@@ -78,19 +78,21 @@ CLI flags override defaults.
 
 ## Examples
 
-### JSONL to stdout
+### JSON Lines
 
 ```bash
-transmcap convert sample.mcap --format jsonl --topic /camera/image
+transmcap convert sample.mcap --format jsonl --topic /imu/data [-o imu.jsonl]
 ```
 
-### CSV to file
+### CSV
 
 ```bash
-transmcap convert sample.mcap --format csv --topic /camera/image -o image.csv
+transmcap convert sample.mcap --format csv --topic /imu/data [-o imu.csv]
 ```
 
 ### Parquet to file
+
+parquet output requires `-o/--output`:
 
 ```bash
 transmcap convert sample.mcap --format parquet --topic /imu/data -o imu.parquet
@@ -99,7 +101,7 @@ transmcap convert sample.mcap --format parquet --topic /imu/data -o imu.parquet
 ### Custom flatten policy
 
 ```bash
-transmcap convert sample.mcap --format parquet --topic /my/topic \
+transmcap convert sample.mcap --format parquet --topic /imu/data \
   --list-policy drop --array-policy flatten --map-policy drop \
   -o out.parquet
 ```
