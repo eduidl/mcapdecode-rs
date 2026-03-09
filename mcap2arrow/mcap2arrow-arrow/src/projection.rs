@@ -148,11 +148,8 @@ fn project_field(
                     .map(|i| struct_arr.column(i).clone())
                     .collect();
 
-                let (pruned_fields, pruned_arrays) = project_fields(
-                    child_fields,
-                    &child_arrays,
-                    selection,
-                )?;
+                let (pruned_fields, pruned_arrays) =
+                    project_fields(child_fields, &child_arrays, selection)?;
 
                 let pruned_schema_fields = Fields::from(pruned_fields.clone());
                 let new_struct = StructArray::new(
@@ -174,11 +171,8 @@ fn project_field(
                     .as_any()
                     .downcast_ref::<ListArray>()
                     .expect("DataType::List matches ListArray");
-                let (pruned_item_field, pruned_values) = project_field(
-                    item_field.as_ref(),
-                    list_arr.values(),
-                    selection,
-                )?;
+                let (pruned_item_field, pruned_values) =
+                    project_field(item_field.as_ref(), list_arr.values(), selection)?;
                 let pruned_item_field = Arc::new(pruned_item_field);
                 let new_list = ListArray::new(
                     pruned_item_field.clone(),
@@ -202,11 +196,8 @@ fn project_field(
                     .as_any()
                     .downcast_ref::<FixedSizeListArray>()
                     .expect("DataType::FixedSizeList matches FixedSizeListArray");
-                let (pruned_item_field, pruned_values) = project_field(
-                    item_field.as_ref(),
-                    fsl_arr.values(),
-                    selection,
-                )?;
+                let (pruned_item_field, pruned_values) =
+                    project_field(item_field.as_ref(), fsl_arr.values(), selection)?;
                 let pruned_item_field = Arc::new(pruned_item_field);
                 let size = *size;
                 let new_fsl = FixedSizeListArray::new(
@@ -229,12 +220,10 @@ fn project_field(
                 // a sub-path does not prune inner values and the whole column is kept.
                 Ok((field.as_ref().clone(), array.clone()))
             }
-            _ => {
-                Err(ArrowError::InvalidArgumentError(format!(
-                    "field '{}' is not nested and cannot select sub-field",
-                    field.name()
-                )))
-            }
+            _ => Err(ArrowError::InvalidArgumentError(format!(
+                "field '{}' is not nested and cannot select sub-field",
+                field.name()
+            ))),
         },
     }
 }
