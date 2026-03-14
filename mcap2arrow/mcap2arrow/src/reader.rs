@@ -22,12 +22,14 @@ use crate::error::McapReaderError;
 pub struct McapReader {
     decoders: HashMap<EncodingKey, Arc<dyn MessageDecoder>>,
     batch_size: usize,
+    parallel: bool,
 }
 
 /// Builder for configuring [`McapReader`].
 pub struct McapReaderBuilder {
     decoders: Vec<Arc<dyn MessageDecoder>>,
     batch_size: usize,
+    parallel: bool,
 }
 
 struct TopicBatchContext {
@@ -43,6 +45,7 @@ impl McapReader {
         McapReaderBuilder {
             decoders: Vec::new(),
             batch_size: 1024,
+            parallel: true,
         }
     }
 
@@ -50,6 +53,7 @@ impl McapReader {
         Self {
             decoders: HashMap::new(),
             batch_size: 1024,
+            parallel: true,
         }
     }
 
@@ -130,60 +134,156 @@ impl McapReader {
     }
 
     /// Read all messages for a topic and emit Arrow RecordBatches to callback.
+    ///
+    /// Chunks in the MCAP file are decompressed in parallel using rayon.
+    /// Message decoding and Arrow conversion remain sequential.
     pub fn for_each_record_batch(
         &self,
         path: &Path,
         topic: &str,
         mut callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
-        fn flush_batch<F>(
-            schema: &SchemaRef,
-            rows: &mut Vec<DecodedMessage>,
-            callback: &mut F,
-        ) -> Result<(), McapReaderError>
-        where
-            F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-        {
-            if rows.is_empty() {
-                return Ok(());
-            }
-
-            let batch = arrow_value_rows_to_record_batch(schema, rows.as_slice());
-            rows.clear();
-            callback(batch).map_err(McapReaderError::Callback)
-        }
-
         let mmap = self.mmap_file(path)?;
         let summary = self.read_summary(path, &mmap)?;
         let context = self.resolve_topic_batch_context(&summary, topic)?;
         let mut rows = Vec::with_capacity(self.batch_size);
 
-        for message in mcap::MessageStream::new(&mmap)? {
-            let message = message?;
-            let channel = &message.channel;
-            if channel.id != context.channel_id {
-                continue;
-            }
-
-            let value = context.decoder.decode(&message.data).map_err(|e| {
-                McapReaderError::MessageDecodeFailed {
-                    topic: topic.to_string(),
-                    source: e,
-                }
-            })?;
-
-            rows.push(DecodedMessage {
-                log_time: message.log_time,
-                publish_time: message.publish_time,
-                value,
-            });
-
-            if rows.len() >= self.batch_size {
-                flush_batch(&context.arrow_schema, &mut rows, &mut callback)?;
-            }
+        if self.parallel {
+            self.for_each_record_batch_parallel(
+                &mmap,
+                &summary,
+                &context,
+                topic,
+                &mut rows,
+                &mut callback,
+            )?;
+        } else {
+            self.for_each_record_batch_sequential(
+                &mmap,
+                &context,
+                topic,
+                &mut rows,
+                &mut callback,
+            )?;
         }
 
         flush_batch(&context.arrow_schema, &mut rows, &mut callback)
+    }
+
+    fn for_each_record_batch_parallel<F>(
+        &self,
+        mmap: &Mmap,
+        summary: &mcap::read::Summary,
+        context: &TopicBatchContext,
+        topic: &str,
+        rows: &mut Vec<DecodedMessage>,
+        callback: &mut F,
+    ) -> Result<(), McapReaderError>
+    where
+        F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    {
+        use rayon::prelude::*;
+
+        // chunk_indexes preserves file order; par_iter preserves that order in results.
+        let chunk_decoded: Vec<Vec<DecodedMessage>> = summary
+            .chunk_indexes
+            .par_iter()
+            .filter(|ci| ci.message_index_offsets.contains_key(&context.channel_id))
+            .map(
+                |chunk_index| -> Result<Vec<DecodedMessage>, McapReaderError> {
+                    summary
+                        .stream_chunk(mmap, chunk_index)?
+                        .filter_map(|msg_result| match msg_result {
+                            Ok(msg) if msg.channel.id == context.channel_id => {
+                                Some(self.decode_message(
+                                    context,
+                                    topic,
+                                    msg.log_time,
+                                    msg.publish_time,
+                                    &msg.data,
+                                ))
+                            }
+                            Ok(_) => None,
+                            Err(e) => Some(Err(e.into())),
+                        })
+                        .collect()
+                },
+            )
+            .collect::<Result<Vec<_>, McapReaderError>>()?;
+
+        for chunk_messages in chunk_decoded {
+            for decoded in chunk_messages {
+                push_decoded_message(
+                    self.batch_size,
+                    &context.arrow_schema,
+                    rows,
+                    decoded,
+                    callback,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn for_each_record_batch_sequential<F>(
+        &self,
+        mmap: &Mmap,
+        context: &TopicBatchContext,
+        topic: &str,
+        rows: &mut Vec<DecodedMessage>,
+        callback: &mut F,
+    ) -> Result<(), McapReaderError>
+    where
+        F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    {
+        for message in mcap::MessageStream::new(mmap)? {
+            let message = message?;
+            if message.channel.id != context.channel_id {
+                continue;
+            }
+
+            let decoded = self.decode_message(
+                context,
+                topic,
+                message.log_time,
+                message.publish_time,
+                &message.data,
+            )?;
+            push_decoded_message(
+                self.batch_size,
+                &context.arrow_schema,
+                rows,
+                decoded,
+                callback,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn decode_message(
+        &self,
+        context: &TopicBatchContext,
+        topic: &str,
+        log_time: u64,
+        publish_time: u64,
+        data: &[u8],
+    ) -> Result<DecodedMessage, McapReaderError> {
+        let value =
+            context
+                .decoder
+                .decode(data)
+                .map_err(|e| McapReaderError::MessageDecodeFailed {
+                    topic: topic.to_string(),
+                    source: e,
+                })?;
+
+        Ok(DecodedMessage {
+            log_time,
+            publish_time,
+            value,
+        })
     }
 
     /// Return the total message count from the MCAP summary section.
@@ -223,6 +323,40 @@ impl Default for McapReader {
     }
 }
 
+fn flush_batch<F>(
+    schema: &SchemaRef,
+    rows: &mut Vec<DecodedMessage>,
+    callback: &mut F,
+) -> Result<(), McapReaderError>
+where
+    F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let batch = arrow_value_rows_to_record_batch(schema, rows.as_slice());
+    rows.clear();
+    callback(batch).map_err(McapReaderError::Callback)
+}
+
+fn push_decoded_message<F>(
+    batch_size: usize,
+    schema: &SchemaRef,
+    rows: &mut Vec<DecodedMessage>,
+    decoded: DecodedMessage,
+    callback: &mut F,
+) -> Result<(), McapReaderError>
+where
+    F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+{
+    rows.push(decoded);
+    if rows.len() >= batch_size {
+        flush_batch(schema, rows, callback)?;
+    }
+    Ok(())
+}
+
 impl McapReaderBuilder {
     /// Register a message decoder.
     pub fn with_decoder(mut self, decoder: Box<dyn MessageDecoder>) -> Self {
@@ -233,6 +367,12 @@ impl McapReaderBuilder {
     /// Set the number of messages per RecordBatch (default: 1024).
     pub fn with_batch_size(mut self, size: usize) -> Self {
         self.batch_size = size;
+        self
+    }
+
+    /// Enable or disable parallel chunk decompression and decoding (default: true).
+    pub fn with_parallel(mut self, parallel: bool) -> Self {
+        self.parallel = parallel;
         self
     }
 
@@ -252,6 +392,7 @@ impl McapReaderBuilder {
     pub fn build(self) -> McapReader {
         let mut reader = McapReader::new();
         reader.batch_size = self.batch_size;
+        reader.parallel = self.parallel;
         for decoder in self.decoders {
             reader.register_shared_decoder(decoder);
         }

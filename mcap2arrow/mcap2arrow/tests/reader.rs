@@ -1,20 +1,96 @@
 use std::{
+    collections::BTreeMap,
+    fs::{self, File},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use arrow::array::Int64Array;
+use mcap::{WriteOptions, Writer, records::MessageHeader};
 use mcap2arrow::{McapReader, McapReaderError};
 use mcap2arrow_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,
 };
+use memmap2::Mmap;
+
+static TEMP_FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
         .join(name)
+}
+
+struct TempFixture {
+    path: PathBuf,
+}
+
+impl TempFixture {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn temp_fixture_path(name: &str) -> PathBuf {
+    let id = TEMP_FIXTURE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "mcap2arrow-{name}-{}-{id}.mcap",
+        std::process::id()
+    ))
+}
+
+fn write_chunked_fixture(name: &str, payloads: &[&[u8]]) -> TempFixture {
+    let path = temp_fixture_path(name);
+    let file = File::create(&path).unwrap();
+    let mut writer = Writer::with_options(
+        file,
+        WriteOptions::new()
+            .compression(None)
+            .chunk_size(Some(1))
+            .library("mcap2arrow-test"),
+    )
+    .unwrap();
+    let schema_id = writer
+        .add_schema("test.Msg", "jsonschema", br#"{"type":"object"}"#)
+        .unwrap();
+    let channel_id = writer
+        .add_channel(schema_id, "/decoded", "json", &BTreeMap::new())
+        .unwrap();
+
+    for (idx, payload) in payloads.iter().enumerate() {
+        writer
+            .write_to_known_channel(
+                &MessageHeader {
+                    channel_id,
+                    sequence: idx as u32,
+                    log_time: (idx + 1) as u64,
+                    publish_time: (idx + 1) as u64,
+                },
+                payload,
+            )
+            .unwrap();
+    }
+
+    writer.finish().unwrap();
+    TempFixture { path }
+}
+
+fn chunk_index_count(path: &Path) -> usize {
+    let file = File::open(path).unwrap();
+    let mmap = unsafe { Mmap::map(&file) }.unwrap();
+    let summary = mcap::Summary::read(&mmap).unwrap().unwrap();
+    summary.chunk_indexes.len()
 }
 
 fn collect_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
@@ -40,6 +116,41 @@ fn collect_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64>
     values
 }
 
+fn collect_batch_rows(reader: &McapReader, path: &Path, topic: &str) -> Vec<usize> {
+    let mut batch_rows = Vec::new();
+    reader
+        .for_each_record_batch(path, topic, |batch| {
+            batch_rows.push(batch.num_rows());
+            Ok(())
+        })
+        .unwrap();
+    batch_rows
+}
+
+fn decode_test_value(message_data: &[u8]) -> Result<i64, DecoderError> {
+    let text = std::str::from_utf8(message_data).map_err(|source| DecoderError::MessageDecode {
+        schema_name: "test.Msg".to_string(),
+        source: Box::new(source),
+    })?;
+
+    for key in ["\"value\":", "\"x\":"] {
+        if let Some(start) = text.find(key) {
+            let digits: String = text[start + key.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '-')
+                .collect();
+            if let Ok(value) = digits.parse::<i64>() {
+                return Ok(value);
+            }
+        }
+    }
+
+    Err(DecoderError::MessageDecode {
+        schema_name: "test.Msg".to_string(),
+        source: "missing integer field".into(),
+    })
+}
+
 struct TestJsonDecoder;
 struct TestJsonTopicDecoder {
     field_defs: FieldDefs,
@@ -62,8 +173,10 @@ impl MessageDecoder for TestJsonDecoder {
 }
 
 impl TopicDecoder for TestJsonTopicDecoder {
-    fn decode(&self, _message_data: &[u8]) -> Result<Value, DecoderError> {
-        Ok(Value::Struct(vec![Value::I64(1)]))
+    fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError> {
+        Ok(Value::Struct(vec![Value::I64(decode_test_value(
+            message_data,
+        )?)]))
     }
 
     fn field_defs(&self) -> &FieldDefs {
@@ -235,5 +348,60 @@ fn register_shared_decoder_decodes_messages() {
     reader.register_shared_decoder(Arc::new(TestJsonDecoder));
 
     let values = collect_i64_values(&reader, &fixture_path("with_summary.mcap"), "/decoded");
-    assert_eq!(values.len(), 2);
+    assert_eq!(values, vec![1, 2]);
+}
+
+#[test]
+fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
+    let fixture = write_chunked_fixture(
+        "parallel-multi-chunk",
+        &[
+            br#"{"value":1}"#,
+            br#"{"value":2}"#,
+            br#"{"value":3}"#,
+            br#"{"value":4}"#,
+            br#"{"value":5}"#,
+        ],
+    );
+    assert!(chunk_index_count(fixture.path()) > 1);
+
+    let parallel_reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_batch_size(2)
+        .with_parallel(true)
+        .build();
+    let sequential_reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_batch_size(2)
+        .with_parallel(false)
+        .build();
+
+    assert_eq!(
+        collect_i64_values(&parallel_reader, fixture.path(), "/decoded"),
+        collect_i64_values(&sequential_reader, fixture.path(), "/decoded")
+    );
+    assert_eq!(
+        collect_batch_rows(&parallel_reader, fixture.path(), "/decoded"),
+        collect_batch_rows(&sequential_reader, fixture.path(), "/decoded")
+    );
+}
+
+#[test]
+fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixture() {
+    let fixture = write_chunked_fixture(
+        "parallel-decode-error",
+        &[br#"{"value":1}"#, b"invalid", br#"{"value":3}"#],
+    );
+    assert!(chunk_index_count(fixture.path()) > 1);
+
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_parallel(true)
+        .build();
+
+    let err = reader
+        .for_each_record_batch(fixture.path(), "/decoded", |_batch| Ok(()))
+        .unwrap_err();
+
+    assert!(matches!(err, McapReaderError::MessageDecodeFailed { .. }));
 }

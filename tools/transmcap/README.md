@@ -43,6 +43,7 @@ Commands:
 - `--array-policy <POLICY>`: `drop | keep | flatten`
 - `--map-policy <POLICY>`: `drop | keep`
 - `--fields <FIELDS>`: comma-separated field paths to include (applied before flattening)
+- `-p, --parallel`: enable parallel chunk decompression and decoding
 
 ## `schema` Options
 
@@ -117,6 +118,7 @@ transmcap schema sample.mcap --topic /imu/data
 
 - `--topic` is required for both commands.
 - `parquet` requires `-o/--output`.
+- `convert` runs sequentially by default; use `-p/--parallel` to enable parallel chunk decompression and decoding.
 - Column name collisions during flattening return an error.
 
 ## Development

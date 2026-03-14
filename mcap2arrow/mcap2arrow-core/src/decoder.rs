@@ -25,7 +25,7 @@ impl EncodingKey {
 ///
 /// Implementations are created by [`MessageDecoder`] once per schema/topic and
 /// reused for all messages in that topic.
-pub trait TopicDecoder {
+pub trait TopicDecoder: Send + Sync {
     /// Decode a single message payload into a [`Value`].
     fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError>;
 

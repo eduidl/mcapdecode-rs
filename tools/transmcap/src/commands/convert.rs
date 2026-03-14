@@ -53,11 +53,18 @@ pub struct ConvertArgs {
     /// Field paths are applied before flattening (e.g. "x,y,z" or "position.x,position.y").
     #[arg(long, value_delimiter = ',')]
     fields: Option<Vec<String>>,
+
+    /// Enable parallel chunk decompression and decoding.
+    #[arg(short, long)]
+    parallel: bool,
 }
 
 impl ConvertArgs {
     pub fn run(self) -> Result<()> {
-        let reader = McapReader::builder().with_default_decoders().build();
+        let reader = McapReader::builder()
+            .with_default_decoders()
+            .with_parallel(self.parallel)
+            .build();
         let flatten_policy = self.flatten_policy()?;
 
         let count = reader.message_count(&self.input, &self.topic)?;
