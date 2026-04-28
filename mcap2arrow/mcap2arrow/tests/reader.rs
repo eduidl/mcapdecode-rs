@@ -2,20 +2,23 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
+#[cfg(feature = "arrow")]
 use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
+#[cfg(feature = "arrow")]
+use mcap2arrow::McapReaderArrowExt;
 use mcap2arrow::{McapReader, McapReaderError, TopicInfo};
 use mcap2arrow_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,
 };
+#[cfg(feature = "arrow")]
 use memmap2::Mmap;
+#[cfg(feature = "arrow")]
+use std::sync::Arc;
 
 static TEMP_FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -127,6 +130,7 @@ fn write_duplicate_topic_fixture(name: &str) -> TempFixture {
     TempFixture { path }
 }
 
+#[cfg(feature = "arrow")]
 fn chunk_index_count(path: &Path) -> usize {
     let file = File::open(path).unwrap();
     let mmap = unsafe { Mmap::map(&file) }.unwrap();
@@ -134,6 +138,7 @@ fn chunk_index_count(path: &Path) -> usize {
     summary.chunk_indexes.len()
 }
 
+#[cfg(feature = "arrow")]
 fn collect_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
     let mut values = Vec::new();
     reader
@@ -157,6 +162,7 @@ fn collect_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64>
     values
 }
 
+#[cfg(feature = "arrow")]
 fn collect_batch_rows(reader: &McapReader, path: &Path, topic: &str) -> Vec<usize> {
     let mut batch_rows = Vec::new();
     reader
@@ -166,6 +172,24 @@ fn collect_batch_rows(reader: &McapReader, path: &Path, topic: &str) -> Vec<usiz
         })
         .unwrap();
     batch_rows
+}
+
+fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
+    let mut values = Vec::new();
+    reader
+        .for_each_decoded_message(path, topic, |message| {
+            let value = match message.value {
+                Value::Struct(mut fields) => match fields.remove(0) {
+                    Value::I64(value) => value,
+                    other => panic!("expected I64 field, got {other:?}"),
+                },
+                other => panic!("expected struct payload, got {other:?}"),
+            };
+            values.push(value);
+            Ok(())
+        })
+        .unwrap();
+    values
 }
 
 fn decode_test_value(message_data: &[u8]) -> Result<i64, DecoderError> {
@@ -324,6 +348,7 @@ fn list_topics_aggregates_duplicate_channels() {
     );
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_without_decoder_returns_error() {
     let reader = McapReader::new();
@@ -335,6 +360,7 @@ fn for_each_record_batch_without_decoder_returns_error() {
     assert!(matches!(err, McapReaderError::NoDecoder { .. }));
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_errors_when_decoder_is_missing_contains_message() {
     let reader = McapReader::builder().with_batch_size(1).build();
@@ -348,6 +374,7 @@ fn for_each_record_batch_errors_when_decoder_is_missing_contains_message() {
     assert!(err.to_string().contains("no decoder registered"));
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_unknown_topic_returns_error() {
     let mut reader = McapReader::new();
@@ -364,6 +391,7 @@ fn for_each_record_batch_unknown_topic_returns_error() {
     ));
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_errors_when_schema_is_missing() {
     let mut reader = McapReader::new();
@@ -377,6 +405,7 @@ fn for_each_record_batch_errors_when_schema_is_missing() {
     ));
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_propagates_callback_error() {
     let mut reader = McapReader::new();
@@ -390,6 +419,7 @@ fn for_each_record_batch_propagates_callback_error() {
     assert!(err.to_string().contains("callback failed"));
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_emits_batches_by_batch_size() {
     let reader = McapReader::builder()
@@ -408,6 +438,7 @@ fn for_each_record_batch_emits_batches_by_batch_size() {
     assert_eq!(batch_rows, vec![1, 1]);
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_flushes_final_partial_batch() {
     let reader = McapReader::builder()
@@ -426,6 +457,7 @@ fn for_each_record_batch_flushes_final_partial_batch() {
     assert_eq!(batch_rows, vec![2]);
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_propagates_callback_error_with_builder_decoder() {
     let reader = McapReader::builder()
@@ -442,6 +474,7 @@ fn for_each_record_batch_propagates_callback_error_with_builder_decoder() {
     assert!(err.to_string().contains("callback failed"));
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn register_shared_decoder_decodes_messages() {
     let mut reader = McapReader::new();
@@ -451,6 +484,118 @@ fn register_shared_decoder_decodes_messages() {
     assert_eq!(values, vec![1, 2]);
 }
 
+#[test]
+fn for_each_decoded_message_unknown_topic_returns_error() {
+    let mut reader = McapReader::new();
+    reader.register_decoder(Box::new(TestJsonDecoder));
+
+    let err = reader
+        .for_each_decoded_message(&fixture_path("with_summary.mcap"), "/unknown", |_message| {
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        McapReaderError::TopicNotFound { ref topic } if topic == "/unknown"
+    ));
+}
+
+#[test]
+fn for_each_decoded_message_errors_when_schema_is_missing() {
+    let mut reader = McapReader::new();
+    reader.register_decoder(Box::new(TestJsonDecoder));
+
+    let err = reader
+        .for_each_decoded_message(
+            &fixture_path("with_summary.mcap"),
+            "/raw",
+            |_message| Ok(()),
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        McapReaderError::SchemaNotAvailable { ref topic, .. } if topic == "/raw"
+    ));
+}
+
+#[test]
+fn for_each_decoded_message_without_decoder_returns_error() {
+    let reader = McapReader::new();
+
+    let err = reader
+        .for_each_decoded_message(&fixture_path("with_summary.mcap"), "/decoded", |_message| {
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert!(matches!(err, McapReaderError::NoDecoder { .. }));
+}
+
+#[test]
+fn for_each_decoded_message_parallel_matches_sequential_for_multi_chunk_fixture() {
+    let fixture = write_chunked_fixture(
+        "parallel-multi-chunk-decoded",
+        &[
+            br#"{"value":1}"#,
+            br#"{"value":2}"#,
+            br#"{"value":3}"#,
+            br#"{"value":4}"#,
+            br#"{"value":5}"#,
+        ],
+    );
+
+    let parallel_reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_parallel(true)
+        .build();
+    let sequential_reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_parallel(false)
+        .build();
+
+    assert_eq!(
+        collect_decoded_i64_values(&parallel_reader, fixture.path(), "/decoded"),
+        collect_decoded_i64_values(&sequential_reader, fixture.path(), "/decoded")
+    );
+}
+
+#[test]
+fn for_each_decoded_message_parallel_propagates_decode_error() {
+    let fixture = write_chunked_fixture(
+        "parallel-decode-error-decoded",
+        &[br#"{"value":1}"#, b"invalid", br#"{"value":3}"#],
+    );
+
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_parallel(true)
+        .build();
+
+    let err = reader
+        .for_each_decoded_message(fixture.path(), "/decoded", |_message| Ok(()))
+        .unwrap_err();
+
+    assert!(matches!(err, McapReaderError::MessageDecodeFailed { .. }));
+}
+
+#[test]
+fn for_each_decoded_message_propagates_callback_error() {
+    let mut reader = McapReader::new();
+    reader.register_decoder(Box::new(TestJsonDecoder));
+
+    let err = reader
+        .for_each_decoded_message(&fixture_path("with_summary.mcap"), "/decoded", |_message| {
+            Err("callback failed".into())
+        })
+        .unwrap_err();
+
+    assert!(matches!(err, McapReaderError::Callback(_)));
+    assert!(err.to_string().contains("callback failed"));
+}
+
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
     let fixture = write_chunked_fixture(
@@ -486,6 +631,7 @@ fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
     );
 }
 
+#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixture() {
     let fixture = write_chunked_fixture(

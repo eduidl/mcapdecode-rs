@@ -10,9 +10,9 @@ description = "MCAP to Arrow conversion library with protobuf and ROS 2 decoders
 readme = "README.md"
 
 [dependencies]
-mcap2arrow-arrow.workspace = true
+mcap2arrow-arrow = { workspace = true, optional = true }
 mcap2arrow-core.workspace = true
-arrow.workspace = true
+arrow = { workspace = true, optional = true }
 mcap = "0.24.0"
 memmap2 = "0.9.10"
 rayon = "1.11.0"
@@ -23,7 +23,8 @@ mcap2arrow-ros2idl = { workspace = true, optional = true }
 mcap2arrow-ros2msg = { workspace = true, optional = true }
 
 [features]
-default = ["protobuf", "ros2idl", "ros2msg"]
+default = ["arrow", "protobuf", "ros2idl", "ros2msg"]
+arrow = ["dep:arrow", "dep:mcap2arrow-arrow"]
 protobuf = ["dep:mcap2arrow-protobuf"]
 ros2idl = ["dep:mcap2arrow-ros2idl"]
 ros2msg = ["dep:mcap2arrow-ros2msg"]
