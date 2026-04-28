@@ -1,3 +1,5 @@
+#[cfg(feature = "arrow")]
+use std::sync::Arc;
 use std::{
     collections::BTreeMap,
     fs::{self, File},
@@ -17,8 +19,6 @@ use mcap2arrow_core::{
 };
 #[cfg(feature = "arrow")]
 use memmap2::Mmap;
-#[cfg(feature = "arrow")]
-use std::sync::Arc;
 
 static TEMP_FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
