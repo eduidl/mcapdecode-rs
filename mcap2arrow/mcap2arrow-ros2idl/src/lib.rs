@@ -22,8 +22,8 @@ use mcap2arrow_core::{
     DecoderError, EncodingKey, MessageDecoder, MessageEncoding, SchemaEncoding, TopicDecoder,
 };
 use mcap2arrow_ros2_common::{ResolvedSchema, Ros2CdrTopicDecoder};
-pub use resolver::resolve_schema;
 pub use parser::parse_idl_section;
+pub use resolver::resolve_schema;
 pub use schema_bundle::{IdlSection, SchemaBundle};
 
 /// [`MessageDecoder`] for ROS 2 IDL schemas with CDR-encoded messages.
