@@ -1,6 +1,11 @@
 //! MCAP file reader with pluggable decoder support.
 
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    path::Path,
+    sync::Arc,
+};
 
 use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use mcap2arrow_arrow::{arrow_value_rows_to_record_batch, field_defs_to_arrow_schema};
@@ -37,6 +42,17 @@ struct TopicBatchContext {
     decoder: Box<dyn TopicDecoder>,
     field_defs: FieldDefs,
     arrow_schema: SchemaRef,
+}
+
+/// Metadata about a topic discovered from the MCAP summary section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopicInfo {
+    pub topic: String,
+    pub message_count: Option<u64>,
+    pub schema_name: Option<String>,
+    pub schema_encoding: String,
+    pub message_encoding: String,
+    pub channel_count: usize,
 }
 
 impl McapReader {
@@ -131,6 +147,48 @@ impl McapReader {
             field_defs,
             arrow_schema,
         })
+    }
+
+    /// List topics present in the MCAP summary section.
+    pub fn list_topics(&self, path: &Path) -> Result<Vec<TopicInfo>, McapReaderError> {
+        let mmap = self.mmap_file(path)?;
+        let summary = self.read_summary(path, &mmap)?;
+        let stats = summary.stats.as_ref();
+        let mut topics = BTreeMap::<String, TopicInfo>::new();
+
+        for channel in summary.channels.values() {
+            let message_count = stats.map(|summary_stats| {
+                summary_stats
+                    .channel_message_counts
+                    .get(&channel.id)
+                    .copied()
+                    .unwrap_or_default()
+            });
+            let schema = channel.schema.as_ref();
+
+            topics
+                .entry(channel.topic.clone())
+                .and_modify(|topic_info| {
+                    topic_info.channel_count += 1;
+                    if let (Some(existing), Some(current)) =
+                        (topic_info.message_count.as_mut(), message_count)
+                    {
+                        *existing += current;
+                    }
+                })
+                .or_insert_with(|| TopicInfo {
+                    topic: channel.topic.clone(),
+                    message_count,
+                    schema_name: schema.map(|schema| schema.name.clone()),
+                    schema_encoding: schema
+                        .map(|schema| schema.encoding.clone())
+                        .unwrap_or_default(),
+                    message_encoding: channel.message_encoding.clone(),
+                    channel_count: 1,
+                });
+        }
+
+        Ok(topics.into_values().collect())
     }
 
     /// Read all messages for a topic and emit Arrow RecordBatches to callback.

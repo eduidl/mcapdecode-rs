@@ -10,7 +10,7 @@ use std::{
 
 use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
-use mcap2arrow::{McapReader, McapReaderError};
+use mcap2arrow::{McapReader, McapReaderError, TopicInfo};
 use mcap2arrow_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,
@@ -78,6 +78,47 @@ fn write_chunked_fixture(name: &str, payloads: &[&[u8]]) -> TempFixture {
                     publish_time: (idx + 1) as u64,
                 },
                 payload,
+            )
+            .unwrap();
+    }
+
+    writer.finish().unwrap();
+    TempFixture { path }
+}
+
+fn write_duplicate_topic_fixture(name: &str) -> TempFixture {
+    let path = temp_fixture_path(name);
+    let file = File::create(&path).unwrap();
+    let mut writer = Writer::with_options(
+        file,
+        WriteOptions::new()
+            .compression(None)
+            .chunk_size(Some(1))
+            .library("mcap2arrow-test"),
+    )
+    .unwrap();
+    let schema_id = writer
+        .add_schema("test.Msg", "jsonschema", br#"{"type":"object"}"#)
+        .unwrap();
+    let first_metadata = BTreeMap::from([(String::from("source"), String::from("left"))]);
+    let second_metadata = BTreeMap::from([(String::from("source"), String::from("right"))]);
+    let first_channel_id = writer
+        .add_channel(schema_id, "/duplicate", "json", &first_metadata)
+        .unwrap();
+    let second_channel_id = writer
+        .add_channel(schema_id, "/duplicate", "json", &second_metadata)
+        .unwrap();
+
+    for (channel_id, value) in [(first_channel_id, 1_i64), (second_channel_id, 2_i64)] {
+        writer
+            .write_to_known_channel(
+                &MessageHeader {
+                    channel_id,
+                    sequence: 0,
+                    log_time: value as u64,
+                    publish_time: value as u64,
+                },
+                format!(r#"{{"value":{value}}}"#).as_bytes(),
             )
             .unwrap();
     }
@@ -221,6 +262,65 @@ fn builder_default_matches_new_without_decoders() {
     assert_eq!(
         new_reader.message_count(&path, "/decoded").unwrap(),
         built_reader.message_count(&path, "/decoded").unwrap()
+    );
+}
+
+#[test]
+fn list_topics_returns_topic_metadata() {
+    let reader = McapReader::new();
+    let topics = reader
+        .list_topics(&fixture_path("with_summary.mcap"))
+        .unwrap();
+
+    assert_eq!(
+        topics,
+        vec![
+            TopicInfo {
+                topic: "/decoded".to_string(),
+                message_count: Some(2),
+                schema_name: Some("test.Msg".to_string()),
+                schema_encoding: "jsonschema".to_string(),
+                message_encoding: "json".to_string(),
+                channel_count: 1,
+            },
+            TopicInfo {
+                topic: "/raw".to_string(),
+                message_count: Some(1),
+                schema_name: None,
+                schema_encoding: String::new(),
+                message_encoding: "application/octet-stream".to_string(),
+                channel_count: 1,
+            },
+        ]
+    );
+}
+
+#[test]
+fn list_topics_no_summary_returns_error() {
+    let reader = McapReader::new();
+
+    assert!(matches!(
+        reader.list_topics(&fixture_path("no_summary.mcap")),
+        Err(McapReaderError::SummaryNotAvailable { .. })
+    ));
+}
+
+#[test]
+fn list_topics_aggregates_duplicate_channels() {
+    let reader = McapReader::new();
+    let fixture = write_duplicate_topic_fixture("duplicate-topic");
+    let topics = reader.list_topics(fixture.path()).unwrap();
+
+    assert_eq!(
+        topics,
+        vec![TopicInfo {
+            topic: "/duplicate".to_string(),
+            message_count: Some(2),
+            schema_name: Some("test.Msg".to_string()),
+            schema_encoding: "jsonschema".to_string(),
+            message_encoding: "json".to_string(),
+            channel_count: 2,
+        }]
     );
 }
 
