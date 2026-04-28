@@ -64,8 +64,7 @@ pub enum McapReaderError {
         source: DecoderError,
     },
 
-    /// An error returned by the user-supplied callback in
-    /// [`McapReader::for_each_record_batch`](crate::McapReader::for_each_record_batch).
+    /// An error returned by the user-supplied callback in reader iteration APIs.
     #[error(transparent)]
     Callback(Box<dyn std::error::Error + Send + Sync>),
 }

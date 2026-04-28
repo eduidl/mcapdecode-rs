@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/mcap2arrow.svg)](https://crates.io/crates/mcap2arrow)
 
-`mcap2arrow` is a Rust library that decodes MCAP channels/messages and exposes rows as Apache Arrow `RecordBatch` streams.
+`mcap2arrow` is a Rust library that decodes MCAP channels/messages and can expose either decoded messages or Apache Arrow `RecordBatch` streams.
 
 ## Installation
 
@@ -22,6 +22,7 @@ mcap2arrow = "0.3.0"
 
 Default features:
 
+- `arrow`
 - `protobuf`
 - `ros2msg`
 - `ros2idl`
@@ -31,6 +32,13 @@ Disable defaults to trim dependencies:
 ```toml
 [dependencies]
 mcap2arrow = { version = "0.3.0", default-features = false, features = ["protobuf"] }
+```
+
+Enable `arrow` only when you need `RecordBatch` output:
+
+```toml
+[dependencies]
+mcap2arrow = { version = "0.3.0", default-features = false, features = ["arrow", "protobuf"] }
 ```
 
 Encoding pairs supported by built-in decoders:
@@ -45,13 +53,31 @@ Encoding pairs supported by built-in decoders:
 
 ```rust
 use std::path::Path;
-use mcap2arrow::McapReader;
+use mcap2arrow::{McapReader, McapReaderArrowExt};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reader = McapReader::builder().with_default_decoders().build();
 
     reader.for_each_record_batch(Path::new("sample.mcap"), "/topic/name", |batch| {
         println!("rows={}, cols={}", batch.num_rows(), batch.num_columns());
+        Ok(())
+    })?;
+
+    Ok(())
+}
+```
+
+## Decoded Message Usage
+
+```rust
+use std::path::Path;
+use mcap2arrow::McapReader;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let reader = McapReader::builder().with_default_decoders().build();
+
+    reader.for_each_decoded_message(Path::new("sample.mcap"), "/topic/name", |message| {
+        println!("publish_time={}", message.publish_time);
         Ok(())
     })?;
 

@@ -7,8 +7,6 @@ use std::{
     sync::Arc,
 };
 
-use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
-use mcap2arrow_arrow::{arrow_value_rows_to_record_batch, field_defs_to_arrow_schema};
 use mcap2arrow_core::{
     DecodedMessage, EncodingKey, FieldDefs, MessageDecoder, MessageEncoding, SchemaEncoding,
     TopicDecoder,
@@ -35,13 +33,6 @@ pub struct McapReaderBuilder {
     decoders: Vec<Arc<dyn MessageDecoder>>,
     batch_size: usize,
     parallel: bool,
-}
-
-struct TopicBatchContext {
-    channel_id: u16,
-    decoder: Box<dyn TopicDecoder>,
-    field_defs: FieldDefs,
-    arrow_schema: SchemaRef,
 }
 
 /// Metadata about a topic discovered from the MCAP summary section.
@@ -83,12 +74,17 @@ impl McapReader {
         self.decoders.insert(decoder.encoding_key(), decoder);
     }
 
-    fn mmap_file(&self, path: &Path) -> Result<Mmap, McapReaderError> {
+    #[cfg(feature = "arrow")]
+    pub(crate) fn batch_size(&self) -> usize {
+        self.batch_size
+    }
+
+    pub(crate) fn mmap_file(&self, path: &Path) -> Result<Mmap, McapReaderError> {
         let file = fs::File::open(path)?;
         Ok(unsafe { Mmap::map(&file) }?)
     }
 
-    fn read_summary(
+    pub(crate) fn read_summary(
         &self,
         path: &Path,
         mmap: &Mmap,
@@ -114,11 +110,11 @@ impl McapReader {
             })
     }
 
-    fn resolve_topic_batch_context(
+    pub(crate) fn resolve_topic_decode_context(
         &self,
         summary: &mcap::read::Summary,
         topic: &str,
-    ) -> Result<TopicBatchContext, McapReaderError> {
+    ) -> Result<TopicDecodeContext, McapReaderError> {
         let channel = get_channel_from_summary(summary, topic)?;
         let schema = Arc::clone(get_schema_from_channel(channel)?);
         let schema_enc = SchemaEncoding::from(schema.encoding.as_str());
@@ -132,20 +128,10 @@ impl McapReader {
             })?;
         let field_defs = topic_decoder.field_defs().clone();
 
-        if field_defs.is_empty() {
-            return Err(McapReaderError::EmptyDerivedSchema {
-                topic: topic.to_string(),
-                schema_name: schema.name.clone(),
-            });
-        }
-
-        let arrow_schema = Arc::new(field_defs_to_arrow_schema(&field_defs));
-
-        Ok(TopicBatchContext {
+        Ok(TopicDecodeContext {
             channel_id: channel.id,
             decoder: topic_decoder,
             field_defs,
-            arrow_schema,
         })
     }
 
@@ -191,54 +177,52 @@ impl McapReader {
         Ok(topics.into_values().collect())
     }
 
-    /// Read all messages for a topic and emit Arrow RecordBatches to callback.
+    /// Read decoded messages for a topic and emit them one-by-one to callback.
     ///
     /// Chunks in the MCAP file are decompressed in parallel using rayon.
-    /// Message decoding and Arrow conversion remain sequential.
-    pub fn for_each_record_batch(
+    /// The callback is still invoked sequentially in file order.
+    pub fn for_each_decoded_message(
         &self,
         path: &Path,
         topic: &str,
-        mut callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
         let mmap = self.mmap_file(path)?;
         let summary = self.read_summary(path, &mmap)?;
-        let context = self.resolve_topic_batch_context(&summary, topic)?;
-        let mut rows = Vec::with_capacity(self.batch_size);
-
-        if self.parallel {
-            self.for_each_record_batch_parallel(
-                &mmap,
-                &summary,
-                &context,
-                topic,
-                &mut rows,
-                &mut callback,
-            )?;
-        } else {
-            self.for_each_record_batch_sequential(
-                &mmap,
-                &context,
-                topic,
-                &mut rows,
-                &mut callback,
-            )?;
-        }
-
-        flush_batch(&context.arrow_schema, &mut rows, &mut callback)
+        let context = self.resolve_topic_decode_context(&summary, topic)?;
+        self.for_each_decoded_message_impl(&mmap, &summary, &context, topic, &mut |decoded| {
+            callback(decoded).map_err(McapReaderError::Callback)
+        })
     }
 
-    fn for_each_record_batch_parallel<F>(
+    pub(crate) fn for_each_decoded_message_impl<F>(
         &self,
         mmap: &Mmap,
         summary: &mcap::read::Summary,
-        context: &TopicBatchContext,
+        context: &TopicDecodeContext,
         topic: &str,
-        rows: &mut Vec<DecodedMessage>,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
-        F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
+    {
+        if self.parallel {
+            self.for_each_decoded_message_parallel(mmap, summary, context, topic, callback)
+        } else {
+            self.for_each_decoded_message_sequential(mmap, context, topic, callback)
+        }
+    }
+
+    fn for_each_decoded_message_parallel<F>(
+        &self,
+        mmap: &Mmap,
+        summary: &mcap::read::Summary,
+        context: &TopicDecodeContext,
+        topic: &str,
+        callback: &mut F,
+    ) -> Result<(), McapReaderError>
+    where
+        F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
         use rayon::prelude::*;
 
@@ -271,29 +255,22 @@ impl McapReader {
 
         for chunk_messages in chunk_decoded {
             for decoded in chunk_messages {
-                push_decoded_message(
-                    self.batch_size,
-                    &context.arrow_schema,
-                    rows,
-                    decoded,
-                    callback,
-                )?;
+                callback(decoded)?;
             }
         }
 
         Ok(())
     }
 
-    fn for_each_record_batch_sequential<F>(
+    fn for_each_decoded_message_sequential<F>(
         &self,
         mmap: &Mmap,
-        context: &TopicBatchContext,
+        context: &TopicDecodeContext,
         topic: &str,
-        rows: &mut Vec<DecodedMessage>,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
-        F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
         for message in mcap::MessageStream::new(mmap)? {
             let message = message?;
@@ -308,13 +285,7 @@ impl McapReader {
                 message.publish_time,
                 &message.data,
             )?;
-            push_decoded_message(
-                self.batch_size,
-                &context.arrow_schema,
-                rows,
-                decoded,
-                callback,
-            )?;
+            callback(decoded)?;
         }
 
         Ok(())
@@ -322,7 +293,7 @@ impl McapReader {
 
     fn decode_message(
         &self,
-        context: &TopicBatchContext,
+        context: &TopicDecodeContext,
         topic: &str,
         log_time: u64,
         publish_time: u64,
@@ -370,7 +341,7 @@ impl McapReader {
     pub fn topic_field_defs(&self, path: &Path, topic: &str) -> Result<FieldDefs, McapReaderError> {
         let mmap = self.mmap_file(path)?;
         let summary = self.read_summary(path, &mmap)?;
-        let context = self.resolve_topic_batch_context(&summary, topic)?;
+        let context = self.resolve_topic_decode_context(&summary, topic)?;
         Ok(context.field_defs)
     }
 }
@@ -379,40 +350,6 @@ impl Default for McapReader {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn flush_batch<F>(
-    schema: &SchemaRef,
-    rows: &mut Vec<DecodedMessage>,
-    callback: &mut F,
-) -> Result<(), McapReaderError>
-where
-    F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-{
-    if rows.is_empty() {
-        return Ok(());
-    }
-
-    let batch = arrow_value_rows_to_record_batch(schema, rows.as_slice());
-    rows.clear();
-    callback(batch).map_err(McapReaderError::Callback)
-}
-
-fn push_decoded_message<F>(
-    batch_size: usize,
-    schema: &SchemaRef,
-    rows: &mut Vec<DecodedMessage>,
-    decoded: DecodedMessage,
-    callback: &mut F,
-) -> Result<(), McapReaderError>
-where
-    F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-{
-    rows.push(decoded);
-    if rows.len() >= batch_size {
-        flush_batch(schema, rows, callback)?;
-    }
-    Ok(())
 }
 
 impl McapReaderBuilder {
@@ -486,4 +423,10 @@ fn get_schema_from_channel<'a>(
             topic: channel.topic.clone(),
             channel_id: channel.id,
         })
+}
+
+pub(crate) struct TopicDecodeContext {
+    pub(crate) channel_id: u16,
+    pub(crate) decoder: Box<dyn TopicDecoder>,
+    pub(crate) field_defs: FieldDefs,
 }

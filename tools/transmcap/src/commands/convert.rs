@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcap2arrow::{
-    McapReader,
+    McapReader, McapReaderArrowExt,
     arrow::{
         ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, StructPolicy, flatten_record_batch,
         project_record_batch,
