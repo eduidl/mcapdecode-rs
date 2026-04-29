@@ -128,10 +128,7 @@ impl App {
             }
         }?;
 
-        Some(NavigationCommand::Relative {
-            target,
-            delta: delta.into(),
-        })
+        Some(NavigationCommand::Relative { target, delta })
     }
 
     pub(crate) fn apply_navigation(&mut self, command: NavigationCommand) -> AppUpdate {
@@ -597,14 +594,14 @@ impl App {
     }
 
     fn toggle_schema(&mut self) -> AppUpdate {
-        if let Some(row) = self.selected_topic() {
-            if let Some(reason) = &row.unsupported_reason {
-                self.set_status(format!(
-                    "Cannot show schema for '{}': {reason}",
-                    row.topic()
-                ));
-                return AppUpdate::changed();
-            }
+        if let Some(row) = self.selected_topic()
+            && let Some(reason) = &row.unsupported_reason
+        {
+            self.set_status(format!(
+                "Cannot show schema for '{}': {reason}",
+                row.topic()
+            ));
+            return AppUpdate::changed();
         }
 
         if self.schema_visible() {

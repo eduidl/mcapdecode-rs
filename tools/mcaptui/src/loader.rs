@@ -1,5 +1,6 @@
 use std::{
     io,
+    path::Path,
     path::PathBuf,
     sync::{
         Arc,
@@ -174,7 +175,7 @@ fn to_loaded_message(index: usize, message: DecodedMessage) -> LoadedMessage {
 
 fn load_decoded_topic(
     reader: &McapReader,
-    input: &PathBuf,
+    input: &Path,
     topic_name: &str,
     field_defs: FieldDefs,
     sender: &mpsc::Sender<LoaderEvent>,
@@ -213,7 +214,7 @@ fn load_decoded_topic(
 
 fn load_raw_topic(
     reader: &McapReader,
-    input: &PathBuf,
+    input: &Path,
     topic_name: &str,
     sender: &mpsc::Sender<LoaderEvent>,
     cancel: &AtomicBool,

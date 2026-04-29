@@ -48,6 +48,14 @@ struct FrameProcessingResult {
     should_quit: bool,
 }
 
+struct RuntimeContext<'a> {
+    loader: &'a mut Option<TopicLoader>,
+    reader: &'a McapReader,
+    input: &'a Path,
+    schema_cache: &'a mut SchemaCache,
+    parallel: bool,
+}
+
 pub(crate) fn main() -> Result<()> {
     run(Cli::parse())
 }
@@ -68,16 +76,14 @@ fn run(cli: Cli) -> Result<()> {
         let Some(update) = app.select_topic_by_name(topic) else {
             bail!("topic '{topic}' not found");
         };
-        apply_update(
-            update,
-            &mut app,
-            &mut loader,
-            &reader,
-            &cli.input,
-            &mut schema_cache,
-            cli.parallel,
-            &mut FrameProcessingResult::default(),
-        )?;
+        RuntimeContext {
+            loader: &mut loader,
+            reader: &reader,
+            input: &cli.input,
+            schema_cache: &mut schema_cache,
+            parallel: cli.parallel,
+        }
+        .apply_update(update, &mut app, &mut FrameProcessingResult::default())?;
         let selected = app.selected_topic().context("selected topic missing")?;
         if let Some(reason) = selected.message_list_block_reason() {
             bail!(
@@ -176,18 +182,20 @@ fn process_input_events(
 ) -> Result<FrameProcessingResult> {
     let mut result = FrameProcessingResult::default();
     let mut pending_navigation = None;
+    let mut runtime = RuntimeContext {
+        loader,
+        reader,
+        input,
+        schema_cache,
+        parallel,
+    };
 
     for event in events {
         if let Some(navigation) = classify_navigation_event(app, &event) {
-            if queue_navigation_command(
+            if runtime.queue_navigation_command(
                 app,
-                loader,
-                reader,
-                input,
-                schema_cache,
                 &mut pending_navigation,
                 navigation,
-                parallel,
                 &mut result,
             )? {
                 result.should_quit = true;
@@ -196,32 +204,14 @@ fn process_input_events(
             continue;
         }
 
-        if flush_navigation_command(
-            app,
-            loader,
-            reader,
-            input,
-            schema_cache,
-            &mut pending_navigation,
-            parallel,
-            &mut result,
-        )? {
+        if runtime.flush_navigation_command(app, &mut pending_navigation, &mut result)? {
             result.should_quit = true;
             return Ok(result);
         }
 
         match event {
             Event::Key(key) if should_process_key_event(&key) => {
-                if apply_update(
-                    app.handle_key(key),
-                    app,
-                    loader,
-                    reader,
-                    input,
-                    schema_cache,
-                    parallel,
-                    &mut result,
-                )? {
+                if runtime.apply_update(app.handle_key(key), app, &mut result)? {
                     result.should_quit = true;
                     return Ok(result);
                 }
@@ -233,16 +223,7 @@ fn process_input_events(
         }
     }
 
-    if flush_navigation_command(
-        app,
-        loader,
-        reader,
-        input,
-        schema_cache,
-        &mut pending_navigation,
-        parallel,
-        &mut result,
-    )? {
+    if runtime.flush_navigation_command(app, &mut pending_navigation, &mut result)? {
         result.should_quit = true;
     }
 
@@ -255,91 +236,6 @@ fn classify_navigation_event(app: &App, event: &Event) -> Option<app::Navigation
         Event::Mouse(mouse) => app.navigation_for_mouse(*mouse),
         _ => None,
     }
-}
-
-fn queue_navigation_command(
-    app: &mut App,
-    loader: &mut Option<TopicLoader>,
-    reader: &McapReader,
-    input: &Path,
-    schema_cache: &mut SchemaCache,
-    pending_navigation: &mut Option<app::NavigationCommand>,
-    next_navigation: app::NavigationCommand,
-    parallel: bool,
-    result: &mut FrameProcessingResult,
-) -> Result<bool> {
-    match pending_navigation.take() {
-        Some(current) if can_merge_navigation(current, next_navigation) => {
-            *pending_navigation = Some(merge_navigation(current, next_navigation));
-            Ok(false)
-        }
-        Some(current) => {
-            let should_quit = apply_navigation_command(
-                app,
-                loader,
-                reader,
-                input,
-                schema_cache,
-                current,
-                parallel,
-                result,
-            )?;
-            *pending_navigation = Some(next_navigation);
-            Ok(should_quit)
-        }
-        None => {
-            *pending_navigation = Some(next_navigation);
-            Ok(false)
-        }
-    }
-}
-
-fn flush_navigation_command(
-    app: &mut App,
-    loader: &mut Option<TopicLoader>,
-    reader: &McapReader,
-    input: &Path,
-    schema_cache: &mut SchemaCache,
-    pending_navigation: &mut Option<app::NavigationCommand>,
-    parallel: bool,
-    result: &mut FrameProcessingResult,
-) -> Result<bool> {
-    if let Some(navigation) = pending_navigation.take() {
-        return apply_navigation_command(
-            app,
-            loader,
-            reader,
-            input,
-            schema_cache,
-            navigation,
-            parallel,
-            result,
-        );
-    }
-
-    Ok(false)
-}
-
-fn apply_navigation_command(
-    app: &mut App,
-    loader: &mut Option<TopicLoader>,
-    reader: &McapReader,
-    input: &Path,
-    schema_cache: &mut SchemaCache,
-    navigation: app::NavigationCommand,
-    parallel: bool,
-    result: &mut FrameProcessingResult,
-) -> Result<bool> {
-    apply_update(
-        app.apply_navigation(navigation),
-        app,
-        loader,
-        reader,
-        input,
-        schema_cache,
-        parallel,
-        result,
-    )
 }
 
 fn should_process_key_event(key: &crossterm::event::KeyEvent) -> bool {
@@ -422,46 +318,6 @@ fn merge_navigation(
     }
 }
 
-fn apply_update(
-    update: AppUpdate,
-    app: &mut App,
-    loader: &mut Option<TopicLoader>,
-    reader: &McapReader,
-    input: &Path,
-    schema_cache: &mut SchemaCache,
-    parallel: bool,
-    result: &mut FrameProcessingResult,
-) -> Result<bool> {
-    result.state_changed |= update.state_changed;
-
-    match update.request {
-        None => Ok(false),
-        Some(AppRequest::Quit) => {
-            loader::cancel_loader(loader);
-            Ok(true)
-        }
-        Some(AppRequest::CancelLoader) => {
-            loader::cancel_loader(loader);
-            Ok(false)
-        }
-        Some(AppRequest::StartTopicLoad) => {
-            if let Err(error) = start_topic_loader(app, loader, input, parallel) {
-                app.set_status(error.to_string());
-                result.state_changed = true;
-            }
-            Ok(false)
-        }
-        Some(AppRequest::LoadSelectedSchema) => {
-            if let Err(error) = schema::open_selected_schema(app, reader, input, schema_cache) {
-                app.clear_schema_view();
-                app.set_status(error.to_string());
-            }
-            result.state_changed = true;
-            Ok(false)
-        }
-    }
-}
-
 fn start_topic_loader(
     app: &mut App,
     loader: &mut Option<TopicLoader>,
@@ -476,4 +332,91 @@ fn start_topic_loader(
         .context("no topic selected")?;
     *loader = Some(TopicLoader::spawn(input.to_path_buf(), topic, parallel));
     Ok(())
+}
+
+impl RuntimeContext<'_> {
+    fn queue_navigation_command(
+        &mut self,
+        app: &mut App,
+        pending_navigation: &mut Option<app::NavigationCommand>,
+        next_navigation: app::NavigationCommand,
+        result: &mut FrameProcessingResult,
+    ) -> Result<bool> {
+        match pending_navigation.take() {
+            Some(current) if can_merge_navigation(current, next_navigation) => {
+                *pending_navigation = Some(merge_navigation(current, next_navigation));
+                Ok(false)
+            }
+            Some(current) => {
+                let should_quit = self.apply_navigation_command(app, current, result)?;
+                *pending_navigation = Some(next_navigation);
+                Ok(should_quit)
+            }
+            None => {
+                *pending_navigation = Some(next_navigation);
+                Ok(false)
+            }
+        }
+    }
+
+    fn flush_navigation_command(
+        &mut self,
+        app: &mut App,
+        pending_navigation: &mut Option<app::NavigationCommand>,
+        result: &mut FrameProcessingResult,
+    ) -> Result<bool> {
+        if let Some(navigation) = pending_navigation.take() {
+            return self.apply_navigation_command(app, navigation, result);
+        }
+
+        Ok(false)
+    }
+
+    fn apply_navigation_command(
+        &mut self,
+        app: &mut App,
+        navigation: app::NavigationCommand,
+        result: &mut FrameProcessingResult,
+    ) -> Result<bool> {
+        self.apply_update(app.apply_navigation(navigation), app, result)
+    }
+
+    fn apply_update(
+        &mut self,
+        update: AppUpdate,
+        app: &mut App,
+        result: &mut FrameProcessingResult,
+    ) -> Result<bool> {
+        result.state_changed |= update.state_changed;
+
+        match update.request {
+            None => Ok(false),
+            Some(AppRequest::Quit) => {
+                loader::cancel_loader(self.loader);
+                Ok(true)
+            }
+            Some(AppRequest::CancelLoader) => {
+                loader::cancel_loader(self.loader);
+                Ok(false)
+            }
+            Some(AppRequest::StartTopicLoad) => {
+                if let Err(error) = start_topic_loader(app, self.loader, self.input, self.parallel)
+                {
+                    app.set_status(error.to_string());
+                    result.state_changed = true;
+                }
+                Ok(false)
+            }
+            Some(AppRequest::LoadSelectedSchema) => {
+                if let Err(error) =
+                    schema::open_selected_schema(app, self.reader, self.input, self.schema_cache)
+                {
+                    app.clear_schema_view();
+                    app.set_status(error.to_string());
+                }
+                result.state_changed = true;
+                Ok(false)
+            }
+        }
+    }
 }

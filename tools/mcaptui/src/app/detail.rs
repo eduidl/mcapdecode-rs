@@ -22,10 +22,7 @@ impl App {
             self.detail.scroll as usize,
             detail_rows.len().saturating_sub(1),
         );
-        let field_path = detail_rows.get(row_index)?.field_path.clone();
-        let Some(field_path) = field_path else {
-            return None;
-        };
+        let field_path = detail_rows.get(row_index)?.field_path.clone()?;
         let occurrence = detail_rows[..=row_index]
             .iter()
             .filter(|row| row.field_path.as_deref() == Some(field_path.as_str()))

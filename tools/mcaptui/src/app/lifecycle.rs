@@ -139,11 +139,11 @@ impl App {
     }
 
     pub fn select_topic_by_name(&mut self, topic: &str) -> Option<AppUpdate> {
-        if let Some(index) = self.topics.rows.iter().position(|row| row.topic() == topic) {
-            Some(self.set_topic_selection(index))
-        } else {
-            None
-        }
+        self.topics
+            .rows
+            .iter()
+            .position(|row| row.topic() == topic)
+            .map(|index| self.set_topic_selection(index))
     }
 
     pub fn start_loading(&mut self, label: impl Into<String>, total: Option<u64>) {
