@@ -1,11 +1,20 @@
-pub fn strip_line_comments(line: &str) -> &str {
+pub fn strip_comments(line: &str, in_block_comment: &mut bool) -> String {
+    let mut out = String::with_capacity(line.len());
     let mut in_str = false;
     let mut escaped = false;
-    let bytes = line.as_bytes();
-    let mut i = 0usize;
-    while i + 1 < bytes.len() {
-        let ch = bytes[i] as char;
+    let mut chars = line.char_indices().peekable();
+
+    while let Some((_, ch)) = chars.next() {
+        if *in_block_comment {
+            if ch == '*' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+                *in_block_comment = false;
+                chars.next();
+            }
+            continue;
+        }
+
         if in_str {
+            out.push(ch);
             if escaped {
                 escaped = false;
             } else if ch == '\\' {
@@ -13,20 +22,32 @@ pub fn strip_line_comments(line: &str) -> &str {
             } else if ch == '"' {
                 in_str = false;
             }
-            i += 1;
             continue;
         }
+
         if ch == '"' {
             in_str = true;
-            i += 1;
+            out.push(ch);
             continue;
         }
-        if bytes[i] == b'/' && bytes[i + 1] == b'/' {
-            return &line[..i];
+
+        if ch == '/'
+            && let Some((_, next)) = chars.peek()
+        {
+            if *next == '/' {
+                break;
+            }
+            if *next == '*' {
+                *in_block_comment = true;
+                chars.next();
+                continue;
+            }
         }
-        i += 1;
+
+        out.push(ch);
     }
-    line
+
+    out
 }
 
 pub fn is_separator_line(line: &str) -> bool {

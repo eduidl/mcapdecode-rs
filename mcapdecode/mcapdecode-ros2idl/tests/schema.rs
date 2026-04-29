@@ -536,3 +536,118 @@ module ex {
     assert_eq!(sample.fields[0].name, "name");
     assert_eq!(sample.fields[1].name, "kind");
 }
+
+#[test]
+fn resolve_schema_supports_chained_module_lines() {
+    let schema = r#"
+================================================================================
+IDL: pkg/msg/Root
+#include "pkg/msg/Child.idl"
+#include "pkg/msg/Change.idl"
+module pkg { module msg {
+struct Root {
+  sequence<Change, 16> changes;
+  sequence<Child, 16> children;
+};
+};
+};
+================================================================================
+IDL: pkg/msg/Child
+module pkg { module msg {
+struct Child {
+  string id;
+};
+};
+};
+================================================================================
+IDL: pkg/msg/Change
+module pkg { module msg {
+struct Change {
+  string id;
+};
+};
+};
+"#;
+
+    let resolved = resolve_schema("pkg/msg/Root", schema).expect("resolve should succeed");
+
+    assert_eq!(
+        resolved.root,
+        vec!["pkg".to_string(), "msg".to_string(), "Root".to_string()]
+    );
+    let root = resolved
+        .structs
+        .get(&vec!["pkg".into(), "msg".into(), "Root".into()])
+        .expect("Root should exist");
+    assert_eq!(root.fields.len(), 2);
+}
+
+#[test]
+fn parse_idl_section_supports_multiple_close_tokens_on_one_line() {
+    let parsed = parse_idl_section(
+        r#"
+module ex {
+  module msg {
+    struct Sample {
+      uint32 x;
+    }; }; };
+"#,
+    )
+    .expect("IDL should parse");
+
+    assert!(parsed.structs.contains_key(&vec![
+        "ex".to_string(),
+        "msg".to_string(),
+        "Sample".to_string(),
+    ]));
+}
+
+#[test]
+fn resolve_schema_ignores_multiline_block_comments() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Root
+#include "ex/msg/Item.idl"
+#include "ex/msg/Limits.idl"
+module ex {
+  module msg {
+    /**
+    * Block comment before the struct declaration.
+    */
+    struct Root {
+      /* Inline block comment before a named bound. */
+      sequence<Item, kItemsCapacity> items;
+    };
+  };
+};
+================================================================================
+IDL: ex/msg/Item
+module ex {
+  module msg {
+    struct Item {
+      uint32 id;
+    };
+  };
+};
+================================================================================
+IDL: ex/msg/Limits
+module ex {
+  module msg {
+    const uint16 kItemsCapacity = 500;
+  };
+};
+"#;
+
+    let resolved = resolve_schema("ex/msg/Root", schema).expect("resolve should succeed");
+
+    let root = resolved
+        .structs
+        .get(&vec!["ex".into(), "msg".into(), "Root".into()])
+        .expect("Root should exist");
+    assert_eq!(root.fields.len(), 1);
+    assert_eq!(root.fields[0].name, "items");
+    assert!(matches!(
+        root.fields[0].ty,
+        ResolvedType::Sequence { max_len: None, .. }
+    ));
+}
