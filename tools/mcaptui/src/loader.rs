@@ -1,7 +1,6 @@
 use std::{
     io,
-    path::Path,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
