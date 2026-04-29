@@ -2,6 +2,18 @@
 
 `mcaptui` is a terminal UI for browsing MCAP files through `mcapdecode`.
 
+## Installation
+
+Build from the workspace:
+
+```bash
+cargo install --path tools/mcaptui
+```
+
+Tagged GitHub Releases also publish prebuilt archives for:
+
+- Linux: `x86_64-unknown-linux-gnu`
+
 ## Usage
 
 ```bash

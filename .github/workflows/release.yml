@@ -5,8 +5,6 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-*'
-      - 'transmcap/v[0-9]+.[0-9]+.[0-9]+'
-      - 'transmcap/v[0-9]+.[0-9]+.[0-9]+-*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -31,44 +29,83 @@ jobs:
         run: cargo test --workspace --all-features
 
   release:
-    name: Build & Release
+    name: Build (${{ matrix.package }})
     needs: test
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: transmcap
+            binary: transmcap
+            target: x86_64-unknown-linux-musl
+            archive: transmcap-linux-amd64.tar.gz
+            install_musl: true
+          - package: mcaptui
+            binary: mcaptui
+            target: x86_64-unknown-linux-gnu
+            archive: mcaptui-linux-amd64.tar.gz
+            install_musl: false
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install musl toolchain
+        if: matrix.install_musl
         run: sudo apt-get install -y musl-tools
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.package }}-${{ matrix.target }}
 
       - name: Build
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --target x86_64-unknown-linux-musl -p transmcap
+        run: cargo build --release --target ${{ matrix.target }} -p ${{ matrix.package }}
 
       - name: Strip binary
-        run: strip --strip-all target/x86_64-unknown-linux-musl/release/transmcap
+        run: strip --strip-all target/${{ matrix.target }}/release/${{ matrix.binary }}
 
       - name: Package
         run: |
-          tar -czf transmcap-linux-amd64.tar.gz \
-            -C target/x86_64-unknown-linux-musl/release transmcap
+          tar -czf ${{ matrix.archive }} \
+            -C target/${{ matrix.target }}/release ${{ matrix.binary }}
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.package }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish_release:
+    name: Publish Release
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: transmcap-linux-amd64.tar.gz
+          files: dist/*.tar.gz
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            Prebuilt Linux binaries are attached below.
