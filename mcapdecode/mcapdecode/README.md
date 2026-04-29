@@ -99,4 +99,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 If you want a command-line interface, see `transmcap`:
 
 - <https://crates.io/crates/transmcap>
-- <https://github.com/eduidl/mcap2arrow-rs/tree/main/tools/transmcap>
+- <https://github.com/eduidl/mcapdecode-rs/tree/main/tools/transmcap>

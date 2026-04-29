@@ -7,7 +7,7 @@ version = "0.3.0"
 edition = "2024"
 rust-version = "1.90"
 license = "Apache-2.0"
-repository = "https://github.com/eduidl/mcap2arrow-rs"
+repository = "https://github.com/eduidl/mcapdecode-rs"
 include = ["src/**/*", "tests/**/*", "Cargo.toml", "README.md"]
 
 [workspace.dependencies]
