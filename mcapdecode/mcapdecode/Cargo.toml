@@ -23,7 +23,7 @@ mcapdecode-ros2idl = { workspace = true, optional = true }
 mcapdecode-ros2msg = { workspace = true, optional = true }
 
 [features]
-default = ["arrow", "protobuf", "ros2idl", "ros2msg"]
+default = ["protobuf", "ros2idl", "ros2msg"]
 arrow = ["dep:arrow", "dep:mcapdecode-arrow"]
 protobuf = ["dep:mcapdecode-protobuf"]
 ros2idl = ["dep:mcapdecode-ros2idl"]

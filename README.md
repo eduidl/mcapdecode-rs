@@ -16,6 +16,8 @@ Rust workspace for decoding MCAP data into a normalized schema/value model, with
 - CLI usage and options: [`tools/transmcap/README.md`](tools/transmcap/README.md)
 - Library usage and feature flags: [`mcapdecode/mcapdecode/README.md`](mcapdecode/mcapdecode/README.md)
 
+`mcapdecode` defaults to the schema/value API plus built-in decoders. Arrow support is opt-in via the `arrow` feature.
+
 ## Quick CLI Usage (`transmcap`)
 
 ```bash

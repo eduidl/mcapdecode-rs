@@ -14,7 +14,7 @@ name = "transmcap"
 path = "src/main.rs"
 
 [dependencies]
-mcapdecode.workspace = true
+mcapdecode = { workspace = true, features = ["arrow"] }
 
 anyhow = "1.0.102"
 arrow = { workspace = true, features = ["prettyprint", "csv", "json"] }
