@@ -210,11 +210,12 @@ fn process_input_events(
         }
 
         match event {
-            Event::Key(key) if should_process_key_event(&key) => {
-                if runtime.apply_update(app.handle_key(key), app, &mut result)? {
-                    result.should_quit = true;
-                    return Ok(result);
-                }
+            Event::Key(key)
+                if should_process_key_event(&key)
+                    && runtime.apply_update(app.handle_key(key), app, &mut result)? =>
+            {
+                result.should_quit = true;
+                return Ok(result);
             }
             Event::Resize(_, _) => {
                 result.state_changed = true;

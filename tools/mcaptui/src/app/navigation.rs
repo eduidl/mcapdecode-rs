@@ -213,10 +213,8 @@ impl App {
             KeyCode::PageUp => return self.page_topic_selection(false),
             KeyCode::PageDown => return self.page_topic_selection(true),
             KeyCode::Home => return self.set_topic_selection(0),
-            KeyCode::End => {
-                if !self.topics.rows.is_empty() {
-                    return self.set_topic_selection(self.topics.rows.len() - 1);
-                }
+            KeyCode::End if !self.topics.rows.is_empty() => {
+                return self.set_topic_selection(self.topics.rows.len() - 1);
             }
             KeyCode::Char('s') => return self.toggle_schema(),
             KeyCode::Left | KeyCode::Char('h') if self.schema_visible() => {
