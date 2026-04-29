@@ -68,6 +68,35 @@ field_root: optional struct
 }
 
 #[test]
+fn non_optional_fields_do_not_get_optional_prefix() -> Result<(), std::fmt::Error> {
+    let fields = vec![FieldDef::new(
+        "field_root",
+        DataTypeDef::Struct(
+            vec![
+                FieldDef::new("field_a", DataTypeDef::F64, false),
+                FieldDef::new(
+                    "field_b",
+                    DataTypeDef::List(Box::new(ElementDef::new(DataTypeDef::I32, false))),
+                    false,
+                ),
+            ]
+            .into(),
+        ),
+        false,
+    )];
+
+    let text = format_field_defs(&fields)?;
+    let expected = "\
+field_root: struct
+    field_a: f64
+    field_b: list
+        item: i32
+";
+    assert_eq!(text, expected);
+    Ok(())
+}
+
+#[test]
 fn field_defs_display_matches_formatter() -> Result<(), std::fmt::Error> {
     let fields: FieldDefs = vec![FieldDef::new("field_a", DataTypeDef::I32, false)].into();
     assert_eq!(fields.to_string(), format_field_defs(fields.as_slice())?);
