@@ -66,6 +66,15 @@ impl DataTypeDef {
     }
 }
 
+impl Display for DataTypeDef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            DataTypeDef::Array(_, size) => write!(f, "array[{size}]"),
+            _ => f.write_str(self.type_name()),
+        }
+    }
+}
+
 /// Typed collection of [`FieldDef`] used for schema bodies and struct members.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FieldDefs(pub Vec<FieldDef>);
@@ -133,6 +142,16 @@ impl ElementDef {
         Self {
             data_type,
             nullable,
+        }
+    }
+}
+
+impl Display for ElementDef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        if self.nullable {
+            write!(f, "optional {}", self.data_type)
+        } else {
+            Display::fmt(&self.data_type, f)
         }
     }
 }
