@@ -46,6 +46,14 @@ pub struct TopicInfo {
     pub channel_count: usize,
 }
 
+/// Raw message payload for topics that cannot be decoded structurally.
+#[derive(Debug, Clone)]
+pub struct RawMessage {
+    pub log_time: u64,
+    pub publish_time: u64,
+    pub data: Arc<[u8]>,
+}
+
 impl McapReader {
     /// Create a builder for [`McapReader`].
     pub fn builder() -> McapReaderBuilder {
@@ -193,6 +201,34 @@ impl McapReader {
         self.for_each_decoded_message_impl(&mmap, &summary, &context, topic, &mut |decoded| {
             callback(decoded).map_err(McapReaderError::Callback)
         })
+    }
+
+    /// Read raw message payloads for a topic and emit them one-by-one to callback.
+    pub fn for_each_raw_message(
+        &self,
+        path: &Path,
+        topic: &str,
+        mut callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        let mmap = self.mmap_file(path)?;
+        let summary = self.read_summary(path, &mmap)?;
+        let channel = get_channel_from_summary(&summary, topic)?;
+
+        for message in mcap::MessageStream::new(&mmap)? {
+            let message = message?;
+            if message.channel.id != channel.id {
+                continue;
+            }
+
+            callback(RawMessage {
+                log_time: message.log_time,
+                publish_time: message.publish_time,
+                data: Arc::from(message.data),
+            })
+            .map_err(McapReaderError::Callback)?;
+        }
+
+        Ok(())
     }
 
     pub(crate) fn for_each_decoded_message_impl<F>(

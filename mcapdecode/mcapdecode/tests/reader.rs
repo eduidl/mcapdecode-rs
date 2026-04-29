@@ -192,6 +192,17 @@ fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> 
     values
 }
 
+fn collect_raw_payloads(reader: &McapReader, path: &Path, topic: &str) -> Vec<Vec<u8>> {
+    let mut payloads = Vec::new();
+    reader
+        .for_each_raw_message(path, topic, |message| {
+            payloads.push(message.data.to_vec());
+            Ok(())
+        })
+        .unwrap();
+    payloads
+}
+
 fn decode_test_value(message_data: &[u8]) -> Result<i64, DecoderError> {
     let text = std::str::from_utf8(message_data).map_err(|source| DecoderError::MessageDecode {
         schema_name: "test.Msg".to_string(),
@@ -531,6 +542,46 @@ fn for_each_decoded_message_without_decoder_returns_error() {
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::NoDecoder { .. }));
+}
+
+#[test]
+fn for_each_raw_message_reads_schema_less_topic_payloads() {
+    let reader = McapReader::new();
+
+    assert_eq!(
+        collect_raw_payloads(&reader, &fixture_path("with_summary.mcap"), "/raw"),
+        vec![vec![0x01, 0x02, 0x03]]
+    );
+}
+
+#[test]
+fn for_each_raw_message_unknown_topic_returns_error() {
+    let reader = McapReader::new();
+
+    let err = reader
+        .for_each_raw_message(&fixture_path("with_summary.mcap"), "/unknown", |_message| {
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        McapReaderError::TopicNotFound { ref topic } if topic == "/unknown"
+    ));
+}
+
+#[test]
+fn for_each_raw_message_propagates_callback_error() {
+    let reader = McapReader::new();
+
+    let err = reader
+        .for_each_raw_message(&fixture_path("with_summary.mcap"), "/raw", |_message| {
+            Err("callback failed".into())
+        })
+        .unwrap_err();
+
+    assert!(matches!(err, McapReaderError::Callback(_)));
+    assert!(err.to_string().contains("callback failed"));
 }
 
 #[test]
