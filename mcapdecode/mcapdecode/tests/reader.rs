@@ -667,10 +667,10 @@ fn for_each_decoded_message_parallel_stops_after_callback_error() {
 
     let err = reader
         .for_each_decoded_message(fixture.path(), "/decoded", |message| {
-            if let Value::Struct(fields) = &message.value {
-                if let Some(Value::I64(value)) = fields.first() {
-                    visited.push(*value);
-                }
+            if let Value::Struct(fields) = &message.value
+                && let Some(Value::I64(value)) = fields.first()
+            {
+                visited.push(*value);
             }
             if visited.len() == 2 {
                 return Err("callback failed".into());
