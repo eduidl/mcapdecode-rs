@@ -11,6 +11,8 @@
 mcapdecode = "0.3.0"
 ```
 
+This enables the decoded message API and built-in protobuf / ROS 2 decoders. Add the `arrow` feature only when you need `RecordBatch` output.
+
 ## What It Provides
 
 - Reader API over MCAP files and memory maps
@@ -23,7 +25,6 @@ mcapdecode = "0.3.0"
 
 Default features:
 
-- `arrow`
 - `protobuf`
 - `ros2msg`
 - `ros2idl`
@@ -50,7 +51,7 @@ Encoding pairs supported by built-in decoders:
 | `ros2msg` | `cdr` | `ros2msg` |
 | `ros2idl` | `cdr` | `ros2idl` |
 
-## Minimal Usage
+## Arrow Usage
 
 ```rust
 use std::path::Path;
@@ -66,6 +67,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+```
+
+Enable the `arrow` feature for that API:
+
+```toml
+[dependencies]
+mcapdecode = { version = "0.3.0", features = ["arrow"] }
 ```
 
 ## Decoded Message Usage
