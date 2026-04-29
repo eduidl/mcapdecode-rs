@@ -8,7 +8,7 @@
 
 ```toml
 [dependencies]
-mcapdecode = "0.3.0"
+mcapdecode = "0.4.0"
 ```
 
 This enables the decoded message API and built-in protobuf / ROS 2 decoders. Add the `arrow` feature only when you need `RecordBatch` output.
@@ -33,14 +33,14 @@ Disable defaults to trim dependencies:
 
 ```toml
 [dependencies]
-mcapdecode = { version = "0.3.0", default-features = false, features = ["protobuf"] }
+mcapdecode = { version = "0.4.0", default-features = false, features = ["protobuf"] }
 ```
 
 Enable `arrow` only when you need `RecordBatch` output:
 
 ```toml
 [dependencies]
-mcapdecode = { version = "0.3.0", default-features = false, features = ["arrow", "protobuf"] }
+mcapdecode = { version = "0.4.0", default-features = false, features = ["arrow", "protobuf"] }
 ```
 
 Encoding pairs supported by built-in decoders:
@@ -73,7 +73,7 @@ Enable the `arrow` feature for that API:
 
 ```toml
 [dependencies]
-mcapdecode = { version = "0.3.0", features = ["arrow"] }
+mcapdecode = { version = "0.4.0", features = ["arrow"] }
 ```
 
 ## Decoded Message Usage
