@@ -1,0 +1,24 @@
+[package]
+name = "mcaptui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+description = "Terminal UI for browsing MCAP topics and decoded messages via mcapdecode."
+readme = "README.md"
+
+[[bin]]
+name = "mcaptui"
+path = "src/main.rs"
+
+[dependencies]
+mcapdecode.workspace = true
+
+anyhow = "1.0.102"
+chrono = { version = "0.4.42", default-features = false, features = ["std"] }
+clap = { version = "4.5.58", features = ["derive"] }
+crossterm = "0.28.1"
+ratatui = "0.29.0"
+unicode-width = "0.2.0"
