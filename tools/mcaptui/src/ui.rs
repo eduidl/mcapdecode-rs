@@ -37,7 +37,7 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     app.set_topic_page_step(visible_rows(table_area.height));
     app.set_schema_area(schema_area.unwrap_or_default());
 
-    let header = Row::new(vec!["topic", "count", "schema", "message enc"])
+    let header = Row::new(vec!["topic", "count", "schema", "encoding"])
         .style(Style::default().add_modifier(Modifier::BOLD));
     let rows = app.topic_rows().iter().map(|row| {
         let count = row
@@ -49,7 +49,13 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             .info
             .schema_name
             .clone()
+            .map(|schema| display_empty_text(&schema))
             .unwrap_or_else(|| "-".to_string());
+        let encoding = format!(
+            "{}/{}",
+            display_empty_text(&row.info.message_encoding),
+            display_empty_text(&row.info.schema_encoding)
+        );
         let style = if !row.is_supported() {
             Style::default().fg(Color::Yellow)
         } else if !row.has_messages() {
@@ -62,7 +68,7 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             Cell::from(row.info.topic.clone()),
             Cell::from(count),
             Cell::from(schema),
-            Cell::from(row.info.message_encoding.clone()),
+            Cell::from(encoding),
         ])
         .style(style)
     });
@@ -76,10 +82,10 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     let table = Table::new(
         rows,
         [
-            Constraint::Percentage(40),
+            Constraint::Percentage(38),
             Constraint::Length(10),
-            Constraint::Percentage(35),
-            Constraint::Percentage(15),
+            Constraint::Percentage(32),
+            Constraint::Percentage(20),
         ],
     )
     .header(header)
@@ -93,6 +99,14 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
 
     if let Some(schema_area) = schema_area {
         render_schema_widget(frame, schema_area, app);
+    }
+}
+
+fn display_empty_text(value: &str) -> String {
+    if value.is_empty() {
+        "<empty>".to_string()
+    } else {
+        value.to_string()
     }
 }
 
