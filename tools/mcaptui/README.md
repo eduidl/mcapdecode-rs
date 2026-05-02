@@ -35,3 +35,8 @@ Press `s` to toggle the derived schema widget for the selected topic.
 The widget is available on both the topic list screen and the message browser screen.
 `mcaptui` shows the normalized `mcapdecode` field schema that is actually used for decoding.
 When the schema popup is visible, `Tab` includes it in the focus order so the cursor keys can scroll it.
+
+## Detail Rendering
+
+Large `List`, `Array`, and `Map` values in the message detail pane are truncated after the first 32 items or entries.
+The pane keeps the original total count and adds an omission row so large payloads stay navigable in the terminal.

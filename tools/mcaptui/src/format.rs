@@ -7,6 +7,7 @@ use mcapdecode::{
 use crate::app::DetailRow;
 
 const BYTES_DETAIL_LEN: usize = 32;
+const DETAIL_COLLECTION_ITEM_LIMIT: usize = 32;
 const HEX_DUMP_WIDTH: usize = 16;
 
 pub fn format_timestamp(timestamp_ns: u64) -> String {
@@ -175,7 +176,7 @@ fn push_value_lines(
                 }
                 _ => None,
             };
-            for (index, item) in items.iter().enumerate() {
+            for (index, item) in items.iter().take(DETAIL_COLLECTION_ITEM_LIMIT).enumerate() {
                 push_value_lines(
                     &format!("[{index}]"),
                     item,
@@ -185,6 +186,13 @@ fn push_value_lines(
                     rows,
                 );
             }
+            push_truncated_summary(
+                items.len(),
+                DETAIL_COLLECTION_ITEM_LIMIT,
+                "items",
+                indent + 1,
+                rows,
+            );
         }
         Value::Map(entries) => {
             rows.push(DetailRow::new(
@@ -197,7 +205,11 @@ fn push_value_lines(
                 }
                 _ => (None, None),
             };
-            for (index, (key, value)) in entries.iter().enumerate() {
+            for (index, (key, value)) in entries
+                .iter()
+                .take(DETAIL_COLLECTION_ITEM_LIMIT)
+                .enumerate()
+            {
                 rows.push(DetailRow::new(
                     format!("{}  entry[{index}]:", pad),
                     field_path.map(ToOwned::to_owned),
@@ -205,6 +217,13 @@ fn push_value_lines(
                 push_value_lines("key", key, key_type, field_path, indent + 2, rows);
                 push_value_lines("value", value, value_type, field_path, indent + 2, rows);
             }
+            push_truncated_summary(
+                entries.len(),
+                DETAIL_COLLECTION_ITEM_LIMIT,
+                "entries",
+                indent + 1,
+                rows,
+            );
         }
         _ => rows.push(DetailRow::new(
             format!("{pad}{label}: {}", format_scalar(value)),
@@ -233,6 +252,24 @@ fn format_scalar(value: &Value) -> String {
             "<compound>".to_string()
         }
     }
+}
+
+fn push_truncated_summary(
+    total: usize,
+    limit: usize,
+    noun: &str,
+    indent: usize,
+    rows: &mut Vec<DetailRow>,
+) {
+    let omitted = total.saturating_sub(limit);
+    if omitted == 0 {
+        return;
+    }
+
+    rows.push(DetailRow::new(
+        format!("{}... {omitted} more {noun} omitted", "  ".repeat(indent)),
+        None,
+    ));
 }
 
 fn format_bytes(bytes: &[u8], limit: usize) -> String {

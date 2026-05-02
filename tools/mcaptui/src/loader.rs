@@ -7,6 +7,7 @@ use std::{
         mpsc::{self, Receiver, TryRecvError},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::Result;
@@ -22,6 +23,8 @@ use crate::{
 
 const CANCELLED_ERROR: &str = "__mcaptui_loader_cancelled__";
 const MAX_LOADER_EVENTS_PER_FRAME: usize = 32;
+const MESSAGE_BATCH_SIZE: usize = 64;
+const MESSAGE_BATCH_MAX_LATENCY: Duration = Duration::from_millis(40);
 
 #[derive(Debug, Default)]
 pub(crate) struct LoaderDrainResult {
@@ -185,6 +188,7 @@ fn load_decoded_topic(
     }
 
     let mut pending = Vec::new();
+    let mut last_flush = Instant::now();
     let mut next_index = 0usize;
     let load_result = reader.for_each_decoded_message(input, topic_name, |message| {
         if cancel.load(Ordering::Relaxed) {
@@ -194,12 +198,7 @@ fn load_decoded_topic(
         pending.push(to_loaded_message(next_index, message));
         next_index += 1;
 
-        if pending.len() >= 64 {
-            let batch = std::mem::take(&mut pending);
-            sender
-                .send(LoaderEvent::Messages(batch))
-                .map_err(|send_error| io::Error::other(send_error.to_string()))?;
-        }
+        flush_pending_messages(sender, &mut pending, &mut last_flush)?;
 
         Ok(())
     });
@@ -226,6 +225,7 @@ fn load_raw_topic(
     }
 
     let mut pending = Vec::new();
+    let mut last_flush = Instant::now();
     let mut next_index = 0usize;
     let load_result = reader.for_each_raw_message(input, topic_name, |message| {
         if cancel.load(Ordering::Relaxed) {
@@ -235,12 +235,7 @@ fn load_raw_topic(
         pending.push(to_loaded_raw_message(next_index, message));
         next_index += 1;
 
-        if pending.len() >= 64 {
-            let batch = std::mem::take(&mut pending);
-            sender
-                .send(LoaderEvent::Messages(batch))
-                .map_err(|send_error| io::Error::other(send_error.to_string()))?;
-        }
+        flush_pending_messages(sender, &mut pending, &mut last_flush)?;
 
         Ok(())
     });
@@ -289,7 +284,24 @@ fn supports_raw_fallback(error: &McapReaderError) -> bool {
     )
 }
 
-#[allow(dead_code)]
-fn _topic_label(topic: &TopicInfo) -> String {
-    topic.topic.clone()
+fn flush_pending_messages(
+    sender: &mpsc::Sender<LoaderEvent>,
+    pending: &mut Vec<LoadedMessage>,
+    last_flush: &mut Instant,
+) -> Result<()> {
+    if !should_flush_messages(pending.len(), last_flush.elapsed()) {
+        return Ok(());
+    }
+
+    let batch = std::mem::take(pending);
+    sender
+        .send(LoaderEvent::Messages(batch))
+        .map_err(|send_error| io::Error::other(send_error.to_string()))?;
+    *last_flush = Instant::now();
+    Ok(())
+}
+
+fn should_flush_messages(pending_len: usize, elapsed_since_flush: Duration) -> bool {
+    pending_len >= MESSAGE_BATCH_SIZE
+        || (pending_len > 0 && elapsed_since_flush >= MESSAGE_BATCH_MAX_LATENCY)
 }

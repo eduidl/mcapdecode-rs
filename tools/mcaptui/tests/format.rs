@@ -96,6 +96,53 @@ fn detail_formatter_renders_struct_list_map_and_bytes() {
 }
 
 #[test]
+fn detail_formatter_truncates_large_collections() {
+    let schema: FieldDefs = vec![
+        FieldDef::new(
+            "items",
+            DataTypeDef::List(Box::new(ElementDef::new(I64, false))),
+            false,
+        ),
+        FieldDef::new(
+            "labels",
+            Map {
+                key: Box::new(ElementDef::new(StringType, false)),
+                value: Box::new(ElementDef::new(I64, false)),
+            },
+            false,
+        ),
+    ]
+    .into();
+    let value = Value::Struct(vec![
+        Value::List((0_i64..40).map(Value::I64).collect()),
+        Value::Map(
+            (0_i64..35)
+                .map(|index| (Value::string(format!("k{index}")), Value::I64(index)))
+                .collect(),
+        ),
+    ]);
+
+    let lines: Vec<_> = format_detail_rows(10, 20, &value, &schema)
+        .into_iter()
+        .map(|row| row.text)
+        .collect();
+
+    assert!(lines.iter().any(|line| line == "  items: [40 items]"));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "    ... 8 more items omitted")
+    );
+    assert!(lines.iter().any(|line| line == "  labels: [35 entries]"));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "    ... 3 more entries omitted")
+    );
+    assert!(!lines.iter().any(|line| line.contains("entry[34]")));
+}
+
+#[test]
 fn schema_formatter_includes_metadata_and_fields() {
     let rendered = format_schema_text(&sample_topic(), &sample_schema());
 

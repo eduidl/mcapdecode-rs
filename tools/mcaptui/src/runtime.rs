@@ -93,8 +93,6 @@ fn run(cli: Cli) -> Result<()> {
         }
     }
 
-    let mut terminal = terminal::init_terminal()?;
-
     if cli.topic.is_some() {
         let selected = app
             .selected_topic()
@@ -104,6 +102,7 @@ fn run(cli: Cli) -> Result<()> {
         start_topic_loader(&mut app, &mut loader, &cli.input, cli.parallel)?;
     }
 
+    let mut terminal = terminal::init_terminal()?;
     let mut needs_redraw = true;
     let mut fast_poll = false;
 
