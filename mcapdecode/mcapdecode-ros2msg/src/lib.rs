@@ -3,27 +3,33 @@
 //! Implements [`MessageDecoder`] for the
 //! `(schema_encoding = ros2msg, message_encoding = cdr)` key.
 //!
-//! Unlike the IDL decoder, a .msg schema is a single file, so no
-//! multi-section bundle splitting is needed.  `builtin_interfaces` types
-//! (`Time`, `Duration`) are injected automatically via
-//! [`resolve_single_struct`].
+//! ROS 2 MCAP writers often embed dependent `.msg` definitions in the schema
+//! blob, separated by `====` lines and `MSG:` headers. `ros2msg` therefore
+//! supports both a single `.msg` file and bundled dependency sections.
+//! `builtin_interfaces` types (`Time`, `Duration`) are still injected
+//! automatically when not explicitly included.
 //!
 //! # Pipeline
 //!
 //! ```text
-//! schema bytes (UTF-8 .msg)
-//!   └─ parse_msg             – re_ros_msg parser → StructDef
-//!       └─ resolve_single_struct  – type resolution → ResolvedSchema
-//!           └─ decode_cdr_to_value – CDR bytes → Value
+//! schema bytes (UTF-8 .msg or bundled .msg sections)
+//!   └─ SchemaBundle::parse      – optional split at `====` / `MSG:`
+//!       └─ parse_msg            – re_ros_msg parser → StructDef
+//!           └─ resolve_schema   – type resolution → ResolvedSchema
+//!               └─ decode_cdr_to_value – CDR bytes → Value
 //! ```
 
 mod parser;
+mod resolver;
+mod schema_bundle;
 
 use mcapdecode_core::{
     DecoderError, EncodingKey, MessageDecoder, MessageEncoding, SchemaEncoding, TopicDecoder,
 };
-use mcapdecode_ros2_common::{ResolvedSchema, Ros2CdrTopicDecoder, resolve_single_struct};
+use mcapdecode_ros2_common::{ResolvedSchema, Ros2CdrTopicDecoder};
 pub use parser::parse_msg;
+pub use resolver::resolve_schema;
+pub use schema_bundle::{MsgSection, SchemaBundle};
 
 /// [`MessageDecoder`] for ROS 2 .msg schemas with CDR-encoded messages.
 pub struct Ros2MsgDecoder;
@@ -64,11 +70,7 @@ pub fn resolve_for_cdr(
         schema_name: schema_name.to_string(),
         source: Box::new(e),
     })?;
-    let struct_def = parse_msg(schema_name, schema_str).map_err(|e| DecoderError::SchemaParse {
-        schema_name: schema_name.to_string(),
-        source: e.into(),
-    })?;
-    resolve_single_struct(schema_name, struct_def).map_err(|e| DecoderError::SchemaParse {
+    resolve_schema(schema_name, schema_str).map_err(|e| DecoderError::SchemaParse {
         schema_name: schema_name.to_string(),
         source: e.into(),
     })

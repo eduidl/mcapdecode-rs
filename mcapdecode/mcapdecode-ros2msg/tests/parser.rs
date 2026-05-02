@@ -1,5 +1,5 @@
 use mcapdecode_ros2_common::TypeExpr;
-use mcapdecode_ros2msg::parse_msg;
+use mcapdecode_ros2msg::{SchemaBundle, parse_msg, resolve_for_cdr};
 
 // ── existing tests ─────────────────────────────────────────────────────────────
 
@@ -179,5 +179,78 @@ fn parse_bool_field() {
     assert!(
         matches!(result.fields[0].ty, TypeExpr::Primitive(_)),
         "bool should map to a primitive type"
+    );
+}
+
+#[test]
+fn parse_schema_bundle_with_root_and_dependency_sections() {
+    let schema = r#"
+std_msgs/Header header
+geometry_msgs/Vector3 magnetic_field
+float64[9] magnetic_field_covariance
+================================================================================
+MSG: geometry_msgs/Vector3
+float64 x
+float64 y
+float64 z
+================================================================================
+MSG: std_msgs/Header
+builtin_interfaces/Time stamp
+string frame_id
+"#;
+    let bundle = SchemaBundle::parse("sensor_msgs/msg/MagneticField", schema).unwrap();
+
+    assert_eq!(bundle.sections.len(), 3);
+    assert_eq!(
+        bundle.sections[0].msg_path,
+        vec!["sensor_msgs", "msg", "MagneticField"]
+    );
+    assert_eq!(
+        bundle.sections[1].msg_path,
+        vec!["geometry_msgs", "msg", "Vector3"]
+    );
+    assert_eq!(
+        bundle.sections[2].msg_path,
+        vec!["std_msgs", "msg", "Header"]
+    );
+}
+
+#[test]
+fn resolve_for_cdr_supports_ros2msg_schema_bundles() {
+    let schema = r#"
+std_msgs/Header header
+Pose pose
+================================================================================
+MSG: geometry_msgs/Pose
+Point position
+Quaternion orientation
+================================================================================
+MSG: geometry_msgs/Point
+float64 x
+float64 y
+float64 z
+================================================================================
+MSG: geometry_msgs/Quaternion
+float64 x 0
+float64 y 0
+float64 z 0
+float64 w 1
+================================================================================
+MSG: std_msgs/Header
+builtin_interfaces/Time stamp
+string frame_id
+"#;
+    let resolved = resolve_for_cdr("geometry_msgs/msg/PoseStamped", schema.as_bytes()).unwrap();
+
+    assert_eq!(resolved.root, vec!["geometry_msgs", "msg", "PoseStamped"]);
+    assert!(resolved.structs.contains_key(&vec![
+        "geometry_msgs".into(),
+        "msg".into(),
+        "Pose".into()
+    ]));
+    assert!(
+        resolved
+            .structs
+            .contains_key(&vec!["std_msgs".into(), "msg".into(), "Header".into()])
     );
 }
