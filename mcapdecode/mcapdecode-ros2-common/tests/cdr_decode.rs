@@ -356,3 +356,69 @@ fn decodes_string_with_null_terminator() {
     };
     assert!(matches!(&fields[0], Value::String(s) if s.as_ref() == "hello"));
 }
+
+// -- empty-struct placeholder ---------------------------------------------
+
+/// ROS 2 IDL forbids empty structs: rosidl inserts a synthetic
+/// `uint8 structure_needs_at_least_one_member` placeholder before
+/// serialisation, so every empty nested struct consumes one byte on the
+/// wire. This mirrors the behaviour of `mcap_ros2._dynamic` in Python.
+/// See <https://design.ros2.org/articles/legacy_interface_definition.html>.
+#[test]
+fn empty_nested_struct_consumes_one_placeholder_byte() {
+    let inner_name = vec!["ex".to_string(), "msg".to_string(), "Empty".to_string()];
+    let root_name = vec!["ex".to_string(), "msg".to_string(), "Outer".to_string()];
+    let mut structs = HashMap::new();
+    structs.insert(inner_name.clone(), ResolvedStruct { fields: vec![] });
+    structs.insert(
+        root_name.clone(),
+        ResolvedStruct {
+            fields: vec![
+                ResolvedField {
+                    name: "nested".to_string(),
+                    ty: ResolvedType::Struct(inner_name.clone()),
+                    fixed_len: None,
+                },
+                ResolvedField {
+                    name: "state".to_string(),
+                    ty: ResolvedType::Primitive(PrimitiveType::U8),
+                    fixed_len: None,
+                },
+            ],
+        },
+    );
+    let schema = ResolvedSchema {
+        root: root_name,
+        structs,
+        enums: HashMap::new(),
+    };
+
+    // Wire body matches /hardware_interface_state on the Gearbox fixture:
+    // a placeholder `0x00` for the empty struct, then `state = 0x02`,
+    // then two trailing padding bytes that the decoder must not consume.
+    let cdr = cdr_with_payload(vec![0x00, 0x02, 0x00, 0x00]);
+
+    let value = decode_cdr_to_value(&schema, &cdr).expect("decode should succeed");
+    let Value::Struct(fields) = value else {
+        panic!("expected outer struct");
+    };
+    assert_eq!(fields.len(), 2);
+    let Value::Struct(inner_fields) = &fields[0] else {
+        panic!("expected nested struct");
+    };
+    assert!(inner_fields.is_empty());
+    assert!(matches!(fields[1], Value::U8(2)));
+}
+
+/// Same rule applies when the empty struct is the root message: an MCAP
+/// schema that declares no instance fields still has a one-byte wire body.
+#[test]
+fn empty_root_struct_consumes_one_placeholder_byte() {
+    let schema = make_schema(vec![], HashMap::new());
+    let cdr = cdr_with_payload(vec![0x00]);
+    let value = decode_cdr_to_value(&schema, &cdr).expect("decode should succeed");
+    let Value::Struct(fields) = value else {
+        panic!("expected root struct");
+    };
+    assert!(fields.is_empty());
+}

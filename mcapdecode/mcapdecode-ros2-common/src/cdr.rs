@@ -79,6 +79,20 @@ impl Decoder {
             .get(struct_name)
             .ok_or_else(|| format!("unknown struct: {}", struct_name.join("::")))?;
         let mut fields = Vec::with_capacity(s.fields.len());
+        if s.fields.is_empty() {
+            // ROS 2 IDL forbids empty structs, so a `.msg`/`.idl` definition
+            // with no fields gets a synthetic
+            // `uint8 structure_needs_at_least_one_member` placeholder before
+            // CDR serialisation. Every empty struct therefore consumes one
+            // byte on the wire. See
+            // https://design.ros2.org/articles/legacy_interface_definition.html
+            self.align(1)?;
+            self.buf.try_get_u8().map_err(|_| {
+                Ros2Error(format!(
+                    "unexpected EOF reading empty-struct placeholder at {path}"
+                ))
+            })?;
+        }
         for field in &s.fields {
             let field_path = format!("{}.{}", path, field.name);
             let v = self.decode_field(schema, field, &field_path)?;
