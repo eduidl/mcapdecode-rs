@@ -1,0 +1,30 @@
+[package]
+name = "mcapbench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "mcapbench"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.58", features = ["derive"] }
+bytes = "1.11.1"
+mcap = "0.24.0"
+prost = "0.14.3"
+prost-reflect = "0.16.3"
+prost-types = "0.14.3"
+
+[dev-dependencies]
+dhat.workspace = true
+# The reader regression contracts live here rather than in `mcapdecode` because they need
+# generated fixtures, and this crate is `publish = false`.
+mcapdecode = { workspace = true, features = ["ros2idl"] }
+mcapdecode-core.workspace = true
+mcapdecode-protobuf.workspace = true
+mcapdecode-ros2idl.workspace = true
+mcapdecode-ros2msg.workspace = true

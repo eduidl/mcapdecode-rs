@@ -111,6 +111,11 @@ impl ConvertArgs {
         })?;
 
         writer.finish()?;
+        // Reported here rather than inside the writer so that benchmarking a parquet
+        // write does not do terminal I/O on every measured iteration.
+        if let (OutputFormat::Parquet, Some(path)) = (self.format, &self.output) {
+            eprintln!("Written to {}", path.display());
+        }
         pb.finish_with_message("done");
         Ok(())
     }
