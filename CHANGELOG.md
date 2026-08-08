@@ -7,7 +7,7 @@ All notable changes to this project are documented in this file.
 ### Breaking Changes
 
 - Replaced the public `McapReaderArrowExt` trait with inherent Arrow
-  record-batch reading methods on `McapReader`.
+  record-batch reading methods on `McapReader`. [#32]
 - ROS 2 `sequence<uint8>` and `sequence<octet>` fields now decode as `Bytes`
   rather than `List<U8>`. Consumers of decoded values or derived schemas must
   handle these fields as bytes. [#27]
@@ -55,3 +55,4 @@ All notable changes to this project are documented in this file.
 [#26]: https://github.com/eduidl/mcapdecode-rs/pull/26
 [#27]: https://github.com/eduidl/mcapdecode-rs/pull/27
 [#28]: https://github.com/eduidl/mcapdecode-rs/pull/28
+[#32]: https://github.com/eduidl/mcapdecode-rs/pull/32
