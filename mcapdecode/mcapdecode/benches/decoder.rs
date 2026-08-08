@@ -18,8 +18,10 @@ static CASES: LazyLock<Vec<(PayloadCase, Encoding, PathBuf)>> = LazyLock::new(||
             combinations.push((case, encoding));
         }
     }
-    // `strings` is ROS 2 IDL only.
-    combinations.push((PayloadCase::Strings, Encoding::Ros2idl));
+    // `strings` has no protobuf fixture.
+    for encoding in [Encoding::Ros2idl, Encoding::Ros2msg] {
+        combinations.push((PayloadCase::Strings, encoding));
+    }
 
     combinations
         .into_iter()

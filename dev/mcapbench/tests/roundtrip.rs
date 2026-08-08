@@ -20,7 +20,9 @@ fn combinations() -> Vec<(PayloadCase, Encoding)> {
             out.push((case, encoding));
         }
     }
-    out.push((PayloadCase::Strings, Encoding::Ros2idl));
+    for encoding in [Encoding::Ros2idl, Encoding::Ros2msg] {
+        out.push((PayloadCase::Strings, encoding));
+    }
     out
 }
 

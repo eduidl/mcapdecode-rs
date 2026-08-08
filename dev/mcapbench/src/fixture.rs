@@ -29,20 +29,23 @@ const LIBRARY: &str = "mcapbench";
 /// same: channel layout, message ordering, writer options beyond [`FileShape`]. The
 /// schema, the payload, the file shape and [`TARGET_BYTES`] are hashed directly and do
 /// not need a bump.
-const GENERATOR_VERSION: u32 = 1;
+const GENERATOR_VERSION: u32 = 2;
 
 /// Schema blob plus one encoded message for a given case/encoding pair.
 pub struct Fixture {
     pub schema_name: String,
     pub schema_encoding: &'static str,
     pub message_encoding: &'static str,
+    /// MCAP header profile. `ros2` implies CDR messages with a ROS 2 schema, so only the
+    /// ROS 2 encodings may claim it; protobuf files stay profile-less.
+    pub profile: &'static str,
     pub schema: Vec<u8>,
     pub payload: Vec<u8>,
 }
 
 pub fn fixture(case: PayloadCase, encoding: Encoding) -> BenchResult<Fixture> {
     if encoding == Encoding::Protobuf && case == PayloadCase::Strings {
-        return Err("strings is intentionally ros2idl-only".into());
+        return Err("strings are not supported for protobuf fixtures".into());
     }
     let model = model(case);
     let sample = sample(case);
@@ -51,6 +54,7 @@ pub fn fixture(case: PayloadCase, encoding: Encoding) -> BenchResult<Fixture> {
             schema_name: format!("{PACKAGE}/msg/Sample"),
             schema_encoding: "ros2idl",
             message_encoding: "cdr",
+            profile: "ros2",
             schema: ros2::render_idl(&model).into_bytes(),
             payload: ros2::encode_cdr(&sample),
         },
@@ -58,6 +62,7 @@ pub fn fixture(case: PayloadCase, encoding: Encoding) -> BenchResult<Fixture> {
             schema_name: format!("{PACKAGE}/msg/Sample"),
             schema_encoding: "ros2msg",
             message_encoding: "cdr",
+            profile: "ros2",
             schema: ros2::render_msg(&model).into_bytes(),
             payload: ros2::encode_cdr(&sample),
         },
@@ -69,6 +74,7 @@ pub fn fixture(case: PayloadCase, encoding: Encoding) -> BenchResult<Fixture> {
                 schema_name: format!("{PACKAGE}.Sample"),
                 schema_encoding: "protobuf",
                 message_encoding: "protobuf",
+                profile: "",
                 schema,
                 payload: message.encode_to_vec(),
             }
@@ -233,6 +239,7 @@ fn write_to(file: File, fixture: &Fixture, shape: FileShape) -> BenchResult<()> 
         file,
         WriteOptions::new()
             .compression(compression)
+            .profile(fixture.profile)
             .chunk_size(Some(shape.chunk_bytes as u64))
             .library(LIBRARY),
     )?;
