@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mcapbench::{Encoding, FileShape, PayloadCase, ensure_generated};
-use mcapdecode::{McapReader, McapReaderArrowExt};
+use mcapdecode::McapReader;
 use writer::{ParquetWriter, RecordBatchWriter};
 
 static FILE: LazyLock<std::path::PathBuf> = LazyLock::new(|| {

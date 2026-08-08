@@ -10,8 +10,6 @@ use std::{
 #[cfg(feature = "arrow")]
 use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
-#[cfg(feature = "arrow")]
-use mcapdecode::McapReaderArrowExt;
 use mcapdecode::{McapReader, McapReaderError, TopicInfo};
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
