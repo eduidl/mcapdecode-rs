@@ -40,21 +40,13 @@ fn decode(case: PayloadCase, encoding: Encoding) -> Value {
 
 /// Compare a decoded value against the sample it was generated from.
 ///
-/// A byte sequence may legitimately arrive either as `Bytes` or as a list of `U8`
-/// values, and fixed-size arrays arrive as `Array` in CDR but as `List` in protobuf,
-/// so both spellings are accepted.
+/// Byte sequences decode as `Bytes`; fixed-size arrays arrive as `Array` in CDR but as
+/// `List` in protobuf, so both array spellings are accepted.
 fn matches(value: &Value, expected: &Sample) -> bool {
     match (value, expected) {
         (Value::U64(actual), Sample::U64(want)) => actual == want,
         (Value::String(actual), Sample::Str(want)) => actual.as_ref() == want.as_str(),
         (Value::Bytes(actual), Sample::Bytes(want)) => actual.as_ref() == want.as_slice(),
-        (Value::List(items), Sample::Bytes(want)) => {
-            items.len() == want.len()
-                && items
-                    .iter()
-                    .zip(want)
-                    .all(|(item, byte)| matches!(item, Value::U8(v) if v == byte))
-        }
         (Value::Array(items) | Value::List(items), Sample::F64List(want)) => {
             items.len() == want.len()
                 && items

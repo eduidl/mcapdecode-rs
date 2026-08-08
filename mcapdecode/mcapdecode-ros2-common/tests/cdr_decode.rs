@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use mcapdecode_core::Value;
+use mcapdecode_core::{DataTypeDef, Value};
 use mcapdecode_ros2_common::{
-    PrimitiveType, ResolvedField, ResolvedSchema, ResolvedStruct, ResolvedType, decode_cdr_to_value,
+    PrimitiveType, ResolvedField, ResolvedSchema, ResolvedStruct, ResolvedType,
+    decode_cdr_to_value, resolved_schema_to_field_defs,
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -92,6 +93,25 @@ fn fails_on_sequence_bound_overflow() {
 
     let err = decode_cdr_to_value(&schema, &cdr).expect_err("decode should fail");
     assert!(format!("{err:#}").contains("sequence bound overflow"));
+}
+
+#[test]
+fn fails_on_unbounded_sequence_length_larger_than_remaining_payload() {
+    let schema = make_schema(
+        vec![ResolvedField {
+            name: "values".to_string(),
+            ty: ResolvedType::Sequence {
+                elem: Box::new(ResolvedType::Primitive(PrimitiveType::F64)),
+                max_len: None,
+            },
+            fixed_len: None,
+        }],
+        HashMap::new(),
+    );
+    let cdr = cdr_with_payload(u32::MAX.to_le_bytes().to_vec());
+
+    let err = decode_cdr_to_value(&schema, &cdr).expect_err("decode should fail before allocating");
+    assert!(format!("{err:#}").contains("sequence length"));
 }
 
 #[test]
@@ -299,7 +319,7 @@ fn fails_on_big_endian_encapsulation() {
     assert!(format!("{err:#}").contains("unsupported CDR endianness"));
 }
 
-/// An unbounded sequence decodes its length-prefixed elements into `Value::List`.
+/// An unbounded `sequence<uint8>` decodes into bulk `Value::Bytes`.
 #[test]
 fn decodes_unbounded_sequence() {
     let schema = make_schema(
@@ -323,13 +343,35 @@ fn decodes_unbounded_sequence() {
     let Value::Struct(fields) = value else {
         panic!("expected struct");
     };
-    let Value::List(elems) = &fields[0] else {
-        panic!("expected list");
+    let Value::Bytes(bytes) = &fields[0] else {
+        panic!("expected bytes");
     };
-    assert_eq!(elems.len(), 3);
-    assert!(matches!(elems[0], Value::U8(10)));
-    assert!(matches!(elems[1], Value::U8(20)));
-    assert!(matches!(elems[2], Value::U8(30)));
+    assert_eq!(bytes.as_ref(), &[10, 20, 30]);
+}
+
+#[test]
+fn decodes_octet_sequence_as_bytes_and_exposes_binary_schema() {
+    let schema = make_schema(
+        vec![ResolvedField {
+            name: "data".to_string(),
+            ty: ResolvedType::Sequence {
+                elem: Box::new(ResolvedType::Primitive(PrimitiveType::Octet)),
+                max_len: None,
+            },
+            fixed_len: None,
+        }],
+        HashMap::new(),
+    );
+    let cdr = cdr_with_payload(vec![2, 0, 0, 0, 0xaa, 0x55]);
+
+    let value = decode_cdr_to_value(&schema, &cdr).expect("decode should succeed");
+    let Value::Struct(fields) = value else {
+        panic!("expected struct");
+    };
+    assert!(matches!(&fields[0], Value::Bytes(bytes) if bytes.as_ref() == [0xaa, 0x55]));
+
+    let field_defs = resolved_schema_to_field_defs(&schema);
+    assert_eq!(field_defs[0].element.data_type, DataTypeDef::Bytes);
 }
 
 /// A null-terminated string decodes correctly to the UTF-8 content before `\0`.

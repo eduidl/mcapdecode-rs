@@ -38,6 +38,12 @@ cargo build -p mcaptui
 cargo test --workspace
 ```
 
+## Compatibility notes
+
+Breaking change: ROS 2 `sequence<uint8>` / `sequence<octet>` fields now decode as binary
+values rather than lists of integers. In particular, `transmcap` JSONL output serializes
+these fields as hexadecimal strings (for example, `[10, 20, 30]` becomes `"0a141e"`).
+
 ## Performance benchmarks
 
 Benchmarks run against MCAP files that `mcapbench` generates on demand into a cache
@@ -82,18 +88,3 @@ rm -rf "${MCAPBENCH_FIXTURE_DIR:-${TMPDIR:-/tmp}/mcapbench}"
 `dev/mcapbench/tests/roundtrip.rs` decodes every generated combination back to the
 sample it was produced from; a broken schema or payload fails there rather than inside a
 benchmark.
-
-The ignored tests in `dev/mcapbench/tests/reader_alloc_budget.rs` and
-`mcapdecode/mcapdecode-ros2-common/tests/alloc_budget.rs` are deliberate future CI gates.
-They pin, via `dhat` allocation budgets, that reading a clustered topic does not
-decompress the whole file and that `sequence<uint8>` does not allocate per byte. Remove
-their `#[ignore]` markers when the corresponding implementation issue is fixed; run them
-meanwhile with:
-
-```bash
-cargo test -p mcapbench -- --ignored
-cargo test -p mcapdecode-ros2-common -- --ignored
-```
-
-`dhat` profiles the whole process, so each of those tests is alone in its test binary;
-keep it that way when adding more of them.
