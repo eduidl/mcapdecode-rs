@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 use mcapdecode_core::{DecoderError, Value};
 
 use crate::{
@@ -12,8 +12,7 @@ use crate::{
 };
 
 pub fn decode_cdr_to_value(schema: &ResolvedSchema, data: &[u8]) -> Result<Value, DecoderError> {
-    let bytes = Bytes::copy_from_slice(data);
-    let mut d = Decoder::new(bytes);
+    let mut d = Decoder::new(data);
     d.read_encapsulation()
         .map_err(|detail| DecoderError::MessageDecode {
             schema_name: schema.root.join("::"),
@@ -35,14 +34,14 @@ fn primitive_align_size(p: &PrimitiveType) -> usize {
     }
 }
 
-struct Decoder {
-    buf: Bytes,
+struct Decoder<'a> {
+    buf: &'a [u8],
     initial_len: usize,
     align_base: usize,
 }
 
-impl Decoder {
-    fn new(buf: Bytes) -> Self {
+impl<'a> Decoder<'a> {
+    fn new(buf: &'a [u8]) -> Self {
         let initial_len = buf.len();
         Self {
             buf,
@@ -163,6 +162,18 @@ impl Decoder {
                 {
                     return Err(format!("sequence bound overflow at {path}: {len} > {max}").into());
                 }
+                if len > self.buf.remaining() {
+                    return Err(format!(
+                        "unexpected EOF at {path}: sequence length {len} exceeds remaining payload"
+                    )
+                    .into());
+                }
+                if matches!(
+                    elem.as_ref(),
+                    ResolvedType::Primitive(PrimitiveType::U8 | PrimitiveType::Octet)
+                ) {
+                    return Ok(Value::Bytes(Arc::from(self.read_bytes(len, path)?)));
+                }
                 let mut out = Vec::with_capacity(len);
                 for i in 0..len {
                     let p = format!("{path}[{i}]");
@@ -225,10 +236,12 @@ impl Decoder {
         Ok(())
     }
 
-    fn read_bytes(&mut self, n: usize, path: &str) -> Result<Bytes, Ros2Error> {
+    fn read_bytes(&mut self, n: usize, path: &str) -> Result<&'a [u8], Ros2Error> {
         if self.buf.remaining() < n {
             return Err(format!("unexpected EOF at {path}").into());
         }
-        Ok(self.buf.copy_to_bytes(n))
+        let (bytes, rest) = self.buf.split_at(n);
+        self.buf = rest;
+        Ok(bytes)
     }
 }

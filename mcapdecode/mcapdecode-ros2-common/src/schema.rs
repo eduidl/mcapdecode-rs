@@ -8,7 +8,8 @@
 //! | Primitive              | corresponding scalar type    |
 //! | Struct                 | `Struct(FieldDefs)`          |
 //! | Enum                   | `String` (variant name)      |
-//! | Sequence               | `List(element type)`         |
+//! | `sequence<uint8/octet>` | `Bytes`                     |
+//! | Other sequence         | `List(element type)`         |
 //! | BoundedString/WString  | `String`                     |
 //! | Fixed-length field     | `Array(element type, n)`     |
 
@@ -62,10 +63,18 @@ fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) ->
         }
         // Enums are represented as their variant name string.
         ResolvedType::Enum(_) => DataTypeDef::String,
-        ResolvedType::Sequence { elem, .. } => {
-            let elem_dt = resolved_type_to_data_type_def(schema, elem);
-            DataTypeDef::List(Box::new(ElementDef::new(elem_dt, false)))
+        ResolvedType::Sequence { elem, .. }
+            if matches!(
+                elem.as_ref(),
+                ResolvedType::Primitive(PrimitiveType::U8 | PrimitiveType::Octet)
+            ) =>
+        {
+            DataTypeDef::Bytes
         }
+        ResolvedType::Sequence { elem, .. } => DataTypeDef::List(Box::new(ElementDef::new(
+            resolved_type_to_data_type_def(schema, elem),
+            false,
+        ))),
         ResolvedType::BoundedString(_) => DataTypeDef::String,
         ResolvedType::BoundedWString(_) => DataTypeDef::String,
     }
