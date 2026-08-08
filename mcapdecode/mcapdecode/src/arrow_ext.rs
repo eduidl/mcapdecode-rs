@@ -11,21 +11,12 @@ struct TopicBatchContext {
     arrow_schema: SchemaRef,
 }
 
-pub trait McapReaderArrowExt {
+impl McapReader {
     /// Read all messages for a topic and emit Arrow RecordBatches to callback.
     ///
     /// Chunks in the MCAP file are decompressed in parallel using rayon.
     /// Message decoding and Arrow conversion remain sequential.
-    fn for_each_record_batch(
-        &self,
-        path: &Path,
-        topic: &str,
-        callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError>;
-}
-
-impl McapReaderArrowExt for McapReader {
-    fn for_each_record_batch(
+    pub fn for_each_record_batch(
         &self,
         path: &Path,
         topic: &str,
