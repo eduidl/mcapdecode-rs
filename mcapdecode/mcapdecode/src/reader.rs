@@ -249,7 +249,7 @@ impl McapReader {
         if self.parallel {
             self.for_each_decoded_message_parallel(mmap, summary, context, topic, callback)
         } else {
-            self.for_each_decoded_message_sequential(mmap, context, topic, callback)
+            self.for_each_decoded_message_sequential(mmap, summary, context, topic, callback)
         }
     }
 
@@ -266,11 +266,8 @@ impl McapReader {
     {
         use rayon::prelude::*;
 
-        let chunk_indexes: Vec<_> = summary
-            .chunk_indexes
-            .iter()
-            .filter(|ci| ci.message_index_offsets.contains_key(&context.channel_id))
-            .collect();
+        let chunk_indexes: Vec<_> =
+            Self::topic_chunk_indexes(summary, context.channel_id).collect();
         let chunk_count = chunk_indexes.len();
         let cancelled = Arc::new(AtomicBool::new(false));
         let (sender, receiver) = mpsc::channel();
@@ -329,6 +326,16 @@ impl McapReader {
         Ok(())
     }
 
+    fn topic_chunk_indexes(
+        summary: &mcap::read::Summary,
+        channel_id: u16,
+    ) -> impl Iterator<Item = &mcap::records::ChunkIndex> {
+        summary
+            .chunk_indexes
+            .iter()
+            .filter(move |chunk_index| chunk_index.message_index_offsets.contains_key(&channel_id))
+    }
+
     fn decode_chunk_messages(
         &self,
         mmap: &Mmap,
@@ -367,6 +374,7 @@ impl McapReader {
     fn for_each_decoded_message_sequential<F>(
         &self,
         mmap: &Mmap,
+        summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
         topic: &str,
         callback: &mut F,
@@ -374,20 +382,22 @@ impl McapReader {
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        for message in mcap::MessageStream::new(mmap)? {
-            let message = message?;
-            if message.channel.id != context.channel_id {
-                continue;
-            }
+        for chunk_index in Self::topic_chunk_indexes(summary, context.channel_id) {
+            for message in summary.stream_chunk(mmap, chunk_index)? {
+                let message = message?;
+                if message.channel.id != context.channel_id {
+                    continue;
+                }
 
-            let decoded = self.decode_message(
-                context,
-                topic,
-                message.log_time,
-                message.publish_time,
-                &message.data,
-            )?;
-            callback(decoded)?;
+                let decoded = self.decode_message(
+                    context,
+                    topic,
+                    message.log_time,
+                    message.publish_time,
+                    &message.data,
+                )?;
+                callback(decoded)?;
+            }
         }
 
         Ok(())

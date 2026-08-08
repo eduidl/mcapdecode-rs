@@ -14,10 +14,8 @@ use common::{clustered_fixture, read_topic};
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-/// Contract for the sequential read path, which currently scans every chunk instead of
-/// filtering on the chunk index the way the parallel path does.
+/// Contract for the sequential read path: chunks outside the requested topic must be skipped.
 #[test]
-#[ignore = "remove once the sequential path filters chunks via the chunk index"]
 fn reading_a_clustered_topic_does_not_touch_the_whole_file() {
     let path = clustered_fixture();
     let _profiler = dhat::Profiler::builder().testing().build();
