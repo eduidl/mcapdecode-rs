@@ -2,8 +2,10 @@
 
 use std::{
     collections::BTreeMap,
-    fs::File,
+    fs::{File, OpenOptions},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use mcap::{Compression, WriteOptions, Writer, records::MessageHeader};
@@ -128,11 +130,34 @@ pub fn generated_path(
     Ok(fixture_dir().join(digest_name(&fixture, case, encoding, shape)))
 }
 
+/// Distinguishes staging files written by the same process; see [`staging_path`].
+static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A staging path no other writer can be using.
+///
+/// The process id separates processes, the counter separates threads within one, and the
+/// clock separates a recycled process id from whatever a previous process with that id
+/// left behind. The file is then created exclusively, so even an unforeseen collision
+/// fails the call instead of letting two writers interleave into one file.
+fn staging_path(dir: &Path, name: &str) -> PathBuf {
+    let sequence = STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    dir.join(format!(
+        ".tmp-{}-{sequence}-{nanos}-{name}",
+        std::process::id()
+    ))
+}
+
 /// Return the fixture path, generating the file first if it is not present yet.
 ///
-/// The file is written to a unique sibling and renamed into place, so an interrupted or
+/// The file is written to a staging sibling and renamed into place, so an interrupted or
 /// concurrent run cannot leave a truncated fixture at the cached path — which, since the
-/// cache check is mere existence, would otherwise poison every later run.
+/// cache check is mere existence, would otherwise poison every later run. Two writers
+/// racing for the same fixture each rename their own complete file, and generation is
+/// deterministic, so whichever rename lands last publishes identical bytes.
 pub fn ensure_generated(
     case: PayloadCase,
     encoding: Encoding,
@@ -144,8 +169,8 @@ pub fn ensure_generated(
     let path = dir.join(&name);
     if !path.exists() {
         std::fs::create_dir_all(&dir)?;
-        let staging = dir.join(format!(".tmp-{}-{name}", std::process::id()));
-        match write(&staging, &fixture, shape) {
+        let staging = staging_path(&dir, &name);
+        match write_new(&staging, &fixture, shape) {
             Ok(()) => std::fs::rename(&staging, &path)?,
             Err(e) => {
                 let _ = std::fs::remove_file(&staging);
@@ -165,7 +190,21 @@ pub fn generate(
     write(path, &fixture(case, encoding)?, shape)
 }
 
+/// Write to `path`, truncating whatever is there. Used for caller-chosen destinations.
 fn write(path: &Path, fixture: &Fixture, shape: FileShape) -> BenchResult<()> {
+    validate(shape)?;
+    write_to(File::create(path)?, fixture, shape)
+}
+
+/// Write to `path`, failing if it already exists. Used for staging files, where an
+/// existing path means another writer is using it.
+fn write_new(path: &Path, fixture: &Fixture, shape: FileShape) -> BenchResult<()> {
+    validate(shape)?;
+    let file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    write_to(file, fixture, shape)
+}
+
+fn validate(shape: FileShape) -> BenchResult<()> {
     if shape.select_percent > 100 {
         return Err(format!(
             "select_percent must be 0..=100, got {}",
@@ -173,6 +212,15 @@ fn write(path: &Path, fixture: &Fixture, shape: FileShape) -> BenchResult<()> {
         )
         .into());
     }
+    // A zero chunk size makes the writer flush after every message, which silently turns
+    // a 24 MiB fixture into hundreds of thousands of chunks instead of the requested shape.
+    if shape.chunk_bytes == 0 {
+        return Err("chunk_bytes must be greater than 0".into());
+    }
+    Ok(())
+}
+
+fn write_to(file: File, fixture: &Fixture, shape: FileShape) -> BenchResult<()> {
     let count = (TARGET_BYTES / fixture.payload.len().max(1)).max(1);
     let selected_count = (count * usize::from(shape.select_percent)).div_ceil(100);
     let compression = match shape.compression {
@@ -181,7 +229,6 @@ fn write(path: &Path, fixture: &Fixture, shape: FileShape) -> BenchResult<()> {
         CompressionKind::Lz4 => Some(Compression::Lz4),
     };
 
-    let file = File::create(path)?;
     let mut writer = Writer::with_options(
         file,
         WriteOptions::new()
