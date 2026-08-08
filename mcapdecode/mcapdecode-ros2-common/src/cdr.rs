@@ -1,6 +1,6 @@
 //! CDR decoding to the Arrow-independent Value type.
 
-use std::sync::Arc;
+use std::{fmt::Write, sync::Arc};
 
 use bytes::Buf;
 use mcapdecode_core::{DecoderError, Value};
@@ -18,7 +18,8 @@ pub fn decode_cdr_to_value(schema: &ResolvedSchema, data: &[u8]) -> Result<Value
             schema_name: schema.root.join("::"),
             source: detail.into(),
         })?;
-    d.decode_struct(schema, &schema.root, &schema.root.join("."))
+    let mut path = schema.root.join(".");
+    d.decode_struct(schema, &schema.root, &mut path)
         .map_err(|detail| DecoderError::MessageDecode {
             schema_name: schema.root.join("::"),
             source: detail.into(),
@@ -71,7 +72,7 @@ impl<'a> Decoder<'a> {
         &mut self,
         schema: &ResolvedSchema,
         struct_name: &[String],
-        path: &str,
+        path: &mut String,
     ) -> Result<Value, Ros2Error> {
         let s = schema
             .structs
@@ -93,8 +94,11 @@ impl<'a> Decoder<'a> {
             })?;
         }
         for field in &s.fields {
-            let field_path = format!("{}.{}", path, field.name);
-            let v = self.decode_field(schema, field, &field_path)?;
+            let path_len = path.len();
+            write!(path, ".{}", field.name).expect("writing to a String cannot fail");
+            let v = self.decode_field(schema, field, path);
+            path.truncate(path_len);
+            let v = v?;
             fields.push(v);
         }
         Ok(Value::Struct(fields))
@@ -104,13 +108,16 @@ impl<'a> Decoder<'a> {
         &mut self,
         schema: &ResolvedSchema,
         field: &ResolvedField,
-        path: &str,
+        path: &mut String,
     ) -> Result<Value, Ros2Error> {
         if let Some(n) = field.fixed_len {
             let mut arr = Vec::with_capacity(n);
             for i in 0..n {
-                let p = format!("{path}[{i}]");
-                arr.push(self.decode_type(schema, &field.ty, &p)?);
+                let path_len = path.len();
+                write!(path, "[{i}]").expect("writing to a String cannot fail");
+                let v = self.decode_type(schema, &field.ty, path);
+                path.truncate(path_len);
+                arr.push(v?);
             }
             return Ok(Value::Array(arr));
         }
@@ -121,7 +128,7 @@ impl<'a> Decoder<'a> {
         &mut self,
         schema: &ResolvedSchema,
         ty: &ResolvedType,
-        path: &str,
+        path: &mut String,
     ) -> Result<Value, Ros2Error> {
         match ty {
             ResolvedType::Primitive(p) => self.decode_primitive(p, path),
@@ -176,8 +183,11 @@ impl<'a> Decoder<'a> {
                 }
                 let mut out = Vec::with_capacity(len);
                 for i in 0..len {
-                    let p = format!("{path}[{i}]");
-                    out.push(self.decode_type(schema, elem, &p)?);
+                    let path_len = path.len();
+                    write!(path, "[{i}]").expect("writing to a String cannot fail");
+                    let v = self.decode_type(schema, elem, path);
+                    path.truncate(path_len);
+                    out.push(v?);
                 }
                 Ok(Value::List(out))
             }
