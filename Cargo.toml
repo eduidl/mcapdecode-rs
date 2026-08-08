@@ -1,5 +1,5 @@
 [workspace]
-members = ["mcapdecode/*", "tools/*"]
+members = ["dev/*", "mcapdecode/*", "tools/*"]
 resolver = "3"
 
 [workspace.package]
@@ -11,6 +11,8 @@ repository = "https://github.com/eduidl/mcapdecode-rs"
 include = ["src/**/*", "tests/**/*", "Cargo.toml", "README.md"]
 
 [workspace.dependencies]
+# Unpublished dev crate, so it carries no version requirement.
+mcapbench = { path = "dev/mcapbench" }
 mcapdecode = { path = "mcapdecode/mcapdecode", version = "=0.5.1" }
 mcapdecode-arrow = { path = "mcapdecode/mcapdecode-arrow", version = "=0.5.1" }
 mcapdecode-core = { path = "mcapdecode/mcapdecode-core", version = "=0.5.1" }
@@ -21,6 +23,8 @@ mcapdecode-ros2msg = { path = "mcapdecode/mcapdecode-ros2msg", version = "=0.5.1
 
 arrow = { version = "57.3.0", default-features = false }
 thiserror = "2.0.18"
+criterion = "0.5.1"
+dhat = "0.3.3"
 
 [workspace.metadata.release]
 allow-branch = ["main"]

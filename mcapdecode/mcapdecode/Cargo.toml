@@ -28,3 +28,22 @@ arrow = ["dep:arrow", "dep:mcapdecode-arrow"]
 protobuf = ["dep:mcapdecode-protobuf"]
 ros2idl = ["dep:mcapdecode-ros2idl"]
 ros2msg = ["dep:mcapdecode-ros2msg"]
+
+[dev-dependencies]
+criterion.workspace = true
+mcapbench.workspace = true
+
+[[bench]]
+name = "decoder"
+harness = false
+required-features = ["protobuf", "ros2idl", "ros2msg"]
+
+[[bench]]
+name = "reader"
+harness = false
+required-features = ["ros2idl"]
+
+[[bench]]
+name = "arrow"
+harness = false
+required-features = ["arrow", "ros2idl"]

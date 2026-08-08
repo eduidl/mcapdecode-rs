@@ -147,7 +147,6 @@ impl RecordBatchWriter for ParquetWriter {
             .take()
             .expect("inner must exist after first batch");
         writer.close()?;
-        eprintln!("Written to {}", self.output_path.display());
         Ok(())
     }
 }

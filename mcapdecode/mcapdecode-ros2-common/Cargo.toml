@@ -13,3 +13,6 @@ description = "Shared ROS 2 type system and CDR decoding helpers for mcapdecode.
 mcapdecode-core.workspace = true
 thiserror.workspace = true
 bytes = "1.11.1"
+
+[dev-dependencies]
+dhat.workspace = true
