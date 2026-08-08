@@ -221,6 +221,23 @@ fn decodes_fixed_length_array() {
     assert!(matches!(elems[2], Value::I32(30)));
 }
 
+/// An error in a fixed-size array still identifies the failing element.
+#[test]
+fn fixed_length_array_error_includes_element_path() {
+    let schema = make_schema(
+        vec![ResolvedField {
+            name: "coords".to_string(),
+            ty: ResolvedType::Primitive(PrimitiveType::I32),
+            fixed_len: Some(2),
+        }],
+        HashMap::new(),
+    );
+
+    let cdr = cdr_with_payload(10i32.to_le_bytes().to_vec());
+    let err = decode_cdr_to_value(&schema, &cdr).expect_err("second element should be missing");
+    assert!(format!("{err:#}").contains("ex.msg.A.coords[1]"));
+}
+
 /// A nested struct field decodes recursively into `Value::Struct`.
 #[test]
 fn decodes_nested_struct() {
