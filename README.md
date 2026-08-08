@@ -68,12 +68,12 @@ cargo bench -p mcapdecode --features arrow -- --baseline before-change
 ```
 
 Decoder benchmarks keep payload shape separate from encoding: `flat`, `nested`, `bytes`
-and `numeric_array` run for ROS 2 IDL, ROS 2 msg and protobuf; `strings` is ROS 2 IDL
-only. Reader benchmarks vary one axis at a time from a fixed baseline: selectivity
-(1%, 50%, 100%) combined with clustered or interleaved layout, none/zstd/lz4 compression,
-chunk size, and sequential/parallel decoding. Layout matters because only a clustered
-topic lets a reader skip chunks; an interleaved one appears in every chunk. Criterion is
-configured with ten samples and byte throughput.
+and `numeric_array` run for ROS 2 IDL, ROS 2 msg and protobuf; `strings` runs for ROS 2
+IDL and ROS 2 msg. Reader benchmarks vary one axis at a time from a fixed baseline:
+selectivity (1%, 50%, 100%) combined with clustered or interleaved layout, none/zstd/lz4
+compression, chunk size, and sequential/parallel decoding. Layout matters because only a
+clustered topic lets a reader skip chunks; an interleaved one appears in every chunk.
+Criterion is configured with ten samples and byte throughput.
 
 Fixture names are content-addressed over the schema, the payload and the file shape, so
 editing the generator invalidates cached files automatically. They are cached in

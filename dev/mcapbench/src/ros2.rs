@@ -15,11 +15,9 @@ fn idl_type(ty: &FieldTy) -> String {
 /// Render the model as a `====`-separated IDL bundle, one section per struct.
 pub(crate) fn render_idl(model: &Model) -> String {
     let mut out = String::new();
-    for (index, def) in model.structs.iter().enumerate() {
-        if index > 0 {
-            out.push_str(&"=".repeat(80));
-            out.push('\n');
-        }
+    for def in &model.structs {
+        out.push_str(&"=".repeat(80));
+        out.push('\n');
         out.push_str(&format!("IDL: {PACKAGE}/msg/{}\n", def.name));
         out.push_str(&format!("module {PACKAGE} {{\n  module msg {{\n"));
         out.push_str(&format!("    struct {} {{\n", def.name));
