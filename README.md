@@ -10,6 +10,7 @@ Rust workspace for decoding MCAP data into a normalized schema/value model, with
 - [`mcapdecode`](mcapdecode/mcapdecode): library entry point for decoding MCAP into structured messages, with optional Arrow `RecordBatch` output
 - [`transmcap`](tools/transmcap): CLI for converting MCAP to `jsonl/csv/parquet`
 - [`mcaptui`](tools/mcaptui): terminal UI for browsing topics, decoded messages, and derived schemas interactively
+- [`mcapdecode` Python package](mcapdecode/mcapdecode-python): PyArrow-based Python bindings
 - `mcapdecode-*`: internal/support crates used by `mcapdecode`
 - [`mcapbench`](dev/mcapbench): unpublished dev crate that generates benchmark fixtures
 
@@ -88,3 +89,11 @@ rm -rf "${MCAPBENCH_FIXTURE_DIR:-${TMPDIR:-/tmp}/mcapbench}"
 `dev/mcapbench/tests/roundtrip.rs` decodes every generated combination back to the
 sample it was produced from; a broken schema or payload fails there rather than inside a
 benchmark.
+
+## Python Performance Comparison
+
+The manual Python benchmark compares `mcapdecode.read()` with pure-Python `rosbags`
+from MCAP input through `pyarrow.Table` output. It covers flat, nested, byte sequence,
+numeric array, and string payloads. See [`dev/python-bench/README.md`](dev/python-bench/README.md)
+for setup and execution; its JSON and Markdown reports include the local environment and
+are intentionally not CI performance gates.

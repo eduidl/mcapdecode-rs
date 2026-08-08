@@ -449,6 +449,34 @@ fn for_each_record_batch_emits_batches_by_batch_size() {
 
 #[cfg(feature = "arrow")]
 #[test]
+fn for_each_record_batch_with_schema_returns_schema_for_its_batches() {
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_batch_size(1)
+        .build();
+
+    let mut batch_schemas = Vec::new();
+    let schema = reader
+        .for_each_record_batch_with_schema(
+            &fixture_path("with_summary.mcap"),
+            "/decoded",
+            |batch| {
+                batch_schemas.push(batch.schema());
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    assert_eq!(batch_schemas.len(), 2);
+    assert!(
+        batch_schemas
+            .iter()
+            .all(|batch_schema| *batch_schema == schema)
+    );
+}
+
+#[cfg(feature = "arrow")]
+#[test]
 fn for_each_record_batch_flushes_final_partial_batch() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))

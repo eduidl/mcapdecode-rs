@@ -1,5 +1,5 @@
-use arrow::datatypes::DataType;
-use mcapdecode_arrow::field_defs_to_arrow_schema;
+use arrow::datatypes::{DataType, TimeUnit};
+use mcapdecode_arrow::{field_defs_to_arrow_schema, field_defs_to_record_batch_schema};
 use mcapdecode_core::{DataTypeDef, ElementDef, FieldDef, FieldDefs};
 
 #[test]
@@ -125,4 +125,19 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
         }
         other => panic!("expected struct, got {other:?}"),
     }
+}
+
+#[test]
+fn record_batch_schema_prepends_timestamp_columns() {
+    let fields = FieldDefs::from(vec![FieldDef::new("value", DataTypeDef::I64, false)]);
+
+    let schema = field_defs_to_record_batch_schema(&fields);
+
+    assert_eq!(schema.field(0).name(), "@log_time");
+    assert_eq!(
+        schema.field(0).data_type(),
+        &DataType::Timestamp(TimeUnit::Nanosecond, Some("+00:00".into()))
+    );
+    assert_eq!(schema.field(1).name(), "@publish_time");
+    assert_eq!(schema.field(2).name(), "value");
 }

@@ -108,3 +108,18 @@ If you want a command-line interface, see `transmcap`:
 
 - <https://crates.io/crates/transmcap>
 - <https://github.com/eduidl/mcapdecode-rs/tree/main/tools/transmcap>
+
+## Python
+
+The `mcapdecode` Python package returns a `pyarrow.Table` for a decoded topic.
+
+```python
+import mcapdecode
+import polars as pl
+
+for topic in mcapdecode.list_topics("sample.mcap"):
+    print(topic.topic, topic.message_count)
+
+table = mcapdecode.read("sample.mcap", "/imu/data")
+frame = pl.from_arrow(table, rechunk=False)
+```

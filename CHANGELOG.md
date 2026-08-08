@@ -14,6 +14,8 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Added the `mcapdecode` Python package with PyArrow table output and topic
+  metadata inspection.
 - Added reproducible generated MCAP fixtures and benchmark suites for decoding,
   reading, Arrow conversion, and Parquet conversion. [#24]
 

@@ -16,6 +16,14 @@ pub fn field_defs_to_arrow_schema(fields: &FieldDefs) -> Schema {
     Schema::new(arrow_fields)
 }
 
+/// Converts message body fields into the schema emitted by RecordBatch conversion.
+///
+/// The returned schema prepends the `@log_time` and `@publish_time` timestamp
+/// columns used by [`crate::arrow_value_rows_to_record_batch`].
+pub fn field_defs_to_record_batch_schema(fields: &FieldDefs) -> Schema {
+    with_timestamp_fields(field_defs_to_arrow_schema(fields))
+}
+
 fn field_def_to_arrow_field(f: &FieldDef) -> Field {
     Field::new(
         &f.name,

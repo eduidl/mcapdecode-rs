@@ -23,3 +23,14 @@ data/*.mcap
 
 # dhat heap profiles written by the regression budget tests
 dhat-heap.json
+
+# Python virtual environments, caches, and package build outputs
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+*.so
+*.pyd

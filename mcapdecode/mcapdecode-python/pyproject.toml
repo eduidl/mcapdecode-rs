@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.10,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mcapdecode"
+dynamic = ["version"]
+description = "Fast MCAP decoding for Python with PyArrow output."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "eduidl" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = ["pyarrow>=15"]
+
+[project.optional-dependencies]
+polars = ["polars>=1"]
+
+[project.urls]
+Homepage = "https://github.com/eduidl/mcapdecode-rs"
+Repository = "https://github.com/eduidl/mcapdecode-rs"
+
+[tool.maturin]
+bindings = "pyo3"
+manifest-path = "Cargo.toml"
+module-name = "mcapdecode._mcapdecode"
+python-source = "python"

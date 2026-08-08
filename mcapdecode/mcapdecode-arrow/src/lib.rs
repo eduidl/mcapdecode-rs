@@ -46,6 +46,6 @@ pub use flatten::{
 /// Re-export of [`projection::project_record_batch`].
 pub use projection::project_record_batch;
 /// Re-export of [`schema_convert::field_defs_to_arrow_schema`].
-pub use schema_convert::field_defs_to_arrow_schema;
+pub use schema_convert::{field_defs_to_arrow_schema, field_defs_to_record_batch_schema};
 
 pub(crate) const TIMESTAMP_TZ: &str = "+00:00";

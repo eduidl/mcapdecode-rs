@@ -1,0 +1,18 @@
+[package]
+name = "mcapdecode-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python bindings for mcapdecode with PyArrow output."
+publish = false
+
+[lib]
+name = "_mcapdecode"
+crate-type = ["cdylib"]
+
+[dependencies]
+mcapdecode = { workspace = true, features = ["arrow"] }
+arrow = { workspace = true, features = ["pyarrow"] }
+pyo3 = { workspace = true, features = ["extension-module", "macros"] }

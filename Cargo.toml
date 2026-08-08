@@ -22,6 +22,7 @@ mcapdecode-ros2idl = { path = "mcapdecode/mcapdecode-ros2idl", version = "=0.5.1
 mcapdecode-ros2msg = { path = "mcapdecode/mcapdecode-ros2msg", version = "=0.5.1" }
 
 arrow = { version = "57.3.0", default-features = false }
+pyo3 = { version = "0.26.0", default-features = false }
 thiserror = "2.0.18"
 criterion = "0.5.1"
 dhat = "0.3.3"
