@@ -17,6 +17,8 @@
 
 use std::collections::HashMap;
 
+use mcapdecode_core::EnumVariant;
+
 use crate::{
     ast::{EnumDef, FieldDef, ParsedSection, PrimitiveType, StructDef, TypeExpr},
     error::Ros2Error,
@@ -65,8 +67,8 @@ pub struct ResolvedSchema {
     /// All reachable struct definitions, keyed by qualified name.
     pub structs: HashMap<Vec<String>, ResolvedStruct>,
     /// All reachable enum definitions, keyed by qualified name.
-    /// Values are the ordered variant name lists used for index → name mapping.
-    pub enums: HashMap<Vec<String>, Vec<String>>,
+    /// Values are named numeric variants used for value → name mapping.
+    pub enums: HashMap<Vec<String>, Vec<EnumVariant>>,
 }
 
 /// Ensure that `builtin_interfaces::msg::Time` and `builtin_interfaces::msg::Duration`

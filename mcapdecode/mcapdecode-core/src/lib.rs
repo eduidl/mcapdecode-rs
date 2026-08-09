@@ -15,6 +15,6 @@ pub use decoder::{EncodingKey, MessageDecoder, TopicDecoder};
 pub use error::{DecoderError, ValueTypeError};
 pub use message::DecodedMessage;
 pub use message_encoding::MessageEncoding;
-pub use schema::{DataTypeDef, ElementDef, FieldDef, FieldDefs, format_field_defs};
+pub use schema::{DataTypeDef, ElementDef, EnumVariant, FieldDef, FieldDefs, format_field_defs};
 pub use schema_encoding::SchemaEncoding;
 pub use value::Value;

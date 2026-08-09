@@ -7,7 +7,7 @@
 //! # Supported Features
 //!
 //! - Struct declarations with fields
-//! - Enum declarations with variants
+//! - Enum declarations with variants (`@value` sets an enumerator's value)
 //! - Primitive types (bool, int8-64, uint8-64, float32/64, string, etc.)
 //! - Sequence types (bounded and unbounded)
 //! - Bounded strings and wide strings
@@ -15,7 +15,7 @@
 //! - Const declarations
 //! - Module scoping
 //! - Scoped type names (using :: or / separators)
-//! - Annotations (ignored)
+//! - Annotations (ignored, except `@value` on enumerators)
 //! - Include directives (ignored)
 //!
 //! # Unsupported Features
@@ -24,9 +24,17 @@
 //! - Union types
 //! - Typedef declarations
 //! - Bitmask types
+//!
+//! # Limitations
+//!
+//! Parsing is line based, whereas IDL itself is whitespace insensitive. Declarations
+//! written on a single line (`enum E { A, B };`) are rejected, and several enumerators
+//! on one line (`A, B,`) keep only the first one. Lifting this requires tokenizing the
+//! input instead of splitting it into lines.
 
 use std::collections::HashMap;
 
+use mcapdecode_core::EnumVariant;
 use mcapdecode_ros2_common::{
     ConstDef, EnumDef, FieldDef, ParsedSection, PrimitiveType, Ros2Error, StructDef, TypeExpr,
 };
@@ -49,6 +57,43 @@ enum PendingDecl {
     Enum(String),
 }
 
+/// Enum declaration being collected, with the state needed to number its enumerators.
+struct EnumBuilder {
+    name: String,
+    variants: Vec<EnumVariant>,
+    /// Value used for the next enumerator without an explicit `@value`.
+    next_value: i64,
+    /// `@value` seen since the last enumerator, applied to the enumerator that follows.
+    pending_value: Option<i64>,
+    /// Annotation text whose parentheses are still open, continued on the next line.
+    pending_annotation: String,
+}
+
+impl EnumBuilder {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            variants: Vec::new(),
+            next_value: 0,
+            pending_value: None,
+            pending_annotation: String::new(),
+        }
+    }
+
+    /// Append an enumerator, using its `@value` if one was given.
+    ///
+    /// Enumerators without an explicit value continue from the previous one, as
+    /// specified by DDS X-Types 7.3.1.2.1.5 (Enumerated Literal Values).
+    fn push_variant(&mut self, name: String) -> Result<(), Ros2Error> {
+        let value = self.pending_value.take().unwrap_or(self.next_value);
+        self.next_value = value
+            .checked_add(1)
+            .ok_or_else(|| Ros2Error("enum value overflow".to_string()))?;
+        self.variants.push(EnumVariant::new(name, value));
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 enum LineStatement {
     Include,
@@ -67,7 +112,7 @@ pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
     let mut enums: HashMap<Vec<String>, EnumDef> = HashMap::new();
     let mut modules: Vec<String> = Vec::new();
     let mut current_struct: Option<(String, Vec<FieldDef>, Vec<ConstDef>)> = None;
-    let mut current_enum: Option<(String, Vec<String>)> = None;
+    let mut current_enum: Option<EnumBuilder> = None;
     let mut pending_decl: Option<PendingDecl> = None;
 
     let mut annotation_depth = 0i32;
@@ -78,9 +123,42 @@ pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
     for (idx, raw) in idl_body.lines().enumerate() {
         let line_no = idx + 1;
         let line = strip_comments(raw, &mut in_block_comment);
-        let line = line.trim();
+        let mut line = line.trim();
         if line.is_empty() {
             continue;
+        }
+
+        // Inside an enum body annotations bind to the enumerator that follows them, so
+        // `@value` has to be captured (and the rest of the line kept) rather than skipped.
+        let mut annotation_buf = String::new();
+        if annotation_depth == 0
+            && let Some(builder) = current_enum.as_mut()
+            && (line.starts_with('@') || !builder.pending_annotation.is_empty())
+        {
+            annotation_buf = std::mem::take(&mut builder.pending_annotation);
+            if !annotation_buf.is_empty() {
+                annotation_buf.push(' ');
+            }
+            annotation_buf.push_str(line);
+
+            match split_leading_annotations(&annotation_buf) {
+                Some((value, rest)) => {
+                    if let Some(value) = value {
+                        builder.pending_value = Some(parse_enum_value(value).map_err(|e| {
+                            Ros2Error(format!("parse error at line {line_no}: {e}"))
+                        })?);
+                    }
+                    line = rest.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                }
+                None => {
+                    // Argument list still open: continue on the next line.
+                    builder.pending_annotation = annotation_buf.clone();
+                    continue;
+                }
+            }
         }
 
         if annotation_depth > 0 || line.starts_with('@') {
@@ -115,7 +193,7 @@ pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
                         )
                         .into());
                     }
-                    current_enum = Some((name, Vec::new()));
+                    current_enum = Some(EnumBuilder::new(name));
                 }
             }
             continue;
@@ -164,7 +242,7 @@ pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
                         line_no,
                         line,
                     )?;
-                    current_enum = Some((name, Vec::new()));
+                    current_enum = Some(EnumBuilder::new(name));
                     continue;
                 }
                 LineStatement::EnumHead(name) => {
@@ -190,14 +268,14 @@ pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
                                     consts,
                                 },
                             );
-                        } else if let Some((name, variants)) = current_enum.take() {
+                        } else if let Some(builder) = current_enum.take() {
                             let mut full = modules.clone();
-                            full.push(name);
+                            full.push(builder.name);
                             enums.insert(
                                 full.clone(),
                                 EnumDef {
                                     full_name: full,
-                                    variants,
+                                    variants: builder.variants,
                                 },
                             );
                         } else if modules.pop().is_none() {
@@ -224,11 +302,13 @@ pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
             continue;
         }
 
-        if let Some((_, variants)) = current_enum.as_mut() {
-            let name = parse_enum_variant(line)
+        if let Some(builder) = current_enum.as_mut() {
+            let variant = parse_enum_variant(line)
                 .map_err(|e| Ros2Error(format!("parse error at line {line_no}: {e}")))?;
-            if !name.is_empty() {
-                variants.push(name);
+            if let Some(name) = variant {
+                builder
+                    .push_variant(name)
+                    .map_err(|e| Ros2Error(format!("parse error at line {line_no}: {e}")))?;
             }
             continue;
         }
@@ -616,28 +696,121 @@ fn const_decl(input: &str) -> IResult<&str, ConstDef> {
     )(input)
 }
 
-/// Parse enum variant: VARIANT or VARIANT = value
+/// Parse enum variant: `VARIANT`.
+///
+/// ROS 2 IDL enumerators are bare identifiers; explicit values are written with the
+/// `@value` annotation. Anything trailing the identifier (such as the non-IDL
+/// `VARIANT = 1` form) is left unconsumed and ignored.
 fn enum_variant(input: &str) -> IResult<&str, Option<&str>> {
     let trimmed = input.trim().trim_end_matches(',');
     if trimmed.is_empty() {
         return Ok((input, None));
     }
 
-    alt((
-        map(
-            tuple((identifier, ws, char('='), take_while(|c: char| c != ','))),
-            |(name, _, _, _)| Some(name),
-        ),
-        map(identifier, Some),
-    ))(trimmed)
+    map(identifier, Some)(trimmed)
 }
 
-fn parse_enum_variant(line: &str) -> std::result::Result<String, Ros2Error> {
+fn parse_enum_variant(line: &str) -> std::result::Result<Option<String>, Ros2Error> {
     match enum_variant(line) {
-        Ok((_, Some(name))) => Ok(name.to_string()),
-        Ok((_, None)) => Ok(String::new()),
+        Ok((_, variant)) => Ok(variant.map(ToString::to_string)),
         Err(e) => Err(format!("Failed to parse enum variant '{line}': {e}").into()),
     }
+}
+
+/// Split the annotations at the start of `line`, returning the `@value` argument (if
+/// any) together with the rest of the line.
+///
+/// Returns `None` when an annotation's parentheses are not closed on this line, which
+/// leaves the multi-line annotation skipping in charge.
+fn split_leading_annotations(mut line: &str) -> Option<(Option<&str>, &str)> {
+    let mut value = None;
+
+    while let Some(rest) = line.strip_prefix('@') {
+        let name_len = rest
+            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+            .unwrap_or(rest.len());
+        let (name, rest) = rest.split_at(name_len);
+        let rest = rest.trim_start();
+
+        let Some(args_body) = rest.strip_prefix('(') else {
+            line = rest;
+            continue;
+        };
+        let end = find_annotation_args_end(args_body)?;
+        if name == "value" {
+            value = Some(annotation_value_arg(&args_body[..end]));
+        }
+        line = args_body[end + 1..].trim_start();
+    }
+
+    Some((value, line))
+}
+
+/// Byte offset of the `)` closing an annotation argument list, ignoring parentheses
+/// inside string literals. `None` when the list is not closed within `body`.
+fn find_annotation_args_end(body: &str) -> Option<usize> {
+    let mut in_str = false;
+    let mut escaped = false;
+    let mut depth = 0usize;
+    for (idx, ch) in body.char_indices() {
+        if in_str {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                '"' => in_str = false,
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_str = true,
+            '(' => depth += 1,
+            ')' if depth == 0 => return Some(idx),
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Extract the argument of `@value`, accepting both `@value(1)` and `@value(value = 1)`.
+fn annotation_value_arg(args: &str) -> &str {
+    let args = args.trim();
+    args.strip_prefix("value")
+        .map(str::trim_start)
+        .and_then(|rest| rest.strip_prefix('='))
+        .map(str::trim)
+        .unwrap_or(args)
+}
+
+/// Parse an enumerator value, which has to fit in the 32 bits an enum is serialized
+/// with, either as a signed or as an unsigned value.
+fn parse_enum_value(value: &str) -> std::result::Result<i64, Ros2Error> {
+    let value = value.trim();
+    let (negative, digits) = match value.strip_prefix('-') {
+        Some(rest) => (true, rest.trim_start()),
+        None => (false, value),
+    };
+
+    let magnitude = match digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        Some(hex) => i64::from_str_radix(hex, 16),
+        None => digits.parse::<i64>(),
+    }
+    .map_err(|e| Ros2Error(format!("invalid enum value '{value}': {e}")))?;
+
+    let number = if negative { -magnitude } else { magnitude };
+    if !(i64::from(i32::MIN)..=i64::from(u32::MAX)).contains(&number) {
+        return Err(Ros2Error(format!(
+            "invalid enum value '{value}': outside the 32-bit range of an enum"
+        )));
+    }
+    Ok(number)
 }
 
 fn paren_counts_outside_strings(s: &str, in_str: &mut bool, escaped: &mut bool) -> (usize, usize) {

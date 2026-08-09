@@ -184,7 +184,7 @@ fn decode_repeated_field() {
 
 #[test]
 fn decode_enum_field() {
-    let color_enum = simple_enum("Color", &[("RED", 0), ("GREEN", 1), ("BLUE", 2)]);
+    let color_enum = simple_enum("Color", &[("RED", 0), ("GREEN", 7), ("BLUE", 42)]);
     let msg = DescriptorProto {
         name: Some("WithEnum".to_string()),
         field: vec![enum_field("color", 1, ".Color")],
@@ -194,7 +194,7 @@ fn decode_enum_field() {
     let (_pool, desc) = pool_and_desc(&fds, "WithEnum");
 
     let mut dm = DynamicMessage::new(desc);
-    dm.set_field_by_name("color", prost_reflect::Value::EnumNumber(2));
+    dm.set_field_by_name("color", prost_reflect::Value::EnumNumber(42));
 
     let wire = encode_dynamic(&dm);
     let value = decode_protobuf_to_value("WithEnum", &fds, &wire).unwrap();

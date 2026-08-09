@@ -7,7 +7,7 @@
 //! |------------------------|------------------------------|
 //! | Primitive              | corresponding scalar type    |
 //! | Struct                 | `Struct(FieldDefs)`          |
-//! | Enum                   | `String` (variant name)      |
+//! | Enum                   | `Enum(variants)` (decoded as the variant name) |
 //! | `sequence<uint8/octet>` | `Bytes`                     |
 //! | Other sequence         | `List(element type)`         |
 //! | BoundedString/WString  | `String`                     |
@@ -61,8 +61,11 @@ fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) ->
             let fields = resolved_struct_to_field_defs(schema, st);
             DataTypeDef::Struct(fields)
         }
-        // Enums are represented as their variant name string.
-        ResolvedType::Enum(_) => DataTypeDef::String,
+        // An unknown enum stays decodable (`decode_cdr_to_value` falls back to the raw
+        // number), so it must not be treated as harder than a missing struct.
+        ResolvedType::Enum(name) => {
+            DataTypeDef::Enum(schema.enums.get(name).cloned().unwrap_or_default())
+        }
         ResolvedType::Sequence { elem, .. }
             if matches!(
                 elem.as_ref(),

@@ -40,6 +40,7 @@ fn element_def_to_datatype(elem: &ElementDef) -> DataType {
         DataTypeDef::F64 => DataType::Float64,
         DataTypeDef::String => DataType::Utf8,
         DataTypeDef::Bytes => DataType::Binary,
+        DataTypeDef::Enum(_) => DataType::Utf8,
         DataTypeDef::Struct(fields) => {
             let arrow_fields: Vec<Field> = fields.iter().map(field_def_to_arrow_field).collect();
             DataType::Struct(arrow_fields.into())
