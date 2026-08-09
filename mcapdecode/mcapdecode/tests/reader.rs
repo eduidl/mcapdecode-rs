@@ -10,7 +10,7 @@ use std::{
 #[cfg(feature = "arrow")]
 use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
-use mcapdecode::{McapReader, McapReaderError, TopicInfo};
+use mcapdecode::{McapReader, McapReaderError, TopicDecodeStatus, TopicInfo};
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,
@@ -323,6 +323,49 @@ fn list_topics_returns_topic_metadata() {
                 schema_encoding: String::new(),
                 message_encoding: "application/octet-stream".to_string(),
                 channel_count: 1,
+            },
+        ]
+    );
+}
+
+#[test]
+fn list_topics_with_decode_status_reads_topic_metadata_and_decode_errors() {
+    let reader = McapReader::new();
+    let statuses = reader
+        .list_topics_with_decode_status(&fixture_path("with_summary.mcap"))
+        .unwrap();
+
+    assert_eq!(
+        statuses,
+        vec![
+            TopicDecodeStatus {
+                topic: TopicInfo {
+                    topic: "/decoded".to_string(),
+                    message_count: Some(2),
+                    schema_name: Some("test.Msg".to_string()),
+                    schema_encoding: "jsonschema".to_string(),
+                    message_encoding: "json".to_string(),
+                    channel_count: 1,
+                },
+                decodable: false,
+                decode_error: Some(
+                    "no decoder registered for schema_encoding='jsonschema', message_encoding='json' on topic '/decoded'"
+                        .to_string(),
+                ),
+            },
+            TopicDecodeStatus {
+                topic: TopicInfo {
+                    topic: "/raw".to_string(),
+                    message_count: Some(1),
+                    schema_name: None,
+                    schema_encoding: String::new(),
+                    message_encoding: "application/octet-stream".to_string(),
+                    channel_count: 1,
+                },
+                decodable: false,
+                decode_error: Some(
+                    "schema not available for topic '/raw' (channel id 2)".to_string(),
+                ),
             },
         ]
     );
