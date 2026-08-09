@@ -385,6 +385,12 @@ fn parse_type<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, TypeExpr), String> {
     if let Some((consumed, primitive)) = primitive(input) {
         return Ok((&input[consumed..], TypeExpr::Primitive(primitive)));
     }
+    if first.is("unsigned") {
+        return Err(error_at(
+            first,
+            "unsupported IDL type starting with `unsigned`",
+        ));
+    }
     let (input, scoped) = parse_scoped_name(input)?;
     Ok((input, TypeExpr::Scoped(scoped)))
 }

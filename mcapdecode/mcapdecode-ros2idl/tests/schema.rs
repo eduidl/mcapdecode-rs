@@ -1090,3 +1090,14 @@ fn parse_idl_section_reports_unsupported_multiple_field_declarators() {
         .expect_err("multiple declarators must be rejected");
     assert!(format!("{err:#}").contains("unsupported multiple field declarators"));
 }
+
+#[test]
+fn parse_idl_section_rejects_invalid_unsigned_type_combinations() {
+    for idl in [
+        "module ex { module msg { struct Sample { unsigned value; }; }; };",
+        "module ex { module msg { struct Sample { unsigned char value; }; }; };",
+    ] {
+        let err = parse_idl_section(idl).expect_err("invalid unsigned type must be rejected");
+        assert!(format!("{err:#}").contains("unsupported IDL type starting with `unsigned`"),);
+    }
+}
