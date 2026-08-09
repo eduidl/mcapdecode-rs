@@ -10,6 +10,7 @@ Rust workspace for decoding MCAP data into a normalized schema/value model, with
 - [`mcapdecode`](mcapdecode/mcapdecode): library entry point for decoding MCAP into structured messages, with optional Arrow `RecordBatch` output
 - [`transmcap`](tools/transmcap): CLI for converting MCAP to `jsonl/csv/parquet`
 - [`mcaptui`](tools/mcaptui): terminal UI for browsing topics, decoded messages, and derived schemas interactively
+- [`mcapq`](tools/mcapq): machine-readable CLI for inspecting MCAP topic metadata
 - `mcapdecode-*`: internal/support crates used by `mcapdecode`
 - [`mcapbench`](dev/mcapbench): unpublished dev crate that generates benchmark fixtures
 

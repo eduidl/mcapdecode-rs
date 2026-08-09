@@ -50,6 +50,14 @@ pub struct TopicInfo {
     pub channel_count: usize,
 }
 
+/// Decode support status for a topic discovered from the MCAP summary section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopicDecodeStatus {
+    pub topic: TopicInfo,
+    pub decodable: bool,
+    pub decode_error: Option<String>,
+}
+
 /// Raw message payload for topics that cannot be decoded structurally.
 #[derive(Debug, Clone)]
 pub struct RawMessage {
@@ -151,42 +159,32 @@ impl McapReader {
     pub fn list_topics(&self, path: &Path) -> Result<Vec<TopicInfo>, McapReaderError> {
         let mmap = self.mmap_file(path)?;
         let summary = self.read_summary(path, &mmap)?;
-        let stats = summary.stats.as_ref();
-        let mut topics = BTreeMap::<String, TopicInfo>::new();
+        Ok(topic_infos_from_summary(&summary))
+    }
 
-        for channel in summary.channels.values() {
-            let message_count = stats.map(|summary_stats| {
-                summary_stats
-                    .channel_message_counts
-                    .get(&channel.id)
-                    .copied()
-                    .unwrap_or_default()
-            });
-            let schema = channel.schema.as_ref();
+    /// List topics and report whether each topic's schema can be derived with the
+    /// registered decoders. The MCAP summary is read once for the whole operation.
+    pub fn list_topics_with_decode_status(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<TopicDecodeStatus>, McapReaderError> {
+        let mmap = self.mmap_file(path)?;
+        let summary = self.read_summary(path, &mmap)?;
 
-            topics
-                .entry(channel.topic.clone())
-                .and_modify(|topic_info| {
-                    topic_info.channel_count += 1;
-                    if let (Some(existing), Some(current)) =
-                        (topic_info.message_count.as_mut(), message_count)
-                    {
-                        *existing += current;
-                    }
-                })
-                .or_insert_with(|| TopicInfo {
-                    topic: channel.topic.clone(),
-                    message_count,
-                    schema_name: schema.map(|schema| schema.name.clone()),
-                    schema_encoding: schema
-                        .map(|schema| schema.encoding.clone())
-                        .unwrap_or_default(),
-                    message_encoding: channel.message_encoding.clone(),
-                    channel_count: 1,
-                });
-        }
-
-        Ok(topics.into_values().collect())
+        Ok(topic_infos_from_summary(&summary)
+            .into_iter()
+            .map(|topic| {
+                let decode_error = self
+                    .resolve_topic_decode_context(&summary, &topic.topic)
+                    .err()
+                    .map(|error| error.to_string());
+                TopicDecodeStatus {
+                    topic,
+                    decodable: decode_error.is_none(),
+                    decode_error,
+                }
+            })
+            .collect())
     }
 
     /// Read decoded messages for a topic and emit them one-by-one to callback.
@@ -523,6 +521,45 @@ fn get_channel_from_summary<'a>(
         });
     }
     Ok(first)
+}
+
+fn topic_infos_from_summary(summary: &mcap::read::Summary) -> Vec<TopicInfo> {
+    let stats = summary.stats.as_ref();
+    let mut topics = BTreeMap::<String, TopicInfo>::new();
+
+    for channel in summary.channels.values() {
+        let message_count = stats.map(|summary_stats| {
+            summary_stats
+                .channel_message_counts
+                .get(&channel.id)
+                .copied()
+                .unwrap_or_default()
+        });
+        let schema = channel.schema.as_ref();
+
+        topics
+            .entry(channel.topic.clone())
+            .and_modify(|topic_info| {
+                topic_info.channel_count += 1;
+                if let (Some(existing), Some(current)) =
+                    (topic_info.message_count.as_mut(), message_count)
+                {
+                    *existing += current;
+                }
+            })
+            .or_insert_with(|| TopicInfo {
+                topic: channel.topic.clone(),
+                message_count,
+                schema_name: schema.map(|schema| schema.name.clone()),
+                schema_encoding: schema
+                    .map(|schema| schema.encoding.clone())
+                    .unwrap_or_default(),
+                message_encoding: channel.message_encoding.clone(),
+                channel_count: 1,
+            });
+    }
+
+    topics.into_values().collect()
 }
 
 fn get_schema_from_channel<'a>(
