@@ -130,7 +130,8 @@ pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
 
         // Inside an enum body annotations bind to the enumerator that follows them, so
         // `@value` has to be captured (and the rest of the line kept) rather than skipped.
-        let mut annotation_buf = String::new();
+        // Only initialized when the branch below runs; `line` may borrow from it.
+        let mut annotation_buf;
         if annotation_depth == 0
             && let Some(builder) = current_enum.as_mut()
             && (line.starts_with('@') || !builder.pending_annotation.is_empty())
