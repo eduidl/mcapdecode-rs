@@ -1,6 +1,6 @@
 use arrow::datatypes::DataType;
 use mcapdecode_arrow::field_defs_to_arrow_schema;
-use mcapdecode_core::{DataTypeDef, ElementDef, FieldDef, FieldDefs};
+use mcapdecode_core::{DataTypeDef, ElementDef, EnumVariant, FieldDef, FieldDefs};
 
 #[test]
 fn field_defs_to_arrow_schema_converts_nested_types() {
@@ -19,6 +19,13 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
         FieldDef::new("f64", DataTypeDef::F64, false),
         FieldDef::new("s", DataTypeDef::String, true),
         FieldDef::new("bytes", DataTypeDef::Bytes, true),
+        FieldDef::new("bounded_string", DataTypeDef::BoundedString(4), false),
+        FieldDef::new(
+            "enum",
+            DataTypeDef::Enum(vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)]),
+            false,
+        ),
+        FieldDef::new("bounded_bytes", DataTypeDef::BoundedBytes(8), false),
         FieldDef {
             name: "list".to_string(),
             element: ElementDef::new(
@@ -80,8 +87,11 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
     assert_eq!(schema.field(11).data_type(), &DataType::Float64);
     assert_eq!(schema.field(12).data_type(), &DataType::Utf8);
     assert_eq!(schema.field(13).data_type(), &DataType::Binary);
+    assert_eq!(schema.field(14).data_type(), &DataType::Utf8);
+    assert_eq!(schema.field(15).data_type(), &DataType::Utf8);
+    assert_eq!(schema.field(16).data_type(), &DataType::Binary);
 
-    match schema.field(14).data_type() {
+    match schema.field(17).data_type() {
         DataType::List(item) => {
             assert_eq!(item.name(), "item");
             assert_eq!(item.data_type(), &DataType::Int32);
@@ -90,7 +100,7 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
         other => panic!("expected list, got {other:?}"),
     }
 
-    match schema.field(15).data_type() {
+    match schema.field(18).data_type() {
         DataType::FixedSizeList(item, 4) => {
             assert_eq!(item.name(), "item");
             assert_eq!(item.data_type(), &DataType::Float64);
@@ -99,7 +109,7 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
         other => panic!("expected fixed-size list, got {other:?}"),
     }
 
-    match schema.field(16).data_type() {
+    match schema.field(19).data_type() {
         DataType::Map(entry, false) => match entry.data_type() {
             DataType::Struct(entries) => {
                 assert_eq!(entries[0].name(), "key");
@@ -113,7 +123,7 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
         other => panic!("expected map, got {other:?}"),
     }
 
-    match schema.field(17).data_type() {
+    match schema.field(20).data_type() {
         DataType::Struct(children) => {
             assert_eq!(children.len(), 2);
             assert_eq!(children[0].name(), "c1");
@@ -124,5 +134,29 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
             assert!(children[1].is_nullable());
         }
         other => panic!("expected struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn extended_string_and_collection_types_use_their_arrow_equivalents() {
+    let fields = FieldDefs::from(vec![
+        FieldDef::new("wstring", DataTypeDef::WString, false),
+        FieldDef::new("bounded_wstring", DataTypeDef::BoundedWString(16), false),
+        FieldDef::new(
+            "bounded_list",
+            DataTypeDef::BoundedList(Box::new(ElementDef::new(DataTypeDef::I16, false)), 8),
+            false,
+        ),
+    ]);
+
+    let schema = field_defs_to_arrow_schema(&fields);
+    assert_eq!(schema.field(0).data_type(), &DataType::Utf8);
+    assert_eq!(schema.field(1).data_type(), &DataType::Utf8);
+    match schema.field(2).data_type() {
+        DataType::List(item) => {
+            assert_eq!(item.data_type(), &DataType::Int16);
+            assert!(!item.is_nullable());
+        }
+        other => panic!("expected list, got {other:?}"),
     }
 }

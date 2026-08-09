@@ -114,7 +114,7 @@ fn nested_message_becomes_struct() {
 }
 
 #[test]
-fn enum_field_preserves_values_and_displays_as_string() {
+fn enum_field_preserves_values_and_displays_as_enum() {
     let color_enum = simple_enum("Color", &[("RED", 0), ("GREEN", 7), ("BLUE", 42)]);
     let msg = DescriptorProto {
         name: Some("WithEnum".to_string()),
@@ -135,7 +135,7 @@ fn enum_field_preserves_values_and_displays_as_string() {
             EnumVariant::new("BLUE", 42),
         ])
     );
-    assert_eq!(data_type.to_string(), "string");
+    assert_eq!(data_type.to_string(), "enum");
 }
 
 #[test]

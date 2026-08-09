@@ -50,6 +50,13 @@ pub struct TopicInfo {
     pub channel_count: usize,
 }
 
+/// Topic metadata and derived schema IR obtained from one MCAP summary read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TopicSchema {
+    pub info: TopicInfo,
+    pub field_defs: FieldDefs,
+}
+
 /// Decode support status for a topic discovered from the MCAP summary section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TopicDecodeStatus {
@@ -453,6 +460,24 @@ impl McapReader {
         let summary = self.read_summary(path, &mmap)?;
         let context = self.resolve_topic_decode_context(&summary, topic)?;
         Ok(context.field_defs)
+    }
+
+    /// Return topic metadata and schema IR without reading message payloads.
+    ///
+    /// The MCAP file and its summary are each read once for this operation.
+    pub fn topic_schema(&self, path: &Path, topic: &str) -> Result<TopicSchema, McapReaderError> {
+        let mmap = self.mmap_file(path)?;
+        let summary = self.read_summary(path, &mmap)?;
+        let context = self.resolve_topic_decode_context(&summary, topic)?;
+        let info = topic_infos_from_summary(&summary)
+            .into_iter()
+            .find(|info| info.topic == topic)
+            .expect("resolved topic must be present in the summary");
+
+        Ok(TopicSchema {
+            info,
+            field_defs: context.field_defs,
+        })
     }
 }
 

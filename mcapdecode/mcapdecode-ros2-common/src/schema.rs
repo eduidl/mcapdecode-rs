@@ -8,9 +8,9 @@
 //! | Primitive              | corresponding scalar type    |
 //! | Struct                 | `Struct(FieldDefs)`          |
 //! | Enum                   | `Enum(variants)` (decoded as the variant name) |
-//! | `sequence<uint8/octet>` | `Bytes`                     |
-//! | Other sequence         | `List(element type)`         |
-//! | BoundedString/WString  | `String`                     |
+//! | `sequence<uint8/octet>` | `Bytes` / `BoundedBytes`    |
+//! | Other sequence         | `List` / `BoundedList`       |
+//! | BoundedString/WString  | bounded string variants      |
 //! | Fixed-length field     | `Array(element type, n)`     |
 
 use mcapdecode_core::{DataTypeDef, ElementDef, FieldDef, FieldDefs};
@@ -66,20 +66,26 @@ fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) ->
         ResolvedType::Enum(name) => {
             DataTypeDef::Enum(schema.enums.get(name).cloned().unwrap_or_default())
         }
-        ResolvedType::Sequence { elem, .. }
+        ResolvedType::Sequence { elem, max_len }
             if matches!(
                 elem.as_ref(),
                 ResolvedType::Primitive(PrimitiveType::U8 | PrimitiveType::Octet)
             ) =>
         {
-            DataTypeDef::Bytes
+            max_len.map_or(DataTypeDef::Bytes, DataTypeDef::BoundedBytes)
         }
-        ResolvedType::Sequence { elem, .. } => DataTypeDef::List(Box::new(ElementDef::new(
-            resolved_type_to_data_type_def(schema, elem),
-            false,
-        ))),
-        ResolvedType::BoundedString(_) => DataTypeDef::String,
-        ResolvedType::BoundedWString(_) => DataTypeDef::String,
+        ResolvedType::Sequence { elem, max_len } => {
+            let element = Box::new(ElementDef::new(
+                resolved_type_to_data_type_def(schema, elem),
+                false,
+            ));
+            match max_len {
+                Some(size) => DataTypeDef::BoundedList(element, *size),
+                None => DataTypeDef::List(element),
+            }
+        }
+        ResolvedType::BoundedString(size) => DataTypeDef::BoundedString(*size),
+        ResolvedType::BoundedWString(size) => DataTypeDef::BoundedWString(*size),
     }
 }
 
@@ -97,6 +103,6 @@ fn primitive_to_data_type_def(p: &PrimitiveType) -> DataTypeDef {
         PrimitiveType::F32 => DataTypeDef::F32,
         PrimitiveType::F64 => DataTypeDef::F64,
         PrimitiveType::String => DataTypeDef::String,
-        PrimitiveType::WString => DataTypeDef::String,
+        PrimitiveType::WString => DataTypeDef::WString,
     }
 }
