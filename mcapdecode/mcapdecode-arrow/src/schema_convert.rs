@@ -38,14 +38,17 @@ fn element_def_to_datatype(elem: &ElementDef) -> DataType {
         DataTypeDef::U64 => DataType::UInt64,
         DataTypeDef::F32 => DataType::Float32,
         DataTypeDef::F64 => DataType::Float64,
-        DataTypeDef::String => DataType::Utf8,
-        DataTypeDef::Bytes => DataType::Binary,
-        DataTypeDef::Enum(_) => DataType::Utf8,
+        DataTypeDef::String
+        | DataTypeDef::WString
+        | DataTypeDef::BoundedString(_)
+        | DataTypeDef::BoundedWString(_)
+        | DataTypeDef::Enum(_) => DataType::Utf8,
+        DataTypeDef::Bytes | DataTypeDef::BoundedBytes(_) => DataType::Binary,
         DataTypeDef::Struct(fields) => {
             let arrow_fields: Vec<Field> = fields.iter().map(field_def_to_arrow_field).collect();
             DataType::Struct(arrow_fields.into())
         }
-        DataTypeDef::List(elem) => {
+        DataTypeDef::List(elem) | DataTypeDef::BoundedList(elem, _) => {
             let child_dt = element_def_to_datatype(elem);
             DataType::List(Arc::new(Field::new("item", child_dt, elem.nullable)))
         }

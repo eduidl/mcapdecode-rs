@@ -329,6 +329,23 @@ fn list_topics_returns_topic_metadata() {
 }
 
 #[test]
+fn topic_schema_returns_metadata_and_field_defs_together() {
+    let mut reader = McapReader::new();
+    reader.register_decoder(Box::new(TestJsonDecoder));
+
+    let topic_schema = reader
+        .topic_schema(&fixture_path("with_summary.mcap"), "/decoded")
+        .unwrap();
+
+    assert_eq!(topic_schema.info.topic, "/decoded");
+    assert_eq!(topic_schema.info.schema_name.as_deref(), Some("test.Msg"));
+    assert_eq!(
+        topic_schema.field_defs,
+        vec![FieldDef::new("value", DataTypeDef::I64, true)].into()
+    );
+}
+
+#[test]
 fn list_topics_with_decode_status_reads_topic_metadata_and_decode_errors() {
     let reader = McapReader::new();
     let statuses = reader

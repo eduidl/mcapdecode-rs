@@ -171,9 +171,9 @@ fn push_value_lines(
                 field_path.map(ToOwned::to_owned),
             ));
             let child_type = match data_type {
-                Some(DataTypeDef::List(element)) | Some(DataTypeDef::Array(element, _)) => {
-                    Some(&element.data_type)
-                }
+                Some(DataTypeDef::List(element))
+                | Some(DataTypeDef::BoundedList(element, _))
+                | Some(DataTypeDef::Array(element, _)) => Some(&element.data_type),
                 _ => None,
             };
             for (index, item) in items.iter().take(DETAIL_COLLECTION_ITEM_LIMIT).enumerate() {

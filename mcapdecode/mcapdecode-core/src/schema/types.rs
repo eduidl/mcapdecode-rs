@@ -21,10 +21,15 @@ pub enum DataTypeDef {
     F32,
     F64,
     String,
+    WString,
+    BoundedString(usize),
+    BoundedWString(usize),
     Bytes,
+    BoundedBytes(usize),
     Enum(Vec<EnumVariant>),
     Struct(FieldDefs),
     List(Box<ElementDef>),
+    BoundedList(Box<ElementDef>, usize),
     Array(Box<ElementDef>, usize),
     Map {
         key: Box<ElementDef>,
@@ -38,6 +43,8 @@ impl DataTypeDef {
             self,
             DataTypeDef::Struct(_)
                 | DataTypeDef::List(_)
+                | DataTypeDef::BoundedList(_, _)
+                | DataTypeDef::Enum(_)
                 | DataTypeDef::Array(_, _)
                 | DataTypeDef::Map { .. }
         )
@@ -58,11 +65,15 @@ impl DataTypeDef {
             DataTypeDef::F32 => "f32",
             DataTypeDef::F64 => "f64",
             DataTypeDef::String => "string",
+            DataTypeDef::WString => "wstring",
+            DataTypeDef::BoundedString(_) => "string",
+            DataTypeDef::BoundedWString(_) => "wstring",
             DataTypeDef::Bytes => "bytes",
-            // TODO: Render enum variants once schema metadata has a display format.
-            DataTypeDef::Enum(_) => "string",
+            DataTypeDef::BoundedBytes(_) => "bytes",
+            DataTypeDef::Enum(_) => "enum",
             DataTypeDef::Struct(_) => "struct",
             DataTypeDef::List(_) => "list",
+            DataTypeDef::BoundedList(_, _) => "list",
             DataTypeDef::Array(_, _) => "array",
             DataTypeDef::Map { .. } => "map",
         }
@@ -71,8 +82,7 @@ impl DataTypeDef {
 
 /// A named numeric value in an enum definition.
 ///
-/// The numeric value is preserved from the source schema even though enum
-/// values continue to be displayed as strings.
+/// The numeric value is preserved from the source schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumVariant {
     pub name: String,
@@ -91,8 +101,30 @@ impl EnumVariant {
 impl Display for DataTypeDef {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            DataTypeDef::Array(_, size) => write!(f, "array[{size}]"),
+            DataTypeDef::List(element) => write!(f, "{}[]", NestedElement(element)),
+            DataTypeDef::BoundedList(element, size) => {
+                write!(f, "{}[<={size}]", NestedElement(element))
+            }
+            DataTypeDef::Array(element, size) => write!(f, "{}[{size}]", NestedElement(element)),
+            DataTypeDef::BoundedString(size) => write!(f, "string[<={size}]"),
+            DataTypeDef::BoundedWString(size) => write!(f, "wstring[<={size}]"),
+            DataTypeDef::BoundedBytes(size) => write!(f, "bytes[<={size}]"),
+            DataTypeDef::Map { key, value } => {
+                write!(f, "map<{}, {}>", NestedElement(key), NestedElement(value))
+            }
             _ => f.write_str(self.type_name()),
+        }
+    }
+}
+
+struct NestedElement<'a>(&'a ElementDef);
+
+impl Display for NestedElement<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        if self.0.nullable {
+            write!(f, "{}?", self.0.data_type)
+        } else {
+            Display::fmt(&self.0.data_type, f)
         }
     }
 }

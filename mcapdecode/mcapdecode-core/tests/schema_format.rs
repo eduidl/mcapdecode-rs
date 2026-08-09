@@ -1,4 +1,6 @@
-use mcapdecode_core::{DataTypeDef, ElementDef, FieldDef, FieldDefs, format_field_defs};
+use mcapdecode_core::{
+    DataTypeDef, ElementDef, EnumVariant, FieldDef, FieldDefs, format_field_defs,
+};
 
 #[test]
 fn nested_struct_keeps_compact_type_labels_and_indentation() -> Result<(), std::fmt::Error> {
@@ -58,10 +60,9 @@ fn list_of_complex_item_is_rendered_as_block() -> Result<(), std::fmt::Error> {
     let text = format_field_defs(&fields)?;
     let expected = "\
 field_root: optional struct
-    field_list: optional list
-        item: optional struct
-            item_a: optional i32
-            item_b: optional string
+    field_list: optional struct?[]
+        item_a: optional i32
+        item_b: optional string
 ";
     assert_eq!(text, expected);
     Ok(())
@@ -89,8 +90,94 @@ fn non_optional_fields_do_not_get_optional_prefix() -> Result<(), std::fmt::Erro
     let expected = "\
 field_root: struct
     field_a: f64
-    field_b: list
-        item: i32
+    field_b: i32[]
+";
+    assert_eq!(text, expected);
+    Ok(())
+}
+
+#[test]
+fn arrays_and_maps_render_complete_types_on_the_parent_line() -> Result<(), std::fmt::Error> {
+    let fields = vec![
+        FieldDef::new(
+            "samples",
+            DataTypeDef::Array(Box::new(ElementDef::new(DataTypeDef::F64, false)), 9),
+            false,
+        ),
+        FieldDef::new(
+            "bounded_samples",
+            DataTypeDef::BoundedList(Box::new(ElementDef::new(DataTypeDef::I16, false)), 4),
+            false,
+        ),
+        FieldDef::new(
+            "labels",
+            DataTypeDef::Map {
+                key: Box::new(ElementDef::new(DataTypeDef::String, false)),
+                value: Box::new(ElementDef::new(DataTypeDef::I32, true)),
+            },
+            false,
+        ),
+    ];
+
+    let text = format_field_defs(&fields)?;
+    let expected = "\
+samples: f64[9]
+bounded_samples: i16[<=4]
+labels: map<string, i32?>
+";
+    assert_eq!(text, expected);
+    Ok(())
+}
+
+#[test]
+fn enums_render_declared_wire_values() -> Result<(), std::fmt::Error> {
+    let fields = vec![FieldDef::new(
+        "color",
+        DataTypeDef::Enum(vec![
+            EnumVariant::new("UNKNOWN", 0),
+            EnumVariant::new("BLUE", 7),
+        ]),
+        false,
+    )];
+
+    let text = format_field_defs(&fields)?;
+    assert_eq!(text, "color: enum\n    UNKNOWN = 0\n    BLUE = 7\n");
+    Ok(())
+}
+
+#[test]
+fn maps_expand_struct_bodies_without_item_labels() -> Result<(), std::fmt::Error> {
+    let struct_key = DataTypeDef::Struct(vec![FieldDef::new("id", DataTypeDef::U32, false)].into());
+    let struct_value =
+        DataTypeDef::Struct(vec![FieldDef::new("enabled", DataTypeDef::Bool, false)].into());
+    let fields = vec![
+        FieldDef::new(
+            "labels",
+            DataTypeDef::Map {
+                key: Box::new(ElementDef::new(DataTypeDef::String, false)),
+                value: Box::new(ElementDef::new(struct_value.clone(), false)),
+            },
+            false,
+        ),
+        FieldDef::new(
+            "index",
+            DataTypeDef::Map {
+                key: Box::new(ElementDef::new(struct_key, false)),
+                value: Box::new(ElementDef::new(struct_value, false)),
+            },
+            false,
+        ),
+    ];
+
+    let text = format_field_defs(&fields)?;
+    let expected = "\
+labels: map<string, struct>
+    enabled: bool
+index: map<struct, struct>
+    @key: struct
+        id: u32
+    @value: struct
+        enabled: bool
 ";
     assert_eq!(text, expected);
     Ok(())
@@ -116,6 +203,6 @@ fn element_display_prefixes_optional() {
             false
         )
         .to_string(),
-        "array[4]"
+        "u8[4]"
     );
 }

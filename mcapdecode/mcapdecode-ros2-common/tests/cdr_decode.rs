@@ -145,7 +145,7 @@ fn decodes_enum_numeric_value_to_variant_name() {
         data_type,
         &DataTypeDef::Enum(vec![EnumVariant::new("OK", 3), EnumVariant::new("WARN", 7)])
     );
-    assert_eq!(data_type.to_string(), "string");
+    assert_eq!(data_type.to_string(), "enum");
 }
 
 /// A negative enumerator value is serialized as its 32-bit two's complement.
@@ -426,6 +426,62 @@ fn decodes_octet_sequence_as_bytes_and_exposes_binary_schema() {
 
     let field_defs = resolved_schema_to_field_defs(&schema);
     assert_eq!(field_defs[0].element.data_type, DataTypeDef::Bytes);
+}
+
+#[test]
+fn schema_preserves_collection_and_string_bounds() {
+    let schema = make_schema(
+        vec![
+            ResolvedField {
+                name: "data".to_string(),
+                ty: ResolvedType::Sequence {
+                    elem: Box::new(ResolvedType::Primitive(PrimitiveType::U8)),
+                    max_len: Some(12),
+                },
+                fixed_len: None,
+            },
+            ResolvedField {
+                name: "values".to_string(),
+                ty: ResolvedType::Sequence {
+                    elem: Box::new(ResolvedType::Primitive(PrimitiveType::I16)),
+                    max_len: Some(4),
+                },
+                fixed_len: None,
+            },
+            ResolvedField {
+                name: "label".to_string(),
+                ty: ResolvedType::BoundedString(16),
+                fixed_len: None,
+            },
+            ResolvedField {
+                name: "wide_label".to_string(),
+                ty: ResolvedType::BoundedWString(8),
+                fixed_len: None,
+            },
+        ],
+        HashMap::new(),
+    );
+
+    let field_defs = resolved_schema_to_field_defs(&schema);
+    assert_eq!(
+        field_defs[0].element.data_type,
+        DataTypeDef::BoundedBytes(12)
+    );
+    assert_eq!(
+        field_defs[1].element.data_type,
+        DataTypeDef::BoundedList(
+            Box::new(mcapdecode_core::ElementDef::new(DataTypeDef::I16, false)),
+            4
+        )
+    );
+    assert_eq!(
+        field_defs[2].element.data_type,
+        DataTypeDef::BoundedString(16)
+    );
+    assert_eq!(
+        field_defs[3].element.data_type,
+        DataTypeDef::BoundedWString(8)
+    );
 }
 
 /// A null-terminated string decodes correctly to the UTF-8 content before `\0`.
