@@ -1,841 +1,621 @@
-//! ROS2 IDL parser implementation using nom parser combinators.
+//! Recursive ROS 2 IDL parser.
 //!
-//! This module provides a robust parser for ROS2 Interface Definition Language (IDL)
-//! schemas. It uses the `nom` library for parser combinators, which provides better
-//! error handling, composability, and maintainability compared to hand-written parsers.
+//! The grammar follows `rosidl_parser/grammar.lark`.  Lexing first is important:
+//! it makes newlines ordinary whitespace and prevents `<` / `>` in constant
+//! expressions from being mistaken for template delimiters.
 //!
-//! # Supported Features
-//!
-//! - Struct declarations with fields
-//! - Enum declarations with variants (`@value` sets an enumerator's value)
-//! - Primitive types (bool, int8-64, uint8-64, float32/64, string, etc.)
-//! - Sequence types (bounded and unbounded)
-//! - Bounded strings and wide strings
-//! - Fixed-size arrays
-//! - Const declarations
-//! - Module scoping
-//! - Scoped type names (using :: or / separators)
-//! - Annotations (ignored, except `@value` on enumerators)
-//! - Include directives (ignored)
-//!
-//! # Unsupported Features
-//!
-//! The following IDL features are explicitly unsupported and will return errors:
-//! - Union types
-//! - Typedef declarations
-//! - Bitmask types
-//!
-//! # Limitations
-//!
-//! Parsing is line based, whereas IDL itself is whitespace insensitive. Declarations
-//! written on a single line (`enum E { A, B };`) are rejected, and several enumerators
-//! on one line (`A, B,`) keep only the first one. Lifting this requires tokenizing the
-//! input instead of splitting it into lines.
-
-use std::collections::HashMap;
+//! `grammar.lark` rules intentionally not represented by the decoder AST / CDR are:
+//! - (34), (35), (42), (43): `char`, `wchar`, and fixed-point types/literals; CDR's
+//!   decoder AST has no corresponding value representation.
+//! - (44), (63)--(66), (198), (204): union, typedef, and bitmask declarations;
+//!   discriminator, alias, and bit-set layouts have no AST representation.
+//! - (218)--(224): annotation declarations; annotation *applications* are parsed,
+//!   but user-defined annotation schemas have no decoder use.
 
 use mcapdecode_core::EnumVariant;
 use mcapdecode_ros2_common::{
     ConstDef, EnumDef, FieldDef, ParsedSection, PrimitiveType, Ros2Error, StructDef, TypeExpr,
 };
-use nom::{
-    IResult, Parser,
-    branch::alt,
-    bytes::complete::{tag, take_while, take_while1},
-    character::complete::{alpha1, alphanumeric1, char, space0},
-    combinator::{all_consuming, map, opt, recognize, value},
-    error::{Error, ErrorKind},
-    multi::{many0, many1, separated_list0},
-    sequence::{pair, preceded, terminated, tuple},
-};
 
-use crate::lex::strip_comments;
+use crate::idl_lexer::{Token, lex};
 
-enum PendingDecl {
-    Module(String),
-    Struct(String),
-    Enum(String),
-}
+type Tokens<'a> = &'a [Token];
 
-/// Enum declaration being collected, with the state needed to number its enumerators.
-struct EnumBuilder {
-    name: String,
-    variants: Vec<EnumVariant>,
-    /// Value used for the next enumerator without an explicit `@value`.
-    next_value: i64,
-    /// `@value` seen since the last enumerator, applied to the enumerator that follows.
-    pending_value: Option<i64>,
-    /// Annotation text whose parentheses are still open, continued on the next line.
-    pending_annotation: String,
-}
-
-impl EnumBuilder {
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            variants: Vec::new(),
-            next_value: 0,
-            pending_value: None,
-            pending_annotation: String::new(),
-        }
-    }
-
-    /// Append an enumerator, using its `@value` if one was given.
-    ///
-    /// Enumerators without an explicit value continue from the previous one, as
-    /// specified by DDS X-Types 7.3.1.2.1.5 (Enumerated Literal Values).
-    fn push_variant(&mut self, name: String) -> Result<(), Ros2Error> {
-        let value = self.pending_value.take().unwrap_or(self.next_value);
-        self.next_value = value
-            .checked_add(1)
-            .ok_or_else(|| Ros2Error("enum value overflow".to_string()))?;
-        self.variants.push(EnumVariant::new(name, value));
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-enum LineStatement {
-    Include,
-    Unsupported,
-    ModuleOpens(Vec<String>),
-    ModuleHead(String),
-    StructOpen(String),
-    StructHead(String),
-    EnumOpen(String),
-    EnumHead(String),
-    Close(usize),
-}
-
+/// Parse one complete IDL section into the public decoder AST.
+///
+/// Grammar (1) `specification`: one or more top-level definitions.
 pub fn parse_idl_section(idl_body: &str) -> Result<ParsedSection, Ros2Error> {
-    let mut structs: HashMap<Vec<String>, StructDef> = HashMap::new();
-    let mut enums: HashMap<Vec<String>, EnumDef> = HashMap::new();
-    let mut modules: Vec<String> = Vec::new();
-    let mut current_struct: Option<(String, Vec<FieldDef>, Vec<ConstDef>)> = None;
-    let mut current_enum: Option<EnumBuilder> = None;
-    let mut pending_decl: Option<PendingDecl> = None;
-
-    let mut annotation_depth = 0i32;
-    let mut ann_in_str = false;
-    let mut ann_escaped = false;
-    let mut in_block_comment = false;
-
-    for (idx, raw) in idl_body.lines().enumerate() {
-        let line_no = idx + 1;
-        let line = strip_comments(raw, &mut in_block_comment);
-        let mut line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        // Inside an enum body annotations bind to the enumerator that follows them, so
-        // `@value` has to be captured (and the rest of the line kept) rather than skipped.
-        // Only initialized when the branch below runs; `line` may borrow from it.
-        let mut annotation_buf;
-        if annotation_depth == 0
-            && let Some(builder) = current_enum.as_mut()
-            && (line.starts_with('@') || !builder.pending_annotation.is_empty())
-        {
-            annotation_buf = std::mem::take(&mut builder.pending_annotation);
-            if !annotation_buf.is_empty() {
-                annotation_buf.push(' ');
-            }
-            annotation_buf.push_str(line);
-
-            match split_leading_annotations(&annotation_buf) {
-                Some((value, rest)) => {
-                    if let Some(value) = value {
-                        builder.pending_value = Some(parse_enum_value(value).map_err(|e| {
-                            Ros2Error(format!("parse error at line {line_no}: {e}"))
-                        })?);
-                    }
-                    line = rest.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-                }
-                None => {
-                    // Argument list still open: continue on the next line.
-                    builder.pending_annotation = annotation_buf.clone();
-                    continue;
-                }
-            }
-        }
-
-        if annotation_depth > 0 || line.starts_with('@') {
-            let (open, close) =
-                paren_counts_outside_strings(line, &mut ann_in_str, &mut ann_escaped);
-            annotation_depth += open as i32;
-            annotation_depth -= close as i32;
-            continue;
-        }
-
-        if let Some(pending) = pending_decl.take() {
-            if line != "{" {
-                return Err(
-                    format!("expected '{{' after declaration at line {line_no}: {line}").into(),
-                );
-            }
-            match pending {
-                PendingDecl::Module(name) => modules.push(name),
-                PendingDecl::Struct(name) => {
-                    if current_struct.is_some() || current_enum.is_some() {
-                        return Err(format!(
-                            "nested declaration unsupported at line {line_no}: {line}"
-                        )
-                        .into());
-                    }
-                    current_struct = Some((name, Vec::new(), Vec::new()));
-                }
-                PendingDecl::Enum(name) => {
-                    if current_struct.is_some() || current_enum.is_some() {
-                        return Err(format!(
-                            "nested declaration unsupported at line {line_no}: {line}"
-                        )
-                        .into());
-                    }
-                    current_enum = Some(EnumBuilder::new(name));
-                }
-            }
-            continue;
-        }
-
-        if let Some(statement) = parse_line_statement(line) {
-            match statement {
-                LineStatement::Include => continue,
-                LineStatement::Unsupported => {
-                    return Err(
-                        format!("unsupported IDL declaration at line {line_no}: {line}").into(),
-                    );
-                }
-                LineStatement::ModuleOpens(names) => {
-                    modules.extend(names);
-                    continue;
-                }
-                LineStatement::ModuleHead(name) => {
-                    pending_decl = Some(PendingDecl::Module(name));
-                    continue;
-                }
-                LineStatement::StructOpen(name) => {
-                    ensure_no_nested_declaration(
-                        current_struct.is_some(),
-                        current_enum.is_some(),
-                        line_no,
-                        line,
-                    )?;
-                    current_struct = Some((name, Vec::new(), Vec::new()));
-                    continue;
-                }
-                LineStatement::StructHead(name) => {
-                    ensure_no_nested_declaration(
-                        current_struct.is_some(),
-                        current_enum.is_some(),
-                        line_no,
-                        line,
-                    )?;
-                    pending_decl = Some(PendingDecl::Struct(name));
-                    continue;
-                }
-                LineStatement::EnumOpen(name) => {
-                    ensure_no_nested_declaration(
-                        current_struct.is_some(),
-                        current_enum.is_some(),
-                        line_no,
-                        line,
-                    )?;
-                    current_enum = Some(EnumBuilder::new(name));
-                    continue;
-                }
-                LineStatement::EnumHead(name) => {
-                    ensure_no_nested_declaration(
-                        current_struct.is_some(),
-                        current_enum.is_some(),
-                        line_no,
-                        line,
-                    )?;
-                    pending_decl = Some(PendingDecl::Enum(name));
-                    continue;
-                }
-                LineStatement::Close(close_count) => {
-                    for _ in 0..close_count {
-                        if let Some((name, fields, consts)) = current_struct.take() {
-                            let mut full = modules.clone();
-                            full.push(name);
-                            structs.insert(
-                                full.clone(),
-                                StructDef {
-                                    full_name: full,
-                                    fields,
-                                    consts,
-                                },
-                            );
-                        } else if let Some(builder) = current_enum.take() {
-                            let mut full = modules.clone();
-                            full.push(builder.name);
-                            enums.insert(
-                                full.clone(),
-                                EnumDef {
-                                    full_name: full,
-                                    variants: builder.variants,
-                                },
-                            );
-                        } else if modules.pop().is_none() {
-                            return Err(format!("unmatched closing brace at line {line_no}").into());
-                        }
-                    }
-                    continue;
-                }
-            }
-        }
-
-        if let Some((_, fields, consts)) = current_struct.as_mut() {
-            if line.starts_with("const ") {
-                consts.push(
-                    parse_const(line)
-                        .map_err(|e| Ros2Error(format!("parse error at line {line_no}: {e}")))?,
-                );
-            } else {
-                fields.push(
-                    parse_field(line)
-                        .map_err(|e| Ros2Error(format!("parse error at line {line_no}: {e}")))?,
-                );
-            }
-            continue;
-        }
-
-        if let Some(builder) = current_enum.as_mut() {
-            let variant = parse_enum_variant(line)
-                .map_err(|e| Ros2Error(format!("parse error at line {line_no}: {e}")))?;
-            if let Some(name) = variant {
-                builder
-                    .push_variant(name)
-                    .map_err(|e| Ros2Error(format!("parse error at line {line_no}: {e}")))?;
-            }
-            continue;
-        }
-
-        if line.starts_with("const ") {
-            parse_const(line)
-                .map_err(|e| Ros2Error(format!("parse error at line {line_no}: {e}")))?;
-            continue;
-        }
-
-        return Err(format!("unexpected top-level statement at line {line_no}: {line}").into());
+    let tokens = lex(idl_body)?;
+    let mut output = ParsedSection::default();
+    let rest = parse_definitions(&tokens, &mut Vec::new(), &mut output).map_err(Ros2Error)?;
+    if let Some(token) = rest.first() {
+        return Err(Ros2Error(error_at(token, "unexpected token")));
     }
+    Ok(output)
+}
 
-    if current_struct.is_some() {
-        return Err("unclosed struct declaration".into());
+/// Grammar (1) `specification` body: consume definitions recursively until a module
+/// closing brace. Newlines are already whitespace at this point.
+fn parse_definitions<'a>(
+    mut input: Tokens<'a>,
+    modules: &mut Vec<String>,
+    output: &mut ParsedSection,
+) -> Result<Tokens<'a>, String> {
+    while !input.is_empty() && !input[0].is("}") {
+        input = parse_definition(input, modules, output)?;
     }
-    if current_enum.is_some() {
-        return Err("unclosed enum declaration".into());
+    Ok(input)
+}
+
+fn parse_definition<'a>(
+    input: Tokens<'a>,
+    modules: &mut Vec<String>,
+    output: &mut ParsedSection,
+) -> Result<Tokens<'a>, String> {
+    // Grammar (2) `definition`: module, const, type declaration, or include.
+    let (input, annotations) = parse_annotations(input)?;
+    if input.first().is_some_and(|token| token.is("}")) {
+        return Ok(input);
     }
-    if pending_decl.is_some() {
-        return Err("declaration missing opening brace".into());
-    }
-    Ok(ParsedSection { structs, enums })
-}
-
-fn ensure_no_nested_declaration(
-    has_current_struct: bool,
-    has_current_enum: bool,
-    line_no: usize,
-    line: &str,
-) -> Result<(), Ros2Error> {
-    if has_current_struct || has_current_enum {
-        return Err(format!("nested declaration unsupported at line {line_no}: {line}").into());
-    }
-    Ok(())
-}
-
-fn parse_line_statement(line: &str) -> Option<LineStatement> {
-    parse_complete(line_statement, line)
-}
-
-fn parse_complete<'a, O, P>(parser: P, input: &'a str) -> Option<O>
-where
-    P: Parser<&'a str, O, Error<&'a str>>,
-{
-    all_consuming(parser)
-        .parse(input)
-        .ok()
-        .map(|(_, output)| output)
-}
-
-fn line_statement(input: &str) -> IResult<&str, LineStatement> {
-    alt((
-        value(LineStatement::Include, include_directive),
-        value(LineStatement::Unsupported, unsupported_decl),
-        map(chained_module_decls, LineStatement::ModuleOpens),
-        map(module_decl_head, |name| {
-            LineStatement::ModuleHead(name.to_string())
-        }),
-        map(struct_decl, |name| {
-            LineStatement::StructOpen(name.to_string())
-        }),
-        map(struct_decl_head, |name| {
-            LineStatement::StructHead(name.to_string())
-        }),
-        map(enum_decl, |name| LineStatement::EnumOpen(name.to_string())),
-        map(enum_decl_head, |name| {
-            LineStatement::EnumHead(name.to_string())
-        }),
-        map(close_tokens, LineStatement::Close),
-    ))(input)
-}
-
-fn include_directive(input: &str) -> IResult<&str, ()> {
-    value((), pair(tag("#include"), take_while(|_: char| true)))(input)
-}
-
-fn unsupported_decl(input: &str) -> IResult<&str, ()> {
-    value(
-        (),
-        pair(
-            terminated(alt((tag("union"), tag("bitmask"), tag("typedef"))), ws1),
-            take_while(|_: char| true),
-        ),
-    )(input)
-}
-
-fn chained_module_decls(input: &str) -> IResult<&str, Vec<String>> {
-    map(many1(terminated(module_decl, ws)), |names| {
-        names.into_iter().map(ToString::to_string).collect()
-    })(input)
-}
-
-fn close_tokens(input: &str) -> IResult<&str, usize> {
-    map(
-        many1(terminated(alt((tag("};"), tag("}"))), ws)),
-        |tokens| tokens.len(),
-    )(input)
-}
-
-/// Parse module declaration: module Name {
-fn module_decl(input: &str) -> IResult<&str, &str> {
-    map(
-        tuple((tag("module"), ws1, identifier, ws, char('{'))),
-        |(_, _, name, _, _)| name,
-    )(input)
-}
-
-/// Parse module declaration head: module Name
-fn module_decl_head(input: &str) -> IResult<&str, &str> {
-    map(
-        tuple((tag("module"), ws1, identifier, ws)),
-        |(_, _, name, _)| name,
-    )(input)
-}
-
-/// Parse struct declaration: struct Name {
-fn struct_decl(input: &str) -> IResult<&str, &str> {
-    map(
-        tuple((tag("struct"), ws1, identifier, ws, char('{'))),
-        |(_, _, name, _, _)| name,
-    )(input)
-}
-
-/// Parse struct declaration head: struct Name
-fn struct_decl_head(input: &str) -> IResult<&str, &str> {
-    map(
-        tuple((tag("struct"), ws1, identifier, ws)),
-        |(_, _, name, _)| name,
-    )(input)
-}
-
-/// Parse enum declaration: enum Name {
-fn enum_decl(input: &str) -> IResult<&str, &str> {
-    map(
-        tuple((tag("enum"), ws1, identifier, ws, char('{'))),
-        |(_, _, name, _, _)| name,
-    )(input)
-}
-
-/// Parse enum declaration head: enum Name
-fn enum_decl_head(input: &str) -> IResult<&str, &str> {
-    map(
-        tuple((tag("enum"), ws1, identifier, ws)),
-        |(_, _, name, _)| name,
-    )(input)
-}
-
-fn parse_const(line: &str) -> Result<ConstDef, Ros2Error> {
-    let body = line
-        .strip_prefix("const ")
-        .ok_or_else(|| Ros2Error("const declaration must start with `const`".to_string()))?;
-    let body = body
-        .strip_suffix(';')
-        .ok_or_else(|| Ros2Error("const declaration must end with ';'".to_string()))?;
-    if has_long_double_tokens(body) {
-        return Err("unsupported IDL type `long double`".into());
-    }
-
-    match const_decl(body.trim()) {
-        Ok((remaining, def)) if remaining.trim().is_empty() => Ok(def),
-        Ok((remaining, _)) => {
-            Err(format!("Unexpected trailing characters in const: {remaining}").into())
+    let Some(token) = input.first() else {
+        return Err("unexpected end of IDL input".to_string());
+    };
+    match token.text.as_str() {
+        "#" => parse_include(input),
+        "module" => parse_module(input, modules, output),
+        "struct" => parse_struct(input, modules, output),
+        "enum" => parse_enum(input, modules, output, annotations),
+        "const" => {
+            let (rest, _) = parse_const(input)?;
+            Ok(rest)
         }
-        Err(e) => Err(format!("Failed to parse const declaration: {e}").into()),
-    }
-}
-
-fn parse_field(line: &str) -> Result<FieldDef, Ros2Error> {
-    let body = line
-        .strip_suffix(';')
-        .ok_or_else(|| "field declaration must end with ';'".to_string())?
-        .trim();
-    if has_long_double_tokens(body) {
-        return Err("unsupported IDL type `long double`".into());
-    }
-
-    match field_decl(body) {
-        Ok((remaining, def)) if remaining.trim().is_empty() => Ok(def),
-        Ok((remaining, _)) => {
-            Err(format!("Unexpected trailing characters in field: {remaining}").into())
-        }
-        Err(e) => Err(format!("Failed to parse field declaration: {e}").into()),
-    }
-}
-
-/// Parse an identifier (alphanumeric + underscore, must start with alpha or _)
-fn identifier(input: &str) -> IResult<&str, &str> {
-    recognize(pair(
-        alt((alpha1, tag("_"))),
-        many0(alt((alphanumeric1, tag("_")))),
-    ))(input)
-}
-
-/// Parse whitespace and comments
-fn ws(input: &str) -> IResult<&str, ()> {
-    value((), space0)(input)
-}
-
-/// Parse one-or-more whitespace characters.
-fn ws1(input: &str) -> IResult<&str, ()> {
-    value((), take_while1(|c: char| c.is_whitespace()))(input)
-}
-
-/// Parse a scoped identifier (e.g., "foo::bar::Baz" or "foo/bar/Baz")
-fn scoped_name(input: &str) -> IResult<&str, Vec<String>> {
-    let sep = if input.contains("::") { "::" } else { "/" };
-    map(
-        separated_list0(tag(sep), map(identifier, String::from)),
-        |parts| parts.into_iter().filter(|s| !s.is_empty()).collect(),
-    )(input)
-}
-
-/// Parse primitive type names (order matters: longer matches first)
-fn primitive_type(input: &str) -> IResult<&str, PrimitiveType> {
-    terminated(
-        alt((
-            value(
-                PrimitiveType::U64,
-                tuple((tag("unsigned"), ws1, tag("long"), ws1, tag("long"))),
-            ),
-            value(PrimitiveType::I64, tuple((tag("long"), ws1, tag("long")))),
-            value(
-                PrimitiveType::U16,
-                tuple((tag("unsigned"), ws1, tag("short"))),
-            ),
-            value(
-                PrimitiveType::U32,
-                tuple((tag("unsigned"), ws1, tag("long"))),
-            ),
-            value(PrimitiveType::Bool, alt((tag("boolean"), tag("bool")))),
-            value(PrimitiveType::I8, tag("int8")),
-            value(PrimitiveType::I16, alt((tag("int16"), tag("short")))),
-            value(PrimitiveType::I32, alt((tag("int32"), tag("long")))),
-            value(PrimitiveType::I64, tag("int64")),
-            value(PrimitiveType::U8, tag("uint8")),
-            value(PrimitiveType::U16, tag("uint16")),
-            value(PrimitiveType::U32, tag("uint32")),
-            value(PrimitiveType::U64, tag("uint64")),
-            value(PrimitiveType::F32, alt((tag("float32"), tag("float")))),
-            value(PrimitiveType::F64, alt((tag("float64"), tag("double")))),
-            value(PrimitiveType::String, tag("string")),
-            value(PrimitiveType::WString, tag("wstring")),
-            value(PrimitiveType::Octet, tag("octet")),
+        "union" | "typedef" | "bitmask" => Err(error_at(
+            token,
+            "unsupported IDL declaration (union, typedef, and bitmask are not supported)",
         )),
-        keyword_boundary,
-    )(input)
-}
-
-fn keyword_boundary(input: &str) -> IResult<&str, ()> {
-    if input.chars().next().is_some_and(is_ident_continue) {
-        return Err(nom::Err::Error(Error::new(input, ErrorKind::Verify)));
+        _ => Err(error_at(token, "unexpected top-level declaration")),
     }
-    Ok((input, ()))
 }
 
-fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
+fn parse_module<'a>(
+    input: Tokens<'a>,
+    modules: &mut Vec<String>,
+    output: &mut ParsedSection,
+) -> Result<Tokens<'a>, String> {
+    // Grammar (3) `module_dcl`: `module IDENTIFIER { definition+ }`.
+    let (input, _) = expect(input, "module")?;
+    let (input, name) = identifier(input)?;
+    let (input, _) = expect(input, "{")?;
+    modules.push(name.text.clone());
+    let input = parse_definitions(input, modules, output)?;
+    let (input, _) = expect(input, "}")?;
+    modules.pop();
+    let (input, _) = expect(input, ";")?;
+    Ok(input)
 }
 
-fn has_long_double_tokens(s: &str) -> bool {
-    let mut normalized = String::with_capacity(s.len());
-    for ch in s.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            normalized.push(ch);
+fn parse_struct<'a>(
+    input: Tokens<'a>,
+    modules: &[String],
+    output: &mut ParsedSection,
+) -> Result<Tokens<'a>, String> {
+    // Grammar (44)--(47): constrained type declarations, struct definitions, and
+    // members. Grammar (48) `struct_forward_dcl` is rejected below (no CDR layout).
+    let (input, _) = expect(input, "struct")?;
+    let (mut input, name) = identifier(input)?;
+    if !input.first().is_some_and(|token| token.is("{")) {
+        // grammar.lark's `struct_forward_dcl` has no CDR layout to decode.
+        return Err(error_at(name, "unsupported struct forward declaration"));
+    }
+    let struct_line = name.line;
+    (input, _) = expect(input, "{")?;
+    let mut fields = Vec::new();
+    let mut consts = Vec::new();
+    while !input.is_empty() && !input[0].is("}") {
+        let (rest, _) = parse_annotations(input)?;
+        input = rest;
+        if input.first().is_some_and(|token| token.is("}")) {
+            break;
+        }
+        if input.first().is_some_and(|token| token.is("const")) {
+            let (rest, constant) = parse_const(input)?;
+            consts.push(constant);
+            input = rest;
         } else {
-            normalized.push(' ');
+            let (rest, field) = parse_member(input)?;
+            fields.push(field);
+            input = rest;
         }
     }
-    let tokens: Vec<&str> = normalized.split_whitespace().collect();
-    tokens
-        .windows(2)
-        .any(|pair| pair[0] == "long" && pair[1] == "double")
-}
-
-/// Parse a number
-fn number(input: &str) -> IResult<&str, usize> {
-    map(take_while1(|c: char| c.is_ascii_digit()), |s: &str| {
-        s.parse().unwrap()
-    })(input)
-}
-
-fn sequence_bound(input: &str) -> IResult<&str, Option<usize>> {
-    alt((
-        map(number, Some),
-        // Some schemas use named constants like `kObjectsCapacity`.
-        // Reader-side schema derivation accepts those declarations but
-        // leaves enforcement to the writer / producer side for now.
-        value(None, scoped_name),
-    ))(input)
-}
-
-/// Parse sequence<T> or sequence<T, N>
-fn sequence_type(input: &str) -> IResult<&str, TypeExpr> {
-    map(
-        tuple((
-            tag("sequence"),
-            ws,
-            char('<'),
-            ws,
-            type_expr_inner,
-            opt(preceded(tuple((ws, char(','), ws)), sequence_bound)),
-            ws,
-            char('>'),
-        )),
-        |(_, _, _, _, elem, max_len, _, _)| TypeExpr::Sequence {
-            elem: Box::new(elem),
-            max_len: max_len.flatten(),
+    if input.is_empty() {
+        return Err(format!("unclosed struct declaration at line {struct_line}"));
+    }
+    let (input, _) = expect(input, "}")?;
+    let (input, _) = expect(input, ";")?;
+    let mut full_name = modules.to_vec();
+    full_name.push(name.text.clone());
+    output.structs.insert(
+        full_name.clone(),
+        StructDef {
+            full_name,
+            fields,
+            consts,
         },
-    )(input)
+    );
+    Ok(input)
 }
 
-/// Parse string<N>
-fn bounded_string_type(input: &str) -> IResult<&str, TypeExpr> {
-    map(
-        tuple((tag("string"), ws, char('<'), ws, number, ws, char('>'))),
-        |(_, _, _, _, n, _, _)| TypeExpr::BoundedString(n),
-    )(input)
+fn parse_enum<'a>(
+    input: Tokens<'a>,
+    modules: &[String],
+    output: &mut ParsedSection,
+    _declaration_annotations: Vec<Annotation>,
+) -> Result<Tokens<'a>, String> {
+    // Grammar (44), (57), (58): enum declaration and comma-separated enumerators.
+    // `@bit_bound` is accepted as an annotation but intentionally ignored: the
+    // decoder AST and CDR decoder currently model every enum as 32-bit.
+    let (input, _) = expect(input, "enum")?;
+    let (mut input, name) = identifier(input)?;
+    let (rest, _) = expect(input, "{")?;
+    input = rest;
+    let mut variants = Vec::new();
+    let mut next_value = 0_i64;
+    let mut needs_variant = true;
+    while !input.is_empty() && !input[0].is("}") {
+        if input[0].is(",") {
+            if needs_variant {
+                return Err(error_at(&input[0], "expected enumerator before `,`"));
+            }
+            needs_variant = true;
+            input = &input[1..];
+            continue;
+        }
+        if !needs_variant {
+            return Err(error_at(
+                &input[0],
+                "unexpected trailing characters in enum variant (expected `,`)",
+            ));
+        }
+        let (rest, annotations) = parse_annotations(input)?;
+        let (rest, enumerator) = identifier(rest)?;
+        let explicit = annotations
+            .iter()
+            .rev()
+            .find(|annotation| annotation.name == "value")
+            .map(|annotation| parse_enum_value(&annotation.argument));
+        let value = match explicit.transpose()? {
+            Some(value) => value,
+            None => next_value,
+        };
+        if !(i64::from(i32::MIN)..=i64::from(u32::MAX)).contains(&value) {
+            return Err(error_at(
+                enumerator,
+                "enum value is outside the 32-bit range of an enum",
+            ));
+        }
+        next_value = value
+            .checked_add(1)
+            .ok_or_else(|| error_at(enumerator, "enum value overflow"))?;
+        variants.push(EnumVariant::new(enumerator.text.clone(), value));
+        input = rest;
+        needs_variant = false;
+    }
+    if variants.is_empty() {
+        return Err(error_at(
+            name,
+            "enum declaration must contain an enumerator",
+        ));
+    }
+    if needs_variant {
+        return Err(input.first().map_or_else(
+            || "unclosed enum declaration".to_string(),
+            |token| error_at(token, "trailing `,` in enum declaration"),
+        ));
+    }
+    let (input, _) = expect(input, "}")?;
+    let (input, _) = expect(input, ";")?;
+    let mut full_name = modules.to_vec();
+    full_name.push(name.text.clone());
+    output.enums.insert(
+        full_name.clone(),
+        EnumDef {
+            full_name,
+            variants,
+        },
+    );
+    Ok(input)
 }
 
-/// Parse wstring<N>
-fn bounded_wstring_type(input: &str) -> IResult<&str, TypeExpr> {
-    map(
-        tuple((tag("wstring"), ws, char('<'), ws, number, ws, char('>'))),
-        |(_, _, _, _, n, _, _)| TypeExpr::BoundedWString(n),
-    )(input)
-}
-
-/// Parse any type expression (internal, does not consume leading whitespace)
-fn type_expr_inner(input: &str) -> IResult<&str, TypeExpr> {
-    alt((
-        sequence_type,
-        bounded_string_type,
-        bounded_wstring_type,
-        map(primitive_type, TypeExpr::Primitive),
-        map(scoped_name, TypeExpr::Scoped),
-    ))(input)
-}
-
-/// Parse field array notation: name[N]
-fn field_array_notation(input: &str) -> IResult<&str, (&str, Option<usize>)> {
-    alt((
-        map(
-            pair(identifier, tuple((char('['), ws, number, ws, char(']')))),
-            |(name, (_, _, size, _, _))| (name, Some(size)),
-        ),
-        map(identifier, |name| (name, None)),
-    ))(input)
-}
-
-/// Parse a field declaration (without semicolon): type_expr name or type_expr name[N]
-fn field_decl(input: &str) -> IResult<&str, FieldDef> {
-    map(
-        tuple((type_expr_inner, ws1, field_array_notation)),
-        |(ty, _, (name, fixed_len))| FieldDef {
-            name: name.to_string(),
+fn parse_member<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, FieldDef), String> {
+    // Grammar (47), (67), (68): a member has a type and one declarator. The public
+    // AST stores one field per declaration, so multiple declarators are unsupported.
+    let start = input
+        .first()
+        .ok_or_else(|| "unexpected end of input in struct member".to_string())?;
+    let (input, ty) = parse_type(input)?;
+    let (input, name) = identifier(input)?;
+    let (input, fixed_len) = parse_fixed_array(input)?;
+    if input.first().is_some_and(|token| token.is("[")) {
+        return Err(error_at(
+            &input[0],
+            "unsupported multi-dimensional fixed array declaration",
+        ));
+    }
+    if input.first().is_some_and(|token| token.is(",")) {
+        return Err(error_at(
+            &input[0],
+            "unsupported multiple field declarators",
+        ));
+    }
+    let (input, _) =
+        expect(input, ";").map_err(|_| error_at(start, "field declaration must end with `;`"))?;
+    Ok((
+        input,
+        FieldDef {
+            name: name.text.clone(),
             ty,
             fixed_len,
         },
-    )(input)
+    ))
 }
 
-/// Parse a const value (everything after '=')
-fn const_value(input: &str) -> IResult<&str, &str> {
-    map(take_while(|c: char| c != ';'), str::trim)(input)
-}
-
-/// Parse a const declaration (without "const " prefix and semicolon): type name = value
-fn const_decl(input: &str) -> IResult<&str, ConstDef> {
-    map(
-        tuple((
-            type_expr_inner,
-            ws1,
-            identifier,
-            ws,
-            char('='),
-            ws,
-            const_value,
-        )),
-        |(ty, _, name, _, _, _, value)| ConstDef {
-            ty,
-            name: name.to_string(),
-            value: value.to_string(),
-        },
-    )(input)
-}
-
-/// Parse enum variant: `VARIANT`.
-///
-/// ROS 2 IDL enumerators are bare identifiers; explicit values are written with the
-/// `@value` annotation. Anything trailing the identifier (such as the non-IDL
-/// `VARIANT = 1` form) is left unconsumed and ignored.
-fn enum_variant(input: &str) -> IResult<&str, Option<&str>> {
-    let trimmed = input.trim().trim_end_matches(',');
-    if trimmed.is_empty() {
-        return Ok((input, None));
-    }
-
-    map(identifier, Some)(trimmed)
-}
-
-fn parse_enum_variant(line: &str) -> std::result::Result<Option<String>, Ros2Error> {
-    match enum_variant(line) {
-        Ok((_, variant)) => Ok(variant.map(ToString::to_string)),
-        Err(e) => Err(format!("Failed to parse enum variant '{line}': {e}").into()),
-    }
-}
-
-/// Split the annotations at the start of `line`, returning the `@value` argument (if
-/// any) together with the rest of the line.
-///
-/// Returns `None` when an annotation's parentheses are not closed on this line, which
-/// leaves the multi-line annotation skipping in charge.
-fn split_leading_annotations(mut line: &str) -> Option<(Option<&str>, &str)> {
-    let mut value = None;
-
-    while let Some(rest) = line.strip_prefix('@') {
-        let name_len = rest
-            .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
-            .unwrap_or(rest.len());
-        let (name, rest) = rest.split_at(name_len);
-        let rest = rest.trim_start();
-
-        let Some(args_body) = rest.strip_prefix('(') else {
-            line = rest;
-            continue;
-        };
-        let end = find_annotation_args_end(args_body)?;
-        if name == "value" {
-            value = Some(annotation_value_arg(&args_body[..end]));
+fn parse_const<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, ConstDef), String> {
+    // Grammar (5), (6): constant declaration and constant type. Grammar (7)--(16)
+    // define expression precedence; values are retained verbatim because the AST
+    // exposes `ConstDef::value` and CDR decoding never evaluates constants.
+    let (input, _) = expect(input, "const")?;
+    let (input, ty) = parse_type(input)?;
+    let (input, name) = identifier(input)?;
+    let (input, _) = expect(input, "=")?;
+    let start = input
+        .first()
+        .ok_or_else(|| "unexpected end of input in const expression".to_string())?;
+    let mut index = 0;
+    let mut parentheses = 0_usize;
+    let mut first_open_parenthesis = None;
+    while let Some(token) = input.get(index) {
+        if token.is(";") && parentheses == 0 {
+            break;
         }
-        line = args_body[end + 1..].trim_start();
-    }
-
-    Some((value, line))
-}
-
-/// Byte offset of the `)` closing an annotation argument list, ignoring parentheses
-/// inside string literals. `None` when the list is not closed within `body`.
-fn find_annotation_args_end(body: &str) -> Option<usize> {
-    let mut in_str = false;
-    let mut escaped = false;
-    let mut depth = 0usize;
-    for (idx, ch) in body.char_indices() {
-        if in_str {
-            if escaped {
-                escaped = false;
-                continue;
+        match token.text.as_str() {
+            "(" => {
+                parentheses += 1;
+                first_open_parenthesis.get_or_insert(token);
             }
-            match ch {
-                '\\' => escaped = true,
-                '"' => in_str = false,
-                _ => {}
+            ")" => {
+                parentheses = parentheses
+                    .checked_sub(1)
+                    .ok_or_else(|| error_at(token, "unmatched `)`"))?
             }
-            continue;
-        }
-        match ch {
-            '"' => in_str = true,
-            '(' => depth += 1,
-            ')' if depth == 0 => return Some(idx),
-            ')' => depth -= 1,
             _ => {}
         }
+        index += 1;
     }
-    None
+    if input.get(index).is_none() {
+        if let Some(open) = first_open_parenthesis {
+            return Err(error_at(open, "unclosed `(` in const expression"));
+        }
+        return Err(error_at(start, "const declaration must end with `;`"));
+    }
+    if index == 0 {
+        return Err(error_at(start, "expected const expression"));
+    }
+    // Comments were discarded by the lexer, so reconstruct from token text instead
+    // of slicing the source span, whose gaps may still contain comments.
+    let value = format_const_value(&input[..index]);
+    Ok((
+        &input[index + 1..],
+        ConstDef {
+            ty,
+            name: name.text.clone(),
+            value,
+        },
+    ))
 }
 
-/// Extract the argument of `@value`, accepting both `@value(1)` and `@value(value = 1)`.
-fn annotation_value_arg(args: &str) -> &str {
-    let args = args.trim();
-    args.strip_prefix("value")
-        .map(str::trim_start)
-        .and_then(|rest| rest.strip_prefix('='))
-        .map(str::trim)
-        .unwrap_or(args)
+/// Reconstruct a comment-free expression, retaining whitespace only where its
+/// absence in the original source would merge two token spellings.
+fn format_const_value(tokens: &[Token]) -> String {
+    let mut value = String::new();
+    let mut previous: Option<&Token> = None;
+    for token in tokens {
+        if !value.is_empty() && previous.is_some_and(|previous| previous.end != token.start) {
+            value.push(' ');
+        }
+        value.push_str(&token.text);
+        previous = Some(token);
+    }
+    value
 }
 
-/// Parse an enumerator value, which has to fit in the 32 bits an enum is serialized
-/// with, either as a signed or as an unsigned value.
-fn parse_enum_value(value: &str) -> std::result::Result<i64, Ros2Error> {
+fn parse_type<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, TypeExpr), String> {
+    // Grammar (21)--(23): type specifiers, simple types, and base types.
+    let Some(first) = input.first() else {
+        return Err("unexpected end of input while parsing type".to_string());
+    };
+    if first.is("long") && input.get(1).is_some_and(|token| token.is("double")) {
+        return Err(error_at(first, "unsupported IDL type `long double`"));
+    }
+    if first.is("sequence") {
+        // Grammar (38), (39): `sequence<type_spec[, positive_int_const]>`.
+        let (input, _) = expect(input, "sequence")?;
+        let (input, _) = expect(input, "<")?;
+        let (input, elem) = parse_type(input)?;
+        let (input, max_len) = if input.first().is_some_and(|token| token.is(",")) {
+            let (input, _) = expect(input, ",")?;
+            parse_bound(input)?
+        } else {
+            (input, None)
+        };
+        let (input, _) = expect(input, ">")?;
+        return Ok((
+            input,
+            TypeExpr::Sequence {
+                elem: Box::new(elem),
+                max_len,
+            },
+        ));
+    }
+    if first.is("string") || first.is("wstring") {
+        // Grammar (38), (40), (41): bounded and unbounded string templates.
+        let wide = first.is("wstring");
+        let mut input = &input[1..];
+        if input.first().is_some_and(|token| token.is("<")) {
+            input = &input[1..];
+            let (rest, bound) = parse_positive_integer(input)?;
+            let (rest, _) = expect(rest, ">")?;
+            return Ok((
+                rest,
+                if wide {
+                    TypeExpr::BoundedWString(bound)
+                } else {
+                    TypeExpr::BoundedString(bound)
+                },
+            ));
+        }
+        return Ok((
+            input,
+            TypeExpr::Primitive(if wide {
+                PrimitiveType::WString
+            } else {
+                PrimitiveType::String
+            }),
+        ));
+    }
+    if let Some((consumed, primitive)) = primitive(input) {
+        return Ok((&input[consumed..], TypeExpr::Primitive(primitive)));
+    }
+    let (input, scoped) = parse_scoped_name(input)?;
+    Ok((input, TypeExpr::Scoped(scoped)))
+}
+
+fn primitive(input: Tokens<'_>) -> Option<(usize, PrimitiveType)> {
+    // Grammar (24)--(37), plus ROS 2's int8/16/32/64 aliases (206)--(215).
+    let word = input.first()?.text.as_str();
+    let second = input.get(1).map(|token| token.text.as_str());
+    let third = input.get(2).map(|token| token.text.as_str());
+    match (word, second, third) {
+        ("unsigned", Some("long"), Some("long")) => Some((3, PrimitiveType::U64)),
+        ("long", Some("long"), _) => Some((2, PrimitiveType::I64)),
+        ("unsigned", Some("short"), _) => Some((2, PrimitiveType::U16)),
+        ("unsigned", Some("long"), _) => Some((2, PrimitiveType::U32)),
+        ("boolean" | "bool", _, _) => Some((1, PrimitiveType::Bool)),
+        ("int8", _, _) => Some((1, PrimitiveType::I8)),
+        ("int16" | "short", _, _) => Some((1, PrimitiveType::I16)),
+        ("int32" | "long", _, _) => Some((1, PrimitiveType::I32)),
+        ("int64", _, _) => Some((1, PrimitiveType::I64)),
+        ("uint8", _, _) => Some((1, PrimitiveType::U8)),
+        ("uint16", _, _) => Some((1, PrimitiveType::U16)),
+        ("uint32", _, _) => Some((1, PrimitiveType::U32)),
+        ("uint64", _, _) => Some((1, PrimitiveType::U64)),
+        ("float32" | "float", _, _) => Some((1, PrimitiveType::F32)),
+        ("float64" | "double", _, _) => Some((1, PrimitiveType::F64)),
+        ("octet", _, _) => Some((1, PrimitiveType::Octet)),
+        _ => None,
+    }
+}
+
+fn parse_fixed_array<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, Option<usize>), String> {
+    // Grammar (59), (60): array declarator and fixed-array size.
+    if !input.first().is_some_and(|token| token.is("[")) {
+        return Ok((input, None));
+    }
+    let (input, _) = expect(input, "[")?;
+    let (input, length) = parse_positive_integer(input)?;
+    let (input, _) = expect(input, "]")?;
+    Ok((input, Some(length)))
+}
+
+fn parse_bound<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, Option<usize>), String> {
+    // Grammar (19) `positive_int_const`; named constants cannot be evaluated by the
+    // decoder AST, so their bound remains unknown.
+    if input.first().is_some_and(|token| {
+        token
+            .text
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_digit())
+    }) {
+        return parse_positive_integer(input).map(|(rest, value)| (rest, Some(value)));
+    }
+    // Positive named constants are accepted, but the AST cannot enforce their bound.
+    parse_scoped_name(input).map(|(rest, _)| (rest, None))
+}
+
+fn parse_positive_integer<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, usize), String> {
+    let token = input
+        .first()
+        .ok_or_else(|| "expected positive integer".to_string())?;
+    let value = match token
+        .text
+        .strip_prefix("0x")
+        .or(token.text.strip_prefix("0X"))
+    {
+        Some(hex) => usize::from_str_radix(hex, 16),
+        None => token.text.parse(),
+    }
+    .map_err(|_| error_at(token, "expected positive integer"))?;
+    if value == 0 {
+        return Err(error_at(token, "expected positive integer"));
+    }
+    Ok((&input[1..], value))
+}
+
+#[derive(Debug)]
+struct Annotation {
+    name: String,
+    argument: String,
+}
+
+fn parse_annotations<'a>(mut input: Tokens<'a>) -> Result<(Tokens<'a>, Vec<Annotation>), String> {
+    // Grammar (225): zero or more annotation applications before a declaration.
+    let mut annotations = Vec::new();
+    while input.first().is_some_and(|token| token.is("@")) {
+        let (rest, annotation) = parse_annotation(input)?;
+        annotations.push(annotation);
+        input = rest;
+    }
+    Ok((input, annotations))
+}
+
+fn parse_annotation<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, Annotation), String> {
+    // Grammar (225)--(227): `@scoped_name` and optional positional/named parameters.
+    let (input, _) = expect(input, "@")?;
+    let (mut input, name) = parse_scoped_name(input)?;
+    let mut argument = String::new();
+    if input.first().is_some_and(|token| token.is("(")) {
+        let start = &input[0];
+        input = &input[1..];
+        let mut depth = 1_usize;
+        let mut index = 0;
+        while let Some(token) = input.get(index) {
+            match token.text.as_str() {
+                "(" => depth += 1,
+                ")" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        let close = input
+            .get(index)
+            .ok_or_else(|| error_at(start, "unclosed annotation"))?;
+        argument = format_const_value(&input[..index]);
+        input = &input[index + 1..];
+        let _ = close;
+    }
+    Ok((
+        input,
+        Annotation {
+            name: name.join("::"),
+            argument,
+        },
+    ))
+}
+
+fn parse_scoped_name<'a>(input: Tokens<'a>) -> Result<(Tokens<'a>, Vec<String>), String> {
+    // Grammar (4): optional leading `::`, then identifiers joined by `::`.
+    let input = if input.first().is_some_and(|token| token.is("::")) {
+        &input[1..]
+    } else {
+        input
+    };
+    let (mut input, first) = identifier(input)?;
+    let mut names = vec![first.text.clone()];
+    while input.first().is_some_and(|token| token.is("::")) {
+        input = &input[1..];
+        let (rest, name) = identifier(input)?;
+        names.push(name.text.clone());
+        input = rest;
+    }
+    Ok((input, names))
+}
+
+fn parse_include(input: Tokens<'_>) -> Result<Tokens<'_>, String> {
+    // 7.3 preprocessing: grammar `include_directive` accepts quoted and angle paths.
+    let (input, _) = expect(input, "#")?;
+    let (input, include) = identifier(input)?;
+    if include.text != "include" {
+        return Err(error_at(include, "expected `include` after `#`"));
+    }
+    let Some(first) = input.first() else {
+        return Err("incomplete #include directive".to_string());
+    };
+    if first.is("<") {
+        let mut index = 1;
+        while let Some(token) = input.get(index) {
+            if token.is(">") {
+                return Ok(&input[index + 1..]);
+            }
+            index += 1;
+        }
+        Err(error_at(first, "unclosed #include path"))
+    } else if first.text.starts_with('"') {
+        Ok(&input[1..])
+    } else {
+        Err(error_at(first, "expected #include path"))
+    }
+}
+
+fn expect<'a>(input: Tokens<'a>, wanted: &'static str) -> Result<(Tokens<'a>, &'a Token), String> {
+    match input.split_first() {
+        Some((token, rest)) if token.is(wanted) => Ok((rest, token)),
+        Some((token, _)) => Err(error_at(token, &format!("expected `{wanted}`"))),
+        None => Err(format!("expected `{wanted}` at end of input")),
+    }
+}
+
+fn identifier(input: Tokens<'_>) -> Result<(Tokens<'_>, &Token), String> {
+    let Some((token, rest)) = input.split_first() else {
+        return Err("expected identifier at end of input".to_string());
+    };
+    if token
+        .text
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        && token
+            .text
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        Ok((rest, token))
+    } else {
+        Err(error_at(token, "expected identifier"))
+    }
+}
+
+fn error_at(token: &Token, message: &str) -> String {
+    format!("parse error at line {}: {message}", token.line)
+}
+
+fn parse_enum_value(value: &str) -> Result<i64, String> {
     let value = value.trim();
+    let value = value
+        .strip_prefix("value")
+        .and_then(|rest| rest.trim_start().strip_prefix('=').map(str::trim))
+        .unwrap_or(value);
     let (negative, digits) = match value.strip_prefix('-') {
-        Some(rest) => (true, rest.trim_start()),
+        Some(rest) => (true, rest.trim()),
         None => (false, value),
     };
-
     let magnitude = match digits
         .strip_prefix("0x")
         .or_else(|| digits.strip_prefix("0X"))
     {
         Some(hex) => i64::from_str_radix(hex, 16),
-        None => digits.parse::<i64>(),
+        None => digits.parse(),
     }
-    .map_err(|e| Ros2Error(format!("invalid enum value '{value}': {e}")))?;
-
+    .map_err(|error| format!("invalid enum value `{value}`: {error}"))?;
     let number = if negative { -magnitude } else { magnitude };
     if !(i64::from(i32::MIN)..=i64::from(u32::MAX)).contains(&number) {
-        return Err(Ros2Error(format!(
-            "invalid enum value '{value}': outside the 32-bit range of an enum"
-        )));
+        return Err(format!(
+            "invalid enum value `{value}`: outside the 32-bit range of an enum"
+        ));
     }
     Ok(number)
-}
-
-fn paren_counts_outside_strings(s: &str, in_str: &mut bool, escaped: &mut bool) -> (usize, usize) {
-    let mut open = 0usize;
-    let mut close = 0usize;
-    for ch in s.chars() {
-        if *in_str {
-            if *escaped {
-                *escaped = false;
-                continue;
-            }
-            match ch {
-                '\\' => *escaped = true,
-                '"' => *in_str = false,
-                _ => {}
-            }
-            continue;
-        }
-        match ch {
-            '"' => *in_str = true,
-            '(' => open += 1,
-            ')' => close += 1,
-            _ => {}
-        }
-    }
-    (open, close)
 }

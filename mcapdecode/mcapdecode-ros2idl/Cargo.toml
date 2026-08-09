@@ -13,4 +13,3 @@ description = "ROS 2 IDL schema decoder for mcapdecode CDR payloads."
 mcapdecode-core.workspace = true
 mcapdecode-ros2-common.workspace = true
 thiserror.workspace = true
-nom = "7.1.3"

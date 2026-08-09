@@ -8,12 +8,12 @@
 //! ```text
 //! schema bytes (UTF-8 IDL bundle)
 //!   └─ SchemaBundle::parse       – split sections at `====` separators
-//!       └─ parse_idl_section     – nom-based IDL parser → ParsedSection
+//!       └─ parse_idl_section     – recursive IDL parser → ParsedSection
 //!           └─ resolve_schema    – type-name resolution → ResolvedSchema
 //!               └─ decode_cdr_to_value  – CDR bytes → Value
 //! ```
 
-mod lex;
+mod idl_lexer;
 mod parser;
 mod resolver;
 mod schema_bundle;
