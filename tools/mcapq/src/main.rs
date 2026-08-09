@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, error::ErrorKind};
-use commands::info::InfoArgs;
+use commands::{info::InfoArgs, schema::SchemaArgs};
 
 mod commands;
 
@@ -16,6 +16,8 @@ struct Cli {
 enum Commands {
     /// List topics and their schema metadata as JSON.
     Info(InfoArgs),
+    /// Describe a topic's payload schema.
+    Schema(SchemaArgs),
 }
 
 fn main() -> ExitCode {
@@ -36,6 +38,7 @@ fn main() -> ExitCode {
 
     let result = match cli.command {
         Commands::Info(args) => args.run(),
+        Commands::Schema(args) => args.run(),
     };
 
     match result {
