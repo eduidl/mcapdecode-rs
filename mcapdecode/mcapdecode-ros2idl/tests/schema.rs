@@ -1,5 +1,5 @@
 use mcapdecode_core::EnumVariant;
-use mcapdecode_ros2_common::{PrimitiveType, ResolvedType};
+use mcapdecode_ros2_common::{PrimitiveType, ResolvedType, TypeExpr};
 use mcapdecode_ros2idl::{SchemaBundle, parse_idl_section, resolve_schema};
 
 // ── existing tests ─────────────────────────────────────────────────────────────
@@ -260,6 +260,45 @@ module ex {
     );
 }
 
+/// Consecutive `>` characters close nested templates, rather than forming the
+/// constant-expression shift operator token.
+#[test]
+fn parse_idl_section_supports_adjacent_nested_template_closers() {
+    let parsed = parse_idl_section(
+        r#"
+module ex { module msg {
+  struct Msg {
+    sequence<string<5>> names;
+    sequence<sequence<uint32>> nested;
+  };
+}; };
+"#,
+    )
+    .expect("nested template terminators should parse");
+
+    let message = parsed
+        .structs
+        .get(&vec!["ex".into(), "msg".into(), "Msg".into()])
+        .expect("Msg should exist");
+    assert_eq!(
+        message.fields[0].ty,
+        TypeExpr::Sequence {
+            elem: Box::new(TypeExpr::BoundedString(5)),
+            max_len: None,
+        }
+    );
+    assert_eq!(
+        message.fields[1].ty,
+        TypeExpr::Sequence {
+            elem: Box::new(TypeExpr::Sequence {
+                elem: Box::new(TypeExpr::Primitive(PrimitiveType::U32)),
+                max_len: None,
+            }),
+            max_len: None,
+        }
+    );
+}
+
 /// `builtin_interfaces::msg::Duration` is injected and resolves like `Time`.
 #[test]
 fn resolve_schema_builtin_duration_is_injected() {
@@ -370,7 +409,7 @@ module ex {
       @value(0x0c)
       C,
       D,
-      @value(value = -1) E,
+      @value(value = -1) E
     };
     struct Msg {
       E value;
@@ -405,7 +444,7 @@ module ex {
     enum E {
       @verbatim (language="comment", text="a (parenthesized) note") A,
       @value(9) @verbatim (language="comment", text="b") B,
-      C,
+      C
     };
     struct Msg {
       E value;
@@ -453,6 +492,27 @@ module ex {
     );
 }
 
+/// The implicit value after the largest serializable enum value must also be rejected.
+#[test]
+fn resolve_schema_rejects_implicit_enum_value_outside_32_bits() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex {
+  module msg {
+    enum E {
+      @value(4294967295) LAST,
+      OVERFLOW
+    };
+    struct Msg { E value; };
+  };
+};
+"#;
+
+    let error = resolve_schema("ex/msg/Msg", schema).expect_err("implicit overflow must fail");
+    assert!(format!("{error:#}").contains("32-bit"));
+}
+
 /// An annotation whose argument list spans several lines still binds to its enumerator.
 #[test]
 fn resolve_schema_handles_multiline_annotations_on_enumerators() {
@@ -466,7 +526,7 @@ module ex {
                  text="a note") A,
       @value(
         9) B,
-      C,
+      C
     };
     struct Msg {
       E value;
@@ -487,10 +547,10 @@ module ex {
     );
 }
 
-/// `VARIANT = 1` is not ROS 2 IDL syntax: the initializer is ignored rather than
-/// honoured, and the enumerator keeps its positional value.
+/// `VARIANT = 1` is not ROS 2 IDL syntax and is rejected instead of being silently
+/// interpreted as an uninitialized enumerator.
 #[test]
-fn resolve_schema_ignores_non_idl_enum_initializers() {
+fn resolve_schema_rejects_non_idl_enum_initializers() {
     let schema = r#"
 ================================================================================
 IDL: ex/msg/Msg
@@ -498,7 +558,7 @@ module ex {
   module msg {
     enum E {
       A = 4,
-      B,
+      B
     };
     struct Msg {
       E value;
@@ -507,12 +567,152 @@ module ex {
 };
 "#;
 
-    let resolved = resolve_schema("ex/msg/Msg", schema).expect("resolve should succeed");
+    let err = resolve_schema("ex/msg/Msg", schema).expect_err("initializer must be rejected");
+    assert!(format!("{err:#}").contains("unexpected trailing characters"));
+}
+
+#[test]
+fn resolve_schema_accepts_single_line_idl_and_comma_separated_enumerators() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex { module msg { enum E { @value(4) A, B, @value(9) C };
+struct Msg { E value; uint32 count; }; }; };
+"#;
+
+    let resolved = resolve_schema("ex/msg/Msg", schema).expect("single-line IDL should parse");
     let key = vec!["ex".to_string(), "msg".to_string(), "E".to_string()];
     assert_eq!(
         resolved.enums.get(&key),
-        Some(&vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)])
+        Some(&vec![
+            EnumVariant::new("A", 4),
+            EnumVariant::new("B", 5),
+            EnumVariant::new("C", 9),
+        ])
     );
+}
+
+#[test]
+fn resolve_schema_rejects_trailing_enum_comma() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex { module msg { enum E { A, }; struct Msg { E value; }; }; };
+"#;
+
+    let err = resolve_schema("ex/msg/Msg", schema).expect_err("trailing comma must be rejected");
+    assert!(format!("{err:#}").contains("trailing `,`"));
+}
+
+#[test]
+fn resolve_schema_rejects_enum_variants_without_comma() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex { module msg { enum E { A B }; struct Msg { E value; }; }; };
+"#;
+
+    let err = resolve_schema("ex/msg/Msg", schema).expect_err("missing comma must be rejected");
+    assert!(format!("{err:#}").contains("unexpected trailing characters"));
+}
+
+#[test]
+fn parse_idl_section_accepts_comparison_and_shift_operators_in_const_values() {
+    let parsed = parse_idl_section(
+        r#"
+module ex { module msg {
+  struct Msg {
+    const long FLAG = 1 << 3;
+    const boolean B = 1 > 0;
+    const long SHIFT_RIGHT = 8 >> 1;
+    uint32 value;
+  };
+}; };
+"#,
+    )
+    .expect("constant expressions with angle operators should parse");
+
+    let message = parsed
+        .structs
+        .get(&vec!["ex".into(), "msg".into(), "Msg".into()])
+        .expect("Msg should exist");
+    assert_eq!(message.consts[2].value, "8 >> 1");
+
+    assert!(
+        parsed
+            .structs
+            .get(&vec!["ex".into(), "msg".into(), "Msg".into()])
+            .is_some_and(|msg| msg.fields.len() == 1)
+    );
+}
+
+#[test]
+fn parse_idl_section_removes_comments_from_const_values() {
+    let parsed = parse_idl_section(
+        "module ex { module msg { struct Msg { const long C = 1 /* two */ + 2; uint32 value; }; }; };",
+    )
+    .expect("comments in a constant expression should be ignored");
+
+    let message = parsed
+        .structs
+        .get(&vec!["ex".into(), "msg".into(), "Msg".into()])
+        .expect("Msg should exist");
+    assert_eq!(message.consts[0].value, "1 + 2");
+}
+
+#[test]
+fn parse_idl_section_preserves_adjacent_const_expression_tokens() {
+    let parsed = parse_idl_section(
+        "module ex { module msg { struct Msg { const long NEGATIVE=-1; const float EXPONENT=1.0e-3; uint32 value; }; }; };",
+    )
+    .expect("adjacent constant-expression tokens should parse");
+
+    let message = parsed
+        .structs
+        .get(&vec!["ex".into(), "msg".into(), "Msg".into()])
+        .expect("Msg should exist");
+    assert_eq!(message.consts[0].value, "-1");
+    assert_eq!(message.consts[1].value, "1.0e-3");
+}
+
+#[test]
+fn parse_idl_section_ignores_comments_in_value_annotations() {
+    let parsed = parse_idl_section(
+        "module ex { module msg { enum E { @value(/* explicit */ 7) A, B }; }; };",
+    )
+    .expect("comments in @value should be ignored");
+
+    assert_eq!(
+        parsed.enums[&vec!["ex".into(), "msg".into(), "E".into()]].variants,
+        vec![EnumVariant::new("A", 7), EnumVariant::new("B", 8)]
+    );
+}
+
+#[test]
+fn parse_idl_section_rejects_unclosed_angle_include_at_end_of_input() {
+    let error = parse_idl_section("#include <")
+        .expect_err("an unterminated angle include should not loop forever");
+
+    assert!(format!("{error:#}").contains("unclosed #include path"));
+}
+
+#[test]
+fn parse_idl_section_rejects_non_ascii_source_without_panicking() {
+    let error =
+        parse_idl_section("\u{feff}module ex { module msg { struct Msg { uint32 value; }; }; };")
+            .expect_err("a BOM is not an IDL token");
+
+    assert!(format!("{error:#}").contains("non-ASCII character"));
+}
+
+#[test]
+fn parse_idl_section_reports_the_actual_line_after_blank_lines() {
+    let err = parse_idl_section(
+        "module ex {\nmodule msg {\nstruct Msg {\n\n\nuint32 value\n};\n};\n};\n",
+    )
+    .expect_err("a field without a semicolon must fail");
+
+    assert!(format!("{err:#}").contains("line 6"));
 }
 
 #[test]
@@ -790,4 +990,114 @@ module ex {
         root.fields[0].ty,
         ResolvedType::Sequence { max_len: None, .. }
     ));
+}
+
+#[test]
+fn resolve_schema_accepts_leading_scope_separator() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Sample
+module ex { module msg {
+struct Sample {
+  ::builtin_interfaces::msg::Time stamp;
+};
+}; };
+"#;
+
+    let resolved = resolve_schema("ex/msg/Sample", schema).expect("schema should resolve");
+    let sample = resolved
+        .structs
+        .get(&vec!["ex".into(), "msg".into(), "Sample".into()])
+        .expect("Sample should exist");
+    assert!(matches!(
+        &sample.fields[0].ty,
+        ResolvedType::Struct(name)
+            if name == &vec![
+                "builtin_interfaces".to_string(),
+                "msg".to_string(),
+                "Time".to_string(),
+            ]
+    ));
+}
+
+#[test]
+fn parse_idl_section_accepts_hexadecimal_positive_bounds() {
+    let parsed = parse_idl_section(
+        "module ex { module msg { struct Sample { string<0x40> name; sequence<uint32, 0x20> values; uint32 ids[0x10]; }; }; };",
+    )
+    .expect("IDL should parse");
+    let sample = parsed
+        .structs
+        .get(&vec!["ex".into(), "msg".into(), "Sample".into()])
+        .expect("Sample should exist");
+    assert!(matches!(&sample.fields[0].ty, TypeExpr::BoundedString(64)));
+    assert!(matches!(
+        &sample.fields[1].ty,
+        TypeExpr::Sequence {
+            max_len: Some(32),
+            ..
+        }
+    ));
+    assert_eq!(sample.fields[2].fixed_len, Some(16));
+}
+
+#[test]
+fn parse_idl_section_rejects_zero_string_bound() {
+    let err =
+        parse_idl_section("module ex { module msg { struct Sample { string<0> name; }; }; };")
+            .expect_err("zero string bound must be rejected");
+    assert!(format!("{err:#}").contains("expected positive integer"));
+}
+
+#[test]
+fn parse_idl_section_rejects_zero_fixed_array_bound() {
+    let err =
+        parse_idl_section("module ex { module msg { struct Sample { uint32 values[0]; }; }; };")
+            .expect_err("zero fixed array length must be rejected");
+    assert!(format!("{err:#}").contains("expected positive integer"));
+}
+
+#[test]
+fn parse_idl_section_reports_unclosed_const_parenthesis_at_its_opening_line() {
+    let err = parse_idl_section(
+        "module ex { module msg {\nconst uint32 BAD = (1 + 2;\nstruct Sample { uint32 value; };\n}; };",
+    )
+    .expect_err("unclosed const parenthesis must be rejected");
+    let message = format!("{err:#}");
+    assert!(message.contains("line 2"));
+    assert!(message.contains("unclosed `(` in const expression"));
+}
+
+#[test]
+fn parse_idl_section_ignores_annotations_before_struct_and_module_closers() {
+    parse_idl_section(
+        "module ex { module msg { struct Sample { @verbatim(\"end of struct\") }; @verbatim(\"end of module\") }; };",
+    )
+    .expect("trailing annotations before closers should be ignored");
+}
+
+#[test]
+fn parse_idl_section_reports_unsupported_multi_dimensional_arrays() {
+    let err =
+        parse_idl_section("module ex { module msg { struct Sample { uint32 values[3][3]; }; }; };")
+            .expect_err("multi-dimensional array must be rejected");
+    assert!(format!("{err:#}").contains("unsupported multi-dimensional fixed array"));
+}
+
+#[test]
+fn parse_idl_section_reports_unsupported_multiple_field_declarators() {
+    let err = parse_idl_section("module ex { module msg { struct Sample { uint32 a, b; }; }; };")
+        .expect_err("multiple declarators must be rejected");
+    assert!(format!("{err:#}").contains("unsupported multiple field declarators"));
+}
+
+#[test]
+fn parse_idl_section_rejects_invalid_unsigned_type_combinations() {
+    for idl in [
+        "module ex { module msg { struct Sample { unsigned value; }; }; };",
+        "module ex { module msg { struct Sample { unsigned char value; }; }; };",
+    ] {
+        let err = parse_idl_section(idl).expect_err("invalid unsigned type must be rejected");
+        assert!(format!("{err:#}").contains("unsupported IDL type starting with `unsigned`"),);
+    }
 }

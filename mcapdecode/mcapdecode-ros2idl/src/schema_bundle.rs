@@ -19,8 +19,6 @@
 
 use mcapdecode_ros2_common::Ros2Error;
 
-use crate::lex::{is_separator_line, split_qual};
-
 /// One IDL section extracted from a schema bundle.
 #[derive(Debug, Clone)]
 pub struct IdlSection {
@@ -110,4 +108,17 @@ fn parse_section(lines: &[String]) -> Result<IdlSection, Ros2Error> {
         idl_path: split_qual(path, "/"),
         body,
     })
+}
+
+fn is_separator_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty() && trimmed.chars().all(|character| character == '=')
+}
+
+fn split_qual(name: &str, separator: &str) -> Vec<String> {
+    name.split(separator)
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
