@@ -66,4 +66,5 @@ fn help_writes_help_to_stdout_and_exits_successfully() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Usage: mcapq <COMMAND>"));
     assert!(stdout.contains("info"));
+    assert!(stdout.contains("schema"));
 }
