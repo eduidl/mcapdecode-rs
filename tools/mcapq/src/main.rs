@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, error::ErrorKind};
 use commands::info::InfoArgs;
 
 mod commands;
@@ -22,6 +22,13 @@ fn main() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) {
+                error.print().expect("failed to write clap output");
+                return ExitCode::SUCCESS;
+            }
             emit_error("invalid_arguments", &error.to_string());
             return ExitCode::from(2);
         }
