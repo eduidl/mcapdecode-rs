@@ -152,7 +152,13 @@ impl<'a> Decoder<'a> {
                     .try_get_u32_le()
                     .map_err(|_| Ros2Error(format!("unexpected EOF at {path}")))?;
                 let s = match schema.enums.get(name) {
-                    Some(vars) if (raw as usize) < vars.len() => vars[raw as usize].clone(),
+                    Some(vars) => vars
+                        .iter()
+                        // Enums are serialized as 32 bits, so only the low 32 bits of the
+                        // declared value are on the wire (`@value(-1)` arrives as 0xFFFFFFFF).
+                        .find(|variant| variant.value as u32 == raw)
+                        .map(|variant| variant.name.clone())
+                        .unwrap_or_else(|| raw.to_string()),
                     _ => raw.to_string(),
                 };
                 Ok(Value::String(Arc::from(s)))

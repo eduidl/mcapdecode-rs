@@ -1,3 +1,4 @@
+use mcapdecode_core::EnumVariant;
 use mcapdecode_ros2_common::{PrimitiveType, ResolvedType};
 use mcapdecode_ros2idl::{SchemaBundle, parse_idl_section, resolve_schema};
 
@@ -176,7 +177,14 @@ module ex {
         .enums
         .get(&enum_key)
         .expect("enum should be in resolved schema");
-    assert_eq!(variants, &vec!["OK", "WARN", "ERROR"]);
+    assert_eq!(
+        variants,
+        &vec![
+            EnumVariant::new("OK", 0),
+            EnumVariant::new("WARN", 1),
+            EnumVariant::new("ERROR", 2),
+        ]
+    );
 
     // The field on the struct must resolve as Enum, not Struct.
     let msg = resolved
@@ -347,18 +355,22 @@ module ex {
     assert!(format!("{err:#}").contains("unclosed struct declaration"));
 }
 
+/// `@value` sets an enumerator's value; the following ones continue from it.
 #[test]
-fn resolve_schema_parses_enum_with_blank_lines_and_commas() {
+fn resolve_schema_preserves_explicit_and_implicit_enum_values() {
     let schema = r#"
 ================================================================================
 IDL: ex/msg/Msg
 module ex {
   module msg {
     enum E {
-      A,
+      @value(4) A,
 
-      B = 2,
-      C
+      B,
+      @value(0x0c)
+      C,
+      D,
+      @value(value = -1) E,
     };
     struct Msg {
       E value;
@@ -371,7 +383,135 @@ module ex {
     let key = vec!["ex".to_string(), "msg".to_string(), "E".to_string()];
     assert_eq!(
         resolved.enums.get(&key),
-        Some(&vec!["A".to_string(), "B".to_string(), "C".to_string()])
+        Some(&vec![
+            EnumVariant::new("A", 4),
+            EnumVariant::new("B", 5),
+            EnumVariant::new("C", 12),
+            EnumVariant::new("D", 13),
+            EnumVariant::new("E", -1),
+        ])
+    );
+}
+
+/// Annotations other than `@value` are still ignored, including ones whose arguments
+/// contain parentheses inside string literals.
+#[test]
+fn resolve_schema_ignores_other_annotations_on_enumerators() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex {
+  module msg {
+    enum E {
+      @verbatim (language="comment", text="a (parenthesized) note") A,
+      @value(9) @verbatim (language="comment", text="b") B,
+      C,
+    };
+    struct Msg {
+      E value;
+    };
+  };
+};
+"#;
+
+    let resolved = resolve_schema("ex/msg/Msg", schema).expect("resolve should succeed");
+    let key = vec!["ex".to_string(), "msg".to_string(), "E".to_string()];
+    assert_eq!(
+        resolved.enums.get(&key),
+        Some(&vec![
+            EnumVariant::new("A", 0),
+            EnumVariant::new("B", 9),
+            EnumVariant::new("C", 10),
+        ])
+    );
+}
+
+/// An enumerator value that does not fit in 32 bits is rejected rather than truncated
+/// to a value that would alias another variant on the wire.
+#[test]
+fn resolve_schema_rejects_enum_value_outside_32_bits() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex {
+  module msg {
+    enum E {
+      @value(4294967296) A,
+      B,
+    };
+    struct Msg {
+      E value;
+    };
+  };
+};
+"#;
+
+    let err = resolve_schema("ex/msg/Msg", schema).expect_err("should reject the value");
+    assert!(
+        format!("{err:#}").contains("32-bit"),
+        "unexpected error: {err:#}"
+    );
+}
+
+/// An annotation whose argument list spans several lines still binds to its enumerator.
+#[test]
+fn resolve_schema_handles_multiline_annotations_on_enumerators() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex {
+  module msg {
+    enum E {
+      @verbatim (language="comment",
+                 text="a note") A,
+      @value(
+        9) B,
+      C,
+    };
+    struct Msg {
+      E value;
+    };
+  };
+};
+"#;
+
+    let resolved = resolve_schema("ex/msg/Msg", schema).expect("resolve should succeed");
+    let key = vec!["ex".to_string(), "msg".to_string(), "E".to_string()];
+    assert_eq!(
+        resolved.enums.get(&key),
+        Some(&vec![
+            EnumVariant::new("A", 0),
+            EnumVariant::new("B", 9),
+            EnumVariant::new("C", 10),
+        ])
+    );
+}
+
+/// `VARIANT = 1` is not ROS 2 IDL syntax: the initializer is ignored rather than
+/// honoured, and the enumerator keeps its positional value.
+#[test]
+fn resolve_schema_ignores_non_idl_enum_initializers() {
+    let schema = r#"
+================================================================================
+IDL: ex/msg/Msg
+module ex {
+  module msg {
+    enum E {
+      A = 4,
+      B,
+    };
+    struct Msg {
+      E value;
+    };
+  };
+};
+"#;
+
+    let resolved = resolve_schema("ex/msg/Msg", schema).expect("resolve should succeed");
+    let key = vec!["ex".to_string(), "msg".to_string(), "E".to_string()];
+    assert_eq!(
+        resolved.enums.get(&key),
+        Some(&vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)])
     );
 }
 

@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use mcapdecode_core::EnumVariant;
+
 /// Scalar primitive types supported by ROS 2 IDL and .msg formats.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrimitiveType {
@@ -77,8 +79,8 @@ pub struct StructDef {
 pub struct EnumDef {
     /// Fully-qualified name segments.
     pub full_name: Vec<String>,
-    /// Variant names in declaration order.
-    pub variants: Vec<String>,
+    /// Named numeric values in declaration order.
+    pub variants: Vec<EnumVariant>,
 }
 
 /// All structs and enums extracted from one IDL section or .msg file.

@@ -22,6 +22,7 @@ pub enum DataTypeDef {
     F64,
     String,
     Bytes,
+    Enum(Vec<EnumVariant>),
     Struct(FieldDefs),
     List(Box<ElementDef>),
     Array(Box<ElementDef>, usize),
@@ -58,10 +59,31 @@ impl DataTypeDef {
             DataTypeDef::F64 => "f64",
             DataTypeDef::String => "string",
             DataTypeDef::Bytes => "bytes",
+            // TODO: Render enum variants once schema metadata has a display format.
+            DataTypeDef::Enum(_) => "string",
             DataTypeDef::Struct(_) => "struct",
             DataTypeDef::List(_) => "list",
             DataTypeDef::Array(_, _) => "array",
             DataTypeDef::Map { .. } => "map",
+        }
+    }
+}
+
+/// A named numeric value in an enum definition.
+///
+/// The numeric value is preserved from the source schema even though enum
+/// values continue to be displayed as strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumVariant {
+    pub name: String,
+    pub value: i64,
+}
+
+impl EnumVariant {
+    pub fn new(name: impl Into<String>, value: i64) -> Self {
+        Self {
+            name: name.into(),
+            value,
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mcapdecode_core::{DataTypeDef, Value};
+use mcapdecode_core::{DataTypeDef, EnumVariant, Value};
 use mcapdecode_ros2_common::{
     PrimitiveType, ResolvedField, ResolvedSchema, ResolvedStruct, ResolvedType,
     decode_cdr_to_value, resolved_schema_to_field_defs,
@@ -19,7 +19,7 @@ fn align(buf: &mut Vec<u8>, n: usize) {
 /// Build a one-struct schema with the given fields and enum map.
 fn make_schema(
     fields: Vec<ResolvedField>,
-    enums: HashMap<Vec<String>, Vec<String>>,
+    enums: HashMap<Vec<String>, Vec<EnumVariant>>,
 ) -> ResolvedSchema {
     let root = vec!["ex".to_string(), "msg".to_string(), "A".to_string()];
     let mut structs = HashMap::new();
@@ -115,7 +115,7 @@ fn fails_on_unbounded_sequence_length_larger_than_remaining_payload() {
 }
 
 #[test]
-fn decodes_enum_index_to_variant_name() {
+fn decodes_enum_numeric_value_to_variant_name() {
     let enum_name = vec!["ex".to_string(), "msg".to_string(), "State".to_string()];
     let schema = make_schema(
         vec![ResolvedField {
@@ -123,12 +123,15 @@ fn decodes_enum_index_to_variant_name() {
             ty: ResolvedType::Enum(enum_name.clone()),
             fixed_len: None,
         }],
-        HashMap::from([(enum_name, vec!["OK".to_string(), "WARN".to_string()])]),
+        HashMap::from([(
+            enum_name,
+            vec![EnumVariant::new("OK", 3), EnumVariant::new("WARN", 7)],
+        )]),
     );
 
     let mut cdr = vec![0x00, 0x01, 0x00, 0x00];
     align(&mut cdr, 4);
-    cdr.extend_from_slice(&(1u32).to_le_bytes());
+    cdr.extend_from_slice(&(7u32).to_le_bytes());
 
     let value = decode_cdr_to_value(&schema, &cdr).expect("decode should succeed");
     let Value::Struct(fields) = value else {
@@ -136,6 +139,40 @@ fn decodes_enum_index_to_variant_name() {
     };
     assert_eq!(fields.len(), 1);
     assert!(matches!(&fields[0], Value::String(s) if s.as_ref() == "WARN"));
+
+    let data_type = &resolved_schema_to_field_defs(&schema)[0].element.data_type;
+    assert_eq!(
+        data_type,
+        &DataTypeDef::Enum(vec![EnumVariant::new("OK", 3), EnumVariant::new("WARN", 7)])
+    );
+    assert_eq!(data_type.to_string(), "string");
+}
+
+/// A negative enumerator value is serialized as its 32-bit two's complement.
+#[test]
+fn decodes_negative_enum_value_to_variant_name() {
+    let enum_name = vec!["ex".to_string(), "msg".to_string(), "State".to_string()];
+    let schema = make_schema(
+        vec![ResolvedField {
+            name: "state".to_string(),
+            ty: ResolvedType::Enum(enum_name.clone()),
+            fixed_len: None,
+        }],
+        HashMap::from([(
+            enum_name,
+            vec![EnumVariant::new("UNKNOWN", -1), EnumVariant::new("OK", 0)],
+        )]),
+    );
+
+    let mut cdr = vec![0x00, 0x01, 0x00, 0x00];
+    align(&mut cdr, 4);
+    cdr.extend_from_slice(&(-1i32).to_le_bytes());
+
+    let value = decode_cdr_to_value(&schema, &cdr).expect("decode should succeed");
+    let Value::Struct(fields) = value else {
+        panic!("expected root struct");
+    };
+    assert!(matches!(&fields[0], Value::String(s) if s.as_ref() == "UNKNOWN"));
 }
 
 #[test]
@@ -292,9 +329,9 @@ fn decodes_nested_struct() {
     assert!(matches!(inner_fields[1], Value::U32(99)));
 }
 
-/// An enum index beyond the variant list falls back to the raw integer string.
+/// An unknown enum numeric value falls back to the raw integer string.
 #[test]
-fn decodes_out_of_range_enum_index_as_raw_number() {
+fn decodes_unknown_enum_value_as_raw_number() {
     let enum_name = vec!["ex".to_string(), "msg".to_string(), "E".to_string()];
     let schema = make_schema(
         vec![ResolvedField {
@@ -302,10 +339,10 @@ fn decodes_out_of_range_enum_index_as_raw_number() {
             ty: ResolvedType::Enum(enum_name.clone()),
             fixed_len: None,
         }],
-        HashMap::from([(enum_name, vec!["A".to_string()])]),
+        HashMap::from([(enum_name, vec![EnumVariant::new("A", 0)])]),
     );
 
-    // Index 5 is out of range (only variant 0 exists).
+    // Value 5 is not declared.
     let mut payload = Vec::new();
     payload.extend_from_slice(&5u32.to_le_bytes());
     let cdr = cdr_with_payload(payload);

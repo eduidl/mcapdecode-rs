@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use mcapdecode_core::{DataTypeDef, DecoderError, ElementDef, FieldDef};
+use mcapdecode_core::{DataTypeDef, DecoderError, ElementDef, EnumVariant, FieldDef};
 use mcapdecode_protobuf::{PresencePolicy, message_fields_to_field_defs, parse_message_descriptor};
 use prost_types::{
     DescriptorProto,
@@ -114,8 +114,8 @@ fn nested_message_becomes_struct() {
 }
 
 #[test]
-fn enum_field_becomes_string() {
-    let color_enum = simple_enum("Color", &[("RED", 0), ("GREEN", 1), ("BLUE", 2)]);
+fn enum_field_preserves_values_and_displays_as_string() {
+    let color_enum = simple_enum("Color", &[("RED", 0), ("GREEN", 7), ("BLUE", 42)]);
     let msg = DescriptorProto {
         name: Some("WithEnum".to_string()),
         field: vec![enum_field("color", 1, ".Color")],
@@ -126,7 +126,16 @@ fn enum_field_becomes_string() {
 
     assert_eq!(schema.len(), 1);
     assert_eq!(schema[0].name, "color");
-    assert_eq!(schema[0].element.data_type, DataTypeDef::String);
+    let data_type = &schema[0].element.data_type;
+    assert_eq!(
+        data_type,
+        &DataTypeDef::Enum(vec![
+            EnumVariant::new("RED", 0),
+            EnumVariant::new("GREEN", 7),
+            EnumVariant::new("BLUE", 42),
+        ])
+    );
+    assert_eq!(data_type.to_string(), "string");
 }
 
 #[test]
