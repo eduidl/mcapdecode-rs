@@ -38,37 +38,12 @@ impl RecordBatchOptions {
     }
 }
 
-/// Adds Arrow RecordBatch output to [`McapReader`].
-///
-/// This is a trait rather than an inherent impl because the reader is moving to
-/// its own crate. A type can only carry an inherent impl in the crate that
-/// defines it (E0116), so once `McapReader` lives elsewhere these methods must
-/// arrive through a trait. Import the trait to call them.
-pub trait McapReaderArrowExt {
+impl McapReader {
     /// Read all messages for a topic and emit Arrow RecordBatches to callback.
     ///
     /// Chunks in the MCAP file are decompressed in parallel using rayon.
     /// Message decoding and Arrow conversion remain sequential.
-    fn for_each_record_batch(
-        &self,
-        path: &Path,
-        topic: &str,
-        callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError>;
-
-    /// Read messages for a topic and emit Arrow RecordBatches subject to
-    /// `options`.
-    fn for_each_record_batch_with_options(
-        &self,
-        path: &Path,
-        topic: &str,
-        options: &RecordBatchOptions,
-        callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError>;
-}
-
-impl McapReaderArrowExt for McapReader {
-    fn for_each_record_batch(
+    pub fn for_each_record_batch(
         &self,
         path: &Path,
         topic: &str,
@@ -82,7 +57,9 @@ impl McapReaderArrowExt for McapReader {
         )
     }
 
-    fn for_each_record_batch_with_options(
+    /// Read messages for a topic and emit Arrow RecordBatches subject to
+    /// `options`.
+    pub fn for_each_record_batch_with_options(
         &self,
         path: &Path,
         topic: &str,

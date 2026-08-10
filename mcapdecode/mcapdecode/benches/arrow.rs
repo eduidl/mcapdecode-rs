@@ -2,7 +2,7 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mcapbench::{Encoding, FileShape, PayloadCase, ensure_generated};
-use mcapdecode::{McapReader, McapReaderArrowExt as _};
+use mcapdecode::McapReader;
 
 fn bench_arrow(c: &mut Criterion) {
     // `bytes` is included because byte sequences are the case where the value

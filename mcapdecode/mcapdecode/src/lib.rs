@@ -1,7 +1,7 @@
 #[cfg(feature = "arrow")]
 mod arrow_ext;
 #[cfg(feature = "arrow")]
-pub use arrow_ext::{McapReaderArrowExt, RecordBatchOptions};
+pub use arrow_ext::RecordBatchOptions;
 mod error;
 mod reader;
 

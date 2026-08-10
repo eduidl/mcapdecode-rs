@@ -55,7 +55,7 @@ Encoding pairs supported by built-in decoders:
 
 ```rust
 use std::path::Path;
-use mcapdecode::{McapReader, McapReaderArrowExt};
+use mcapdecode::McapReader;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reader = McapReader::builder().with_default_decoders().build();
