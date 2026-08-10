@@ -17,12 +17,20 @@ mcapdecode = { path = "mcapdecode/mcapdecode", version = "=0.5.1" }
 mcapdecode-arrow = { path = "mcapdecode/mcapdecode-arrow", version = "=0.5.1" }
 mcapdecode-core = { path = "mcapdecode/mcapdecode-core", version = "=0.5.1" }
 mcapdecode-protobuf = { path = "mcapdecode/mcapdecode-protobuf", version = "=0.5.1" }
+# Decoder features are chosen by each dependent rather than inherited from the
+# reader's own defaults.
+mcapdecode-reader = { path = "mcapdecode/mcapdecode-reader", version = "=0.5.1", default-features = false }
 mcapdecode-ros2-common = { path = "mcapdecode/mcapdecode-ros2-common", version = "=0.5.1" }
 mcapdecode-ros2idl = { path = "mcapdecode/mcapdecode-ros2idl", version = "=0.5.1" }
 mcapdecode-ros2msg = { path = "mcapdecode/mcapdecode-ros2msg", version = "=0.5.1" }
 
 arrow = { version = "57.3.0", default-features = false }
 clap = { version = "4.5.58", features = ["derive"] }
+# Shared by the reader and by the tests that build fixtures for it, which must
+# stay on one version so fixtures are written by the same library that reads
+# them.
+mcap = "0.24.0"
+memmap2 = "0.9.10"
 thiserror = "2.0.18"
 criterion = "0.5.1"
 dhat = "0.3.3"
