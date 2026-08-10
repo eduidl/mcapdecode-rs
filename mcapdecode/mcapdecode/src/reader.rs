@@ -28,14 +28,12 @@ use crate::error::McapReaderError;
 /// Reads an MCAP file and decodes messages using registered [`MessageDecoder`]s.
 pub struct McapReader {
     decoders: HashMap<EncodingKey, Arc<dyn MessageDecoder>>,
-    batch_size: usize,
     parallel: bool,
 }
 
 /// Builder for configuring [`McapReader`].
 pub struct McapReaderBuilder {
     decoders: Vec<Arc<dyn MessageDecoder>>,
-    batch_size: usize,
     parallel: bool,
 }
 
@@ -183,7 +181,6 @@ impl McapReader {
     pub fn builder() -> McapReaderBuilder {
         McapReaderBuilder {
             decoders: Vec::new(),
-            batch_size: 1024,
             parallel: true,
         }
     }
@@ -191,7 +188,6 @@ impl McapReader {
     pub fn new() -> Self {
         Self {
             decoders: HashMap::new(),
-            batch_size: 1024,
             parallel: true,
         }
     }
@@ -204,11 +200,6 @@ impl McapReader {
     /// Register a shared decoder for a specific encoding pair.
     pub fn register_shared_decoder(&mut self, decoder: Arc<dyn MessageDecoder>) {
         self.decoders.insert(decoder.encoding_key(), decoder);
-    }
-
-    #[cfg(feature = "arrow")]
-    pub(crate) fn batch_size(&self) -> usize {
-        self.batch_size
     }
 
     pub(crate) fn mmap_file(&self, path: &Path) -> Result<Mmap, McapReaderError> {
@@ -658,12 +649,6 @@ impl McapReaderBuilder {
         self
     }
 
-    /// Set the number of messages per RecordBatch (default: 1024).
-    pub fn with_batch_size(mut self, size: usize) -> Self {
-        self.batch_size = size;
-        self
-    }
-
     /// Enable or disable parallel chunk decompression and decoding (default: true).
     ///
     /// This is the reader-wide default; a single read can override it through
@@ -688,7 +673,6 @@ impl McapReaderBuilder {
     /// Build the reader.
     pub fn build(self) -> McapReader {
         let mut reader = McapReader::new();
-        reader.batch_size = self.batch_size;
         reader.parallel = self.parallel;
         for decoder in self.decoders {
             reader.register_shared_decoder(decoder);
