@@ -12,26 +12,21 @@ readme = "README.md"
 [dependencies]
 mcapdecode-arrow = { workspace = true, optional = true }
 mcapdecode-core.workspace = true
+mcapdecode-reader.workspace = true
 arrow = { workspace = true, optional = true }
-mcap = "0.24.0"
-memmap2 = "0.9.10"
-rayon = "1.11.0"
-thiserror.workspace = true
-
-mcapdecode-protobuf = { workspace = true, optional = true }
-mcapdecode-ros2idl = { workspace = true, optional = true }
-mcapdecode-ros2msg = { workspace = true, optional = true }
 
 [features]
 default = ["protobuf", "ros2idl", "ros2msg"]
 arrow = ["dep:arrow", "dep:mcapdecode-arrow"]
-protobuf = ["dep:mcapdecode-protobuf"]
-ros2idl = ["dep:mcapdecode-ros2idl"]
-ros2msg = ["dep:mcapdecode-ros2msg"]
+protobuf = ["mcapdecode-reader/protobuf"]
+ros2idl = ["mcapdecode-reader/ros2idl"]
+ros2msg = ["mcapdecode-reader/ros2msg"]
 
 [dev-dependencies]
 criterion.workspace = true
+mcap.workspace = true
 mcapbench.workspace = true
+memmap2.workspace = true
 
 [[bench]]
 name = "decoder"

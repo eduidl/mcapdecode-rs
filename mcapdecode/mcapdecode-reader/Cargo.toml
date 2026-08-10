@@ -1,0 +1,27 @@
+[package]
+name = "mcapdecode-reader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+description = "MCAP reader with pluggable mcapdecode payload decoders."
+readme = "README.md"
+
+[dependencies]
+mcapdecode-core.workspace = true
+mcap.workspace = true
+memmap2.workspace = true
+rayon = "1.11.0"
+thiserror.workspace = true
+
+mcapdecode-protobuf = { workspace = true, optional = true }
+mcapdecode-ros2idl = { workspace = true, optional = true }
+mcapdecode-ros2msg = { workspace = true, optional = true }
+
+[features]
+default = ["protobuf", "ros2idl", "ros2msg"]
+protobuf = ["dep:mcapdecode-protobuf"]
+ros2idl = ["dep:mcapdecode-ros2idl"]
+ros2msg = ["dep:mcapdecode-ros2msg"]
