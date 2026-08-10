@@ -97,7 +97,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Related Crates in This Workspace
 
 - `mcapdecode-core`: schema/value model and shared errors
-- `mcapdecode-reader`: MCAP reading and decoding, where `McapReader` is defined
 - `mcapdecode-arrow`: Arrow conversion implementation
 - `mcapdecode-protobuf`: protobuf decoder
 - `mcapdecode-ros2msg`: ROS 2 `.msg` decoder

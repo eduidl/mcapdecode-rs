@@ -40,10 +40,10 @@ impl RecordBatchOptions {
 
 /// Adds Arrow RecordBatch output to [`McapReader`].
 ///
-/// This is a trait rather than an inherent impl because [`McapReader`] is
-/// defined in `mcapdecode-reader`, and a type can only carry an inherent impl
-/// in the crate that defines it (E0116). Import the trait to call these
-/// methods.
+/// This is a trait rather than an inherent impl because the reader is moving to
+/// its own crate. A type can only carry an inherent impl in the crate that
+/// defines it (E0116), so once `McapReader` lives elsewhere these methods must
+/// arrive through a trait. Import the trait to call them.
 pub trait McapReaderArrowExt {
     /// Read all messages for a topic and emit Arrow RecordBatches to callback.
     ///

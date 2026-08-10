@@ -2,10 +2,14 @@
 mod arrow_ext;
 #[cfg(feature = "arrow")]
 pub use arrow_ext::{McapReaderArrowExt, RecordBatchOptions};
+mod error;
+mod reader;
+
+pub use error::McapReaderError;
 #[cfg(feature = "arrow")]
 pub use mcapdecode_arrow as arrow;
 pub use mcapdecode_core as core;
-pub use mcapdecode_reader::{
-    McapReader, McapReaderBuilder, McapReaderError, PreparedTopic, RawMessage, ReadOptions,
-    TimeRange, TopicDecodeStatus, TopicInfo, TopicSchema,
+pub use reader::{
+    McapReader, McapReaderBuilder, PreparedTopic, RawMessage, ReadOptions, TimeRange,
+    TopicDecodeStatus, TopicInfo, TopicSchema,
 };
