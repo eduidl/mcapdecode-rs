@@ -262,8 +262,31 @@ impl McapReader {
 
         Ok(TopicDecodeContext {
             channel_id: channel.id,
+            schema_name: schema.name.clone(),
             decoder: topic_decoder,
             field_defs,
+        })
+    }
+
+    /// Prepare one topic for a decoder-backed output adapter.
+    ///
+    /// The callback receives a handle that reuses this operation's mapped file,
+    /// summary, and decoder context. It cannot escape the callback.
+    pub fn with_prepared_topic<T>(
+        &self,
+        path: &Path,
+        topic: &str,
+        callback: impl FnOnce(&PreparedTopic<'_>) -> Result<T, McapReaderError>,
+    ) -> Result<T, McapReaderError> {
+        let mmap = self.mmap_file(path)?;
+        let summary = self.read_summary(path, &mmap)?;
+        let context = self.resolve_topic_decode_context(&summary, topic)?;
+        callback(&PreparedTopic {
+            reader: self,
+            mmap,
+            summary,
+            context,
+            topic: topic.to_string(),
         })
     }
 
@@ -318,14 +341,10 @@ impl McapReader {
         path: &Path,
         topic: &str,
         options: &ReadOptions,
-        mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
-        let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
-        let context = self.resolve_topic_decode_context(&summary, topic)?;
-        let request = DecodeRequest { topic, options };
-        self.for_each_decoded_message_impl(&mmap, &summary, &context, request, &mut |decoded| {
-            callback(decoded).map_err(McapReaderError::Callback)
+        self.with_prepared_topic(path, topic, |prepared| {
+            prepared.for_each_decoded_message_with_options(options, callback)
         })
     }
 
@@ -747,8 +766,59 @@ fn get_schema_from_channel<'a>(
         })
 }
 
+/// A topic whose MCAP summary and decoder have already been resolved.
+///
+/// Values are created only through [`McapReader::with_prepared_topic`]. This
+/// keeps the mapped MCAP file, its summary, and decoder context together so an
+/// output adapter can derive a schema and scan messages without reopening the
+/// file or rereading the summary.
+pub struct PreparedTopic<'reader> {
+    reader: &'reader McapReader,
+    mmap: Mmap,
+    summary: mcap::read::Summary,
+    context: TopicDecodeContext,
+    topic: String,
+}
+
+impl PreparedTopic<'_> {
+    /// The topic name requested when this value was prepared.
+    pub fn topic(&self) -> &str {
+        &self.topic
+    }
+
+    /// The MCAP schema name associated with this topic.
+    pub fn schema_name(&self) -> &str {
+        &self.context.schema_name
+    }
+
+    /// The schema IR derived by the registered decoder for this topic.
+    pub fn field_defs(&self) -> &FieldDefs {
+        &self.context.field_defs
+    }
+
+    /// Read decoded messages subject to `options` and emit them one-by-one to
+    /// callback.
+    pub fn for_each_decoded_message_with_options(
+        &self,
+        options: &ReadOptions,
+        mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        self.reader.for_each_decoded_message_impl(
+            &self.mmap,
+            &self.summary,
+            &self.context,
+            DecodeRequest {
+                topic: &self.topic,
+                options,
+            },
+            &mut |decoded| callback(decoded).map_err(McapReaderError::Callback),
+        )
+    }
+}
+
 pub(crate) struct TopicDecodeContext {
     pub(crate) channel_id: u16,
+    pub(crate) schema_name: String,
     pub(crate) decoder: Box<dyn TopicDecoder>,
     pub(crate) field_defs: FieldDefs,
 }

@@ -14,6 +14,9 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Added `McapReader::with_prepared_topic` and `PreparedTopic`, which resolve a
+  topic's summary and decoder once so an output adapter can derive its schema
+  and scan messages without reopening the file. [#40]
 - Added reproducible generated MCAP fixtures and benchmark suites for decoding,
   reading, Arrow conversion, and Parquet conversion. [#24]
 
@@ -56,3 +59,4 @@ All notable changes to this project are documented in this file.
 [#27]: https://github.com/eduidl/mcapdecode-rs/pull/27
 [#28]: https://github.com/eduidl/mcapdecode-rs/pull/28
 [#32]: https://github.com/eduidl/mcapdecode-rs/pull/32
+[#40]: https://github.com/eduidl/mcapdecode-rs/pull/40
