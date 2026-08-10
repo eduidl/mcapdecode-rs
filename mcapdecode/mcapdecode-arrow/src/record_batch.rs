@@ -1,10 +1,10 @@
 use std::{path::Path, sync::Arc};
 
 use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
-use mcapdecode_arrow::{arrow_value_rows_to_record_batch, field_defs_to_arrow_schema};
 use mcapdecode_core::DecodedMessage;
+use mcapdecode_reader::{McapReader, McapReaderError, ReadOptions};
 
-use crate::{McapReader, McapReaderError, ReadOptions};
+use crate::{arrow_value_rows_to_record_batch, field_defs_to_arrow_schema};
 
 /// Options for Arrow RecordBatch reads.
 ///
@@ -12,7 +12,7 @@ use crate::{McapReader, McapReaderError, ReadOptions};
 /// describes the shape of the Arrow output, not how the reader scans a file.
 /// One reader can therefore serve reads that want different batch sizes.
 ///
-/// [`McapReaderBuilder`]: crate::McapReaderBuilder
+/// [`McapReaderBuilder`]: mcapdecode_reader::McapReaderBuilder
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordBatchOptions {
     /// Filtering and traversal options applied to the decoded messages.

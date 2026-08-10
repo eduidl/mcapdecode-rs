@@ -24,6 +24,10 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Arrow RecordBatch reading moved from `mcapdecode` into `mcapdecode-arrow`,
+  behind that crate's new `reader` feature. `mcapdecode` re-exports
+  `McapReaderArrowExt` and `RecordBatchOptions` as before, so its users see no
+  change. [#45]
 - Extracted the MCAP reader into a new `mcapdecode-reader` crate. `mcapdecode`
   re-exports it, so `mcapdecode::McapReader` and friends keep working
   unchanged. [#43]
@@ -66,3 +70,4 @@ All notable changes to this project are documented in this file.
 [#40]: https://github.com/eduidl/mcapdecode-rs/pull/40
 [#41]: https://github.com/eduidl/mcapdecode-rs/pull/41
 [#43]: https://github.com/eduidl/mcapdecode-rs/pull/43
+[#45]: https://github.com/eduidl/mcapdecode-rs/pull/45

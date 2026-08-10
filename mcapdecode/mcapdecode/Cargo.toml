@@ -13,16 +13,16 @@ readme = "README.md"
 mcapdecode-arrow = { workspace = true, optional = true }
 mcapdecode-core.workspace = true
 mcapdecode-reader.workspace = true
-arrow = { workspace = true, optional = true }
 
 [features]
 default = ["protobuf", "ros2idl", "ros2msg"]
-arrow = ["dep:arrow", "dep:mcapdecode-arrow"]
+arrow = ["dep:mcapdecode-arrow", "mcapdecode-arrow/reader"]
 protobuf = ["mcapdecode-reader/protobuf"]
 ros2idl = ["mcapdecode-reader/ros2idl"]
 ros2msg = ["mcapdecode-reader/ros2msg"]
 
 [dev-dependencies]
+arrow.workspace = true
 criterion.workspace = true
 mcap.workspace = true
 mcapbench.workspace = true
