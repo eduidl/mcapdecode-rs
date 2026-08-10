@@ -6,16 +6,10 @@ All notable changes to this project are documented in this file.
 
 ### Breaking Changes
 
-- Arrow RecordBatch reading moved back behind the `McapReaderArrowExt` trait,
-  reverting [#32]. Callers must import the trait. An inherent impl is not
-  possible once `McapReader` and the Arrow conversion live in different
-  crates. [#42]
 - Removed `McapReaderBuilder::with_batch_size`. Arrow RecordBatch size is now
   set per read through `RecordBatchOptions::batch_size`, and
   `McapReader::for_each_record_batch_with_options` takes `&RecordBatchOptions`
   instead of `&ReadOptions`. [#41]
-- Replaced the public `McapReaderArrowExt` trait with inherent Arrow
-  record-batch reading methods on `McapReader`. [#32]
 - ROS 2 `sequence<uint8>` and `sequence<octet>` fields now decode as `Bytes`
   rather than `List<U8>`. Consumers of decoded values or derived schemas must
   handle these fields as bytes. [#27]
@@ -66,7 +60,5 @@ All notable changes to this project are documented in this file.
 [#26]: https://github.com/eduidl/mcapdecode-rs/pull/26
 [#27]: https://github.com/eduidl/mcapdecode-rs/pull/27
 [#28]: https://github.com/eduidl/mcapdecode-rs/pull/28
-[#32]: https://github.com/eduidl/mcapdecode-rs/pull/32
 [#40]: https://github.com/eduidl/mcapdecode-rs/pull/40
 [#41]: https://github.com/eduidl/mcapdecode-rs/pull/41
-[#42]: https://github.com/eduidl/mcapdecode-rs/pull/42
