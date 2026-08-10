@@ -12,7 +12,8 @@ use std::{
 use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
 use mcapdecode::{
-    McapReader, McapReaderError, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo,
+    McapReader, McapReaderError, PreparedTopic, ReadOptions, TimeRange, TopicDecodeStatus,
+    TopicInfo,
 };
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
@@ -626,6 +627,110 @@ fn message_count_unknown_topic_returns_error() {
     ));
 }
 
+fn collect_prepared_values(prepared: &PreparedTopic<'_>, options: &ReadOptions) -> Vec<i64> {
+    let mut values = Vec::new();
+    prepared
+        .for_each_decoded_message_with_options(options, |message| {
+            let Value::Struct(fields) = message.value else {
+                panic!("expected struct payload");
+            };
+            let Value::I64(value) = fields[0] else {
+                panic!("expected i64 field");
+            };
+            values.push(value);
+            Ok(())
+        })
+        .unwrap();
+    values
+}
+
+#[test]
+fn with_prepared_topic_exposes_topic_metadata_and_derived_schema() {
+    let fixture = write_chunked_fixture("prepared-metadata", &[br#"{"value":1}"#]);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+
+    reader
+        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
+            assert_eq!(prepared.topic(), "/decoded");
+            assert_eq!(prepared.schema_name(), "test.Msg");
+            assert!(!prepared.field_defs().is_empty());
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn with_prepared_topic_scans_repeatedly_from_one_preparation() {
+    let fixture = write_chunked_fixture(
+        "prepared-repeat",
+        &[br#"{"value":1}"#, br#"{"value":2}"#, br#"{"value":3}"#],
+    );
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+
+    let (all, limited) = reader
+        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
+            let all = collect_prepared_values(prepared, &ReadOptions::default());
+            let limited = collect_prepared_values(
+                prepared,
+                &ReadOptions {
+                    limit: Some(2),
+                    ..ReadOptions::default()
+                },
+            );
+            Ok((all, limited))
+        })
+        .unwrap();
+
+    assert_eq!(all, vec![1, 2, 3]);
+    assert_eq!(limited, vec![1, 2]);
+}
+
+#[test]
+fn with_prepared_topic_matches_reader_level_filtered_read() {
+    let fixture = write_chunked_fixture(
+        "prepared-matches-reader",
+        &[br#"{"value":1}"#, br#"{"value":2}"#, br#"{"value":3}"#],
+    );
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+    let options = ReadOptions {
+        offset: 1,
+        ..ReadOptions::default()
+    };
+
+    let prepared_values = reader
+        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
+            Ok(collect_prepared_values(prepared, &options))
+        })
+        .unwrap();
+
+    assert_eq!(
+        prepared_values,
+        collect_values(&reader, fixture.path(), &options)
+    );
+}
+
+#[test]
+fn with_prepared_topic_reports_unknown_topic_without_running_callback() {
+    let fixture = write_chunked_fixture("prepared-unknown-topic", &[br#"{"value":1}"#]);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+
+    let err = reader
+        .with_prepared_topic::<()>(fixture.path(), "/unknown", |_prepared| {
+            panic!("callback must not run when the topic cannot be resolved")
+        })
+        .unwrap_err();
+
+    assert!(matches!(err, McapReaderError::TopicNotFound { .. }));
+}
+
 #[test]
 fn builder_default_matches_new_without_decoders() {
     let new_reader = McapReader::new();
@@ -824,8 +929,16 @@ fn for_each_record_batch_propagates_callback_error() {
             Err("callback failed".into())
         })
         .unwrap_err();
-    assert!(matches!(err, McapReaderError::Callback(_)));
-    assert!(err.to_string().contains("callback failed"));
+    let McapReaderError::Callback(inner) = &err else {
+        panic!("expected a callback error, got {err:?}");
+    };
+    // `Callback` is `#[error(transparent)]`, so a doubly wrapped error would
+    // still render as "callback failed".
+    assert!(
+        inner.downcast_ref::<McapReaderError>().is_none(),
+        "the callback error must be wrapped exactly once"
+    );
+    assert_eq!(inner.to_string(), "callback failed");
 }
 
 #[cfg(feature = "arrow")]
@@ -1040,8 +1153,14 @@ fn for_each_decoded_message_propagates_callback_error() {
         })
         .unwrap_err();
 
-    assert!(matches!(err, McapReaderError::Callback(_)));
-    assert!(err.to_string().contains("callback failed"));
+    let McapReaderError::Callback(inner) = &err else {
+        panic!("expected a callback error, got {err:?}");
+    };
+    assert!(
+        inner.downcast_ref::<McapReaderError>().is_none(),
+        "the callback error must be wrapped exactly once"
+    );
+    assert_eq!(inner.to_string(), "callback failed");
 }
 
 #[test]

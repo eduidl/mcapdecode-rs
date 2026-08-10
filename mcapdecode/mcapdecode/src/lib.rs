@@ -8,6 +8,6 @@ pub use error::McapReaderError;
 pub use mcapdecode_arrow as arrow;
 pub use mcapdecode_core as core;
 pub use reader::{
-    McapReader, McapReaderBuilder, RawMessage, ReadOptions, TimeRange, TopicDecodeStatus,
-    TopicInfo, TopicSchema,
+    McapReader, McapReaderBuilder, PreparedTopic, RawMessage, ReadOptions, TimeRange,
+    TopicDecodeStatus, TopicInfo, TopicSchema,
 };
