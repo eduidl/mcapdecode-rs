@@ -108,19 +108,13 @@ impl TimeRange {
 pub struct ReadOptions {
     /// Restrict messages to this `log_time` range.
     pub time_range: Option<TimeRange>,
-    /// Skip this many messages before emitting any. `0` skips nothing.
+    /// Skip this many messages before emitting any. `0` skips nothing, and an
+    /// offset past the last match yields no messages rather than an error.
     ///
-    /// An offset past the last matching message yields no messages rather than
-    /// an error. Skipping cannot avoid decompressing the messages it passes
-    /// over: MCAP chunk indexes carry no per-chunk message count, so reaching
-    /// offset N still requires reading the preceding chunks. Prefer
-    /// [`ReadOptions::time_range`] to resume a scan, since a start time does
-    /// prune whole chunks through the index.
-    ///
-    /// Only the sequential path skips without decoding. On the parallel path a
-    /// chunk is decoded before its position in the topic is known, so skipped
-    /// messages are decoded and discarded — and a decode failure among them
-    /// still fails the read.
+    /// Skipping still reads the chunks it passes over, and on the parallel
+    /// path those messages are decoded and discarded, so a decode failure
+    /// among them still fails the read. Prefer [`ReadOptions::time_range`] to
+    /// resume a scan: a start time prunes whole chunks through the index.
     pub offset: usize,
     /// Stop after this many emitted messages. `None` has no limit.
     ///
