@@ -11,6 +11,8 @@ use std::{
 #[cfg(feature = "arrow")]
 use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
+#[cfg(feature = "arrow")]
+use mcapdecode::RecordBatchOptions;
 use mcapdecode::{
     McapReader, McapReaderError, PreparedTopic, ReadOptions, TimeRange, TopicDecodeStatus,
     TopicInfo,
@@ -141,10 +143,23 @@ fn chunk_index_count(path: &Path) -> usize {
 }
 
 #[cfg(feature = "arrow")]
-fn collect_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
+fn batch_options(batch_size: usize) -> RecordBatchOptions {
+    RecordBatchOptions {
+        batch_size,
+        ..RecordBatchOptions::default()
+    }
+}
+
+#[cfg(feature = "arrow")]
+fn collect_i64_values(
+    reader: &McapReader,
+    path: &Path,
+    topic: &str,
+    options: &RecordBatchOptions,
+) -> Vec<i64> {
     let mut values = Vec::new();
     reader
-        .for_each_record_batch(path, topic, |batch| {
+        .for_each_record_batch_with_options(path, topic, options, |batch| {
             let value_idx = batch
                 .schema()
                 .index_of("value")
@@ -165,10 +180,15 @@ fn collect_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64>
 }
 
 #[cfg(feature = "arrow")]
-fn collect_batch_rows(reader: &McapReader, path: &Path, topic: &str) -> Vec<usize> {
+fn collect_batch_rows(
+    reader: &McapReader,
+    path: &Path,
+    topic: &str,
+    options: &RecordBatchOptions,
+) -> Vec<usize> {
     let mut batch_rows = Vec::new();
     reader
-        .for_each_record_batch(path, topic, |batch| {
+        .for_each_record_batch_with_options(path, topic, options, |batch| {
             batch_rows.push(batch.num_rows());
             Ok(())
         })
@@ -877,7 +897,7 @@ fn for_each_record_batch_without_decoder_returns_error() {
 #[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_errors_when_decoder_is_missing_contains_message() {
-    let reader = McapReader::builder().with_batch_size(1).build();
+    let reader = McapReader::builder().build();
 
     let err = reader
         .for_each_record_batch(&fixture_path("with_summary.mcap"), "/decoded", |_batch| {
@@ -946,26 +966,40 @@ fn for_each_record_batch_propagates_callback_error() {
 fn for_each_record_batch_emits_batches_by_batch_size() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_batch_size(1)
         .build();
 
-    let mut batch_rows = Vec::new();
-    reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/decoded", |batch| {
-            batch_rows.push(batch.num_rows());
-            Ok(())
-        })
-        .unwrap();
+    let batch_rows = collect_batch_rows(
+        &reader,
+        &fixture_path("with_summary.mcap"),
+        "/decoded",
+        &batch_options(1),
+    );
 
     assert_eq!(batch_rows, vec![1, 1]);
 }
 
 #[cfg(feature = "arrow")]
 #[test]
-fn for_each_record_batch_flushes_final_partial_batch() {
+fn for_each_record_batch_treats_zero_batch_size_as_one() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_batch_size(3)
+        .build();
+
+    let batch_rows = collect_batch_rows(
+        &reader,
+        &fixture_path("with_summary.mcap"),
+        "/decoded",
+        &batch_options(0),
+    );
+
+    assert_eq!(batch_rows, vec![1, 1]);
+}
+
+#[cfg(feature = "arrow")]
+#[test]
+fn for_each_record_batch_defaults_to_a_single_batch() {
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
         .build();
 
     let mut batch_rows = Vec::new();
@@ -981,16 +1015,35 @@ fn for_each_record_batch_flushes_final_partial_batch() {
 
 #[cfg(feature = "arrow")]
 #[test]
+fn for_each_record_batch_flushes_final_partial_batch() {
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+
+    let batch_rows = collect_batch_rows(
+        &reader,
+        &fixture_path("with_summary.mcap"),
+        "/decoded",
+        &batch_options(3),
+    );
+
+    assert_eq!(batch_rows, vec![2]);
+}
+
+#[cfg(feature = "arrow")]
+#[test]
 fn for_each_record_batch_propagates_callback_error_with_builder_decoder() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_batch_size(1)
         .build();
 
     let err = reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/decoded", |_batch| {
-            Err("callback failed".into())
-        })
+        .for_each_record_batch_with_options(
+            &fixture_path("with_summary.mcap"),
+            "/decoded",
+            &batch_options(1),
+            |_batch| Err("callback failed".into()),
+        )
         .unwrap_err();
 
     assert!(err.to_string().contains("callback failed"));
@@ -1002,7 +1055,12 @@ fn register_shared_decoder_decodes_messages() {
     let mut reader = McapReader::new();
     reader.register_shared_decoder(Arc::new(TestJsonDecoder));
 
-    let values = collect_i64_values(&reader, &fixture_path("with_summary.mcap"), "/decoded");
+    let values = collect_i64_values(
+        &reader,
+        &fixture_path("with_summary.mcap"),
+        "/decoded",
+        &RecordBatchOptions::default(),
+    );
     assert_eq!(values, vec![1, 2]);
 }
 
@@ -1217,22 +1275,21 @@ fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
 
     let parallel_reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_batch_size(2)
         .with_parallel(true)
         .build();
     let sequential_reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_batch_size(2)
         .with_parallel(false)
         .build();
+    let options = batch_options(2);
 
     assert_eq!(
-        collect_i64_values(&parallel_reader, fixture.path(), "/decoded"),
-        collect_i64_values(&sequential_reader, fixture.path(), "/decoded")
+        collect_i64_values(&parallel_reader, fixture.path(), "/decoded", &options),
+        collect_i64_values(&sequential_reader, fixture.path(), "/decoded", &options)
     );
     assert_eq!(
-        collect_batch_rows(&parallel_reader, fixture.path(), "/decoded"),
-        collect_batch_rows(&sequential_reader, fixture.path(), "/decoded")
+        collect_batch_rows(&parallel_reader, fixture.path(), "/decoded", &options),
+        collect_batch_rows(&sequential_reader, fixture.path(), "/decoded", &options)
     );
 }
 

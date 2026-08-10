@@ -6,6 +6,10 @@ All notable changes to this project are documented in this file.
 
 ### Breaking Changes
 
+- Removed `McapReaderBuilder::with_batch_size`. Arrow RecordBatch size is now
+  set per read through `RecordBatchOptions::batch_size`, and
+  `McapReader::for_each_record_batch_with_options` takes `&RecordBatchOptions`
+  instead of `&ReadOptions`. [#41]
 - Replaced the public `McapReaderArrowExt` trait with inherent Arrow
   record-batch reading methods on `McapReader`. [#32]
 - ROS 2 `sequence<uint8>` and `sequence<octet>` fields now decode as `Bytes`
@@ -60,3 +64,4 @@ All notable changes to this project are documented in this file.
 [#28]: https://github.com/eduidl/mcapdecode-rs/pull/28
 [#32]: https://github.com/eduidl/mcapdecode-rs/pull/32
 [#40]: https://github.com/eduidl/mcapdecode-rs/pull/40
+[#41]: https://github.com/eduidl/mcapdecode-rs/pull/41
