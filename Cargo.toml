@@ -17,6 +17,9 @@ mcapdecode = { path = "mcapdecode/mcapdecode", version = "=0.5.1" }
 mcapdecode-arrow = { path = "mcapdecode/mcapdecode-arrow", version = "=0.5.1" }
 mcapdecode-core = { path = "mcapdecode/mcapdecode-core", version = "=0.5.1" }
 mcapdecode-protobuf = { path = "mcapdecode/mcapdecode-protobuf", version = "=0.5.1" }
+# Decoder features are chosen by each dependent rather than inherited from the
+# reader's own defaults.
+mcapdecode-reader = { path = "mcapdecode/mcapdecode-reader", version = "=0.5.1", default-features = false }
 mcapdecode-ros2-common = { path = "mcapdecode/mcapdecode-ros2-common", version = "=0.5.1" }
 mcapdecode-ros2idl = { path = "mcapdecode/mcapdecode-ros2idl", version = "=0.5.1" }
 mcapdecode-ros2msg = { path = "mcapdecode/mcapdecode-ros2msg", version = "=0.5.1" }

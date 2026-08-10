@@ -24,6 +24,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Extracted the MCAP reader into a new `mcapdecode-reader` crate. `mcapdecode`
+  re-exports it, so `mcapdecode::McapReader` and friends keep working
+  unchanged. [#43]
 - The sequential reader now uses the MCAP chunk index to skip chunks unrelated
   to the requested topic. [#26]
 - Reduced allocations while constructing ROS 2 CDR decoding error paths. [#28]
@@ -62,3 +65,4 @@ All notable changes to this project are documented in this file.
 [#28]: https://github.com/eduidl/mcapdecode-rs/pull/28
 [#40]: https://github.com/eduidl/mcapdecode-rs/pull/40
 [#41]: https://github.com/eduidl/mcapdecode-rs/pull/41
+[#43]: https://github.com/eduidl/mcapdecode-rs/pull/43
