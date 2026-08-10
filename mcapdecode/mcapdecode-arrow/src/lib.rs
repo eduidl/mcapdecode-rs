@@ -1,16 +1,22 @@
 //! Arrow integration layer for `mcapdecode`.
 //!
-//! This crate focuses on two responsibilities:
+//! This crate focuses on three responsibilities:
 //! 1. Convert `mcapdecode-core` schema IR (`FieldDef`) to Arrow `Schema`.
 //! 2. Convert decoded `DecodedMessage` rows into Arrow `RecordBatch`.
+//! 3. Read an MCAP file straight into `RecordBatch`es, by extending
+//!    [`mcapdecode_reader::McapReader`].
 //!
-//! `mcapdecode-arrow` intentionally keeps the public API small and exposes only
-//! two entry points:
+//! The entry points are:
 //! - [`field_defs_to_arrow_schema`] for schema conversion.
 //! - [`arrow_value_rows_to_record_batch`] / [`try_arrow_value_rows_to_record_batch`]
 //!   for row-to-batch conversion.
+//! - [`McapReaderArrowExt`] for reading, configured by [`RecordBatchOptions`].
 //!
-//! Both conversions follow the conventions used by this project:
+//! Reading requires a [`mcapdecode_reader::McapReader`], so a consumer of this
+//! crate depends on `mcapdecode-reader` as well and selects its decoder
+//! features there. This crate deliberately requests none of them.
+//!
+//! The conversions follow the conventions used by this project:
 //! - Timestamp columns are represented as nanosecond `Timestamp` with `UTC`.
 //! - `RecordBatch` output prepends `@log_time` and `@publish_time`.
 //!

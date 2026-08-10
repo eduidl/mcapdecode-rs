@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 include.workspace = true
 readme = "README.md"
-description = "Arrow conversion utilities built on top of mcapdecode-core schemas and values."
+description = "Arrow schema/RecordBatch conversion and MCAP RecordBatch reading for mcapdecode."
 
 [dependencies]
 mcapdecode-core.workspace = true

@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - `mcapdecode-core`: schema/value model and shared errors
 - `mcapdecode-reader`: MCAP reading and decoding, where `McapReader` is defined
-- `mcapdecode-arrow`: Arrow conversion implementation
+- `mcapdecode-arrow`: Arrow conversion, and RecordBatch reading via `McapReaderArrowExt`
 - `mcapdecode-protobuf`: protobuf decoder
 - `mcapdecode-ros2msg`: ROS 2 `.msg` decoder
 - `mcapdecode-ros2idl`: ROS 2 IDL decoder
