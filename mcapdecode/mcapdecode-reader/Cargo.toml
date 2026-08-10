@@ -11,8 +11,8 @@ readme = "README.md"
 
 [dependencies]
 mcapdecode-core.workspace = true
-mcap = "0.24.0"
-memmap2 = "0.9.10"
+mcap.workspace = true
+memmap2.workspace = true
 rayon = "1.11.0"
 thiserror.workspace = true
 

@@ -24,9 +24,9 @@ ros2msg = ["mcapdecode-reader/ros2msg"]
 
 [dev-dependencies]
 criterion.workspace = true
-mcap = "0.24.0"
+mcap.workspace = true
 mcapbench.workspace = true
-memmap2 = "0.9.10"
+memmap2.workspace = true
 
 [[bench]]
 name = "decoder"
