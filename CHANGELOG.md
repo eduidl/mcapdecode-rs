@@ -24,10 +24,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
-- Arrow RecordBatch reading moved from `mcapdecode` into `mcapdecode-arrow`,
-  behind that crate's new `reader` feature. `mcapdecode` re-exports
-  `McapReaderArrowExt` and `RecordBatchOptions` as before, so its users see no
-  change. [#45]
+- Arrow RecordBatch reading moved from `mcapdecode` into `mcapdecode-arrow`.
+  `mcapdecode` re-exports `McapReaderArrowExt` and `RecordBatchOptions` as
+  before, so its users see no change. [#45]
 - Extracted the MCAP reader into a new `mcapdecode-reader` crate. `mcapdecode`
   re-exports it, so `mcapdecode::McapReader` and friends keep working
   unchanged. [#43]

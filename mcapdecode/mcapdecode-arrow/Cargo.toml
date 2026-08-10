@@ -11,11 +11,6 @@ description = "Arrow conversion utilities built on top of mcapdecode-core schema
 
 [dependencies]
 mcapdecode-core.workspace = true
-mcapdecode-reader = { workspace = true, optional = true }
+mcapdecode-reader.workspace = true
 arrow.workspace = true
 thiserror.workspace = true
-
-[features]
-# Adds RecordBatch reading on top of mcapdecode-reader. Off by default so the
-# conversion utilities can be used without pulling in the reader.
-reader = ["dep:mcapdecode-reader"]

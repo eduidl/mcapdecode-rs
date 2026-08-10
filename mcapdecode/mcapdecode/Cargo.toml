@@ -16,7 +16,7 @@ mcapdecode-reader.workspace = true
 
 [features]
 default = ["protobuf", "ros2idl", "ros2msg"]
-arrow = ["dep:mcapdecode-arrow", "mcapdecode-arrow/reader"]
+arrow = ["dep:mcapdecode-arrow"]
 protobuf = ["mcapdecode-reader/protobuf"]
 ros2idl = ["mcapdecode-reader/ros2idl"]
 ros2msg = ["mcapdecode-reader/ros2msg"]

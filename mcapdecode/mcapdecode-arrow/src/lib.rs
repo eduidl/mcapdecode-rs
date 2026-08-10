@@ -31,7 +31,6 @@ pub mod arrow_convert;
 pub mod error;
 pub mod flatten;
 pub mod projection;
-#[cfg(feature = "reader")]
 mod record_batch;
 pub mod schema_convert;
 
@@ -48,7 +47,6 @@ pub use flatten::{
 /// Re-export of [`projection::project_record_batch`].
 pub use projection::project_record_batch;
 /// Arrow RecordBatch reading on top of [`mcapdecode_reader::McapReader`].
-#[cfg(feature = "reader")]
 pub use record_batch::{McapReaderArrowExt, RecordBatchOptions};
 /// Re-export of [`schema_convert::field_defs_to_arrow_schema`].
 pub use schema_convert::field_defs_to_arrow_schema;
