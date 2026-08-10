@@ -4,7 +4,10 @@ use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
 use mcapdecode_arrow::{arrow_value_rows_to_record_batch, field_defs_to_arrow_schema};
 use mcapdecode_core::DecodedMessage;
 
-use crate::{McapReader, McapReaderError, reader::TopicDecodeContext};
+use crate::{
+    McapReader, McapReaderError, ReadOptions,
+    reader::{DecodeRequest, TopicDecodeContext},
+};
 
 struct TopicBatchContext {
     decode: TopicDecodeContext,
@@ -20,17 +23,29 @@ impl McapReader {
         &self,
         path: &Path,
         topic: &str,
+        callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        self.for_each_record_batch_with_options(path, topic, &ReadOptions::default(), callback)
+    }
+
+    /// Read filtered messages for a topic and emit Arrow RecordBatches to callback.
+    pub fn for_each_record_batch_with_options(
+        &self,
+        path: &Path,
+        topic: &str,
+        options: &ReadOptions,
         mut callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
         let mmap = self.mmap_file(path)?;
         let summary = self.read_summary(path, &mmap)?;
         let context = resolve_topic_batch_context(self, &summary, topic)?;
+        let request = DecodeRequest { topic, options };
         let mut rows = Vec::with_capacity(self.batch_size());
         self.for_each_decoded_message_impl(
             &mmap,
             &summary,
             &context.decode,
-            topic,
+            request,
             &mut |decoded| {
                 push_decoded_message(
                     self.batch_size(),

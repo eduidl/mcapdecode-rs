@@ -73,6 +73,111 @@ pub struct RawMessage {
     pub data: Arc<[u8]>,
 }
 
+/// Inclusive/exclusive nanosecond range used to filter messages by `log_time`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TimeRange {
+    /// Inclusive lower bound.
+    pub start: Option<u64>,
+    /// Exclusive upper bound.
+    pub end: Option<u64>,
+}
+
+impl TimeRange {
+    pub fn contains(self, time: u64) -> bool {
+        self.start.is_none_or(|start| time >= start) && self.end.is_none_or(|end| time < end)
+    }
+
+    fn overlaps_chunk(self, chunk_index: &mcap::records::ChunkIndex) -> bool {
+        self.start
+            .is_none_or(|start| chunk_index.message_end_time >= start)
+            && self
+                .end
+                .is_none_or(|end| chunk_index.message_start_time < end)
+    }
+}
+
+/// Options shared by filtered decoded-message and RecordBatch reads.
+///
+/// The fields apply in a fixed order: [`time_range`] selects the messages,
+/// then [`offset`] skips from the front of that selection and [`limit`] caps
+/// how many of the rest are emitted, so the two page through the filtered
+/// messages of a topic.
+///
+/// [`time_range`]: ReadOptions::time_range
+/// [`offset`]: ReadOptions::offset
+/// [`limit`]: ReadOptions::limit
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReadOptions {
+    /// Restrict messages to this `log_time` range.
+    pub time_range: Option<TimeRange>,
+    /// Skip this many messages before emitting any. `0` skips nothing.
+    ///
+    /// An offset past the last matching message yields no messages rather than
+    /// an error. Skipping cannot avoid decompressing the messages it passes
+    /// over: MCAP chunk indexes carry no per-chunk message count, so reaching
+    /// offset N still requires reading the preceding chunks. Prefer
+    /// [`ReadOptions::time_range`] to resume a scan, since a start time does
+    /// prune whole chunks through the index.
+    ///
+    /// Only the sequential path skips without decoding. On the parallel path a
+    /// chunk is decoded before its position in the topic is known, so skipped
+    /// messages are decoded and discarded — and a decode failure among them
+    /// still fails the read.
+    pub offset: usize,
+    /// Stop after this many emitted messages. `None` has no limit.
+    ///
+    /// A limit forces the sequential read path so the scan can stop as soon as
+    /// it is reached, overriding [`ReadOptions::parallel`] and the reader's own
+    /// setting from [`McapReaderBuilder::with_parallel`].
+    pub limit: Option<usize>,
+    /// Override parallel chunk decompression for this read. `None` keeps the
+    /// reader's setting from [`McapReaderBuilder::with_parallel`].
+    ///
+    /// Ignored when [`ReadOptions::limit`] is set, since stopping early
+    /// requires reading chunks in order.
+    pub parallel: Option<bool>,
+}
+
+/// Chunk- and message-level predicates shared by the sequential and parallel
+/// read paths.
+///
+/// The two paths differ in how they schedule decoding, but they must agree on
+/// which chunks and messages belong to a read, so both select through this.
+#[derive(Debug, Clone, Copy)]
+struct MessageFilter {
+    channel_id: u16,
+    time_range: Option<TimeRange>,
+}
+
+impl MessageFilter {
+    fn new(context: &TopicDecodeContext, options: &ReadOptions) -> Self {
+        Self {
+            channel_id: context.channel_id,
+            time_range: options.time_range,
+        }
+    }
+
+    /// Rejected chunks are never decompressed, so this is the read's cheapest
+    /// filter and the only one that saves I/O.
+    fn accepts_chunk(self, chunk_index: &mcap::records::ChunkIndex) -> bool {
+        chunk_index
+            .message_index_offsets
+            .contains_key(&self.channel_id)
+            && self
+                .time_range
+                .is_none_or(|range| range.overlaps_chunk(chunk_index))
+    }
+
+    /// A chunk can hold messages from other channels and from outside the time
+    /// range, so surviving [`MessageFilter::accepts_chunk`] is not enough.
+    fn accepts_message(self, message: &mcap::Message<'_>) -> bool {
+        message.channel.id == self.channel_id
+            && self
+                .time_range
+                .is_none_or(|range| range.contains(message.log_time))
+    }
+}
+
 impl McapReader {
     /// Create a builder for [`McapReader`].
     pub fn builder() -> McapReaderBuilder {
@@ -202,12 +307,24 @@ impl McapReader {
         &self,
         path: &Path,
         topic: &str,
+        callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        self.for_each_decoded_message_with_options(path, topic, &ReadOptions::default(), callback)
+    }
+
+    /// Read decoded messages subject to `options` and emit them one-by-one to callback.
+    pub fn for_each_decoded_message_with_options(
+        &self,
+        path: &Path,
+        topic: &str,
+        options: &ReadOptions,
         mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
         let mmap = self.mmap_file(path)?;
         let summary = self.read_summary(path, &mmap)?;
         let context = self.resolve_topic_decode_context(&summary, topic)?;
-        self.for_each_decoded_message_impl(&mmap, &summary, &context, topic, &mut |decoded| {
+        let request = DecodeRequest { topic, options };
+        self.for_each_decoded_message_impl(&mmap, &summary, &context, request, &mut |decoded| {
             callback(decoded).map_err(McapReaderError::Callback)
         })
     }
@@ -245,16 +362,21 @@ impl McapReader {
         mmap: &Mmap,
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
-        topic: &str,
+        request: DecodeRequest<'_>,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        if self.parallel {
-            self.for_each_decoded_message_parallel(mmap, summary, context, topic, callback)
+        // TODO(P2a): When a limit is set, use per-channel MessageIndex entries to
+        // identify the minimal set of chunks that can satisfy it, then decode that
+        // bounded set in parallel. Message indexes are optional in MCAP, so files
+        // without them must retain this sequential, immediate-stop fallback.
+        let parallel = request.options.parallel.unwrap_or(self.parallel);
+        if parallel && request.options.limit.is_none() {
+            self.for_each_decoded_message_parallel(mmap, summary, context, request, callback)
         } else {
-            self.for_each_decoded_message_sequential(mmap, summary, context, topic, callback)
+            self.for_each_decoded_message_sequential(mmap, summary, context, request, callback)
         }
     }
 
@@ -263,7 +385,7 @@ impl McapReader {
         mmap: &Mmap,
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
-        topic: &str,
+        request: DecodeRequest<'_>,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
@@ -271,8 +393,8 @@ impl McapReader {
     {
         use rayon::prelude::*;
 
-        let chunk_indexes: Vec<_> =
-            Self::topic_chunk_indexes(summary, context.channel_id).collect();
+        let filter = MessageFilter::new(context, request.options);
+        let chunk_indexes: Vec<_> = Self::matching_chunk_indexes(summary, filter).collect();
         let chunk_count = chunk_indexes.len();
         let cancelled = Arc::new(AtomicBool::new(false));
         let (sender, receiver) = mpsc::channel();
@@ -287,8 +409,8 @@ impl McapReader {
                             mmap,
                             summary,
                             context,
-                            topic,
                             chunk_index,
+                            request,
                             &cancelled,
                         );
                         let _ = sender.send((position, result));
@@ -298,6 +420,7 @@ impl McapReader {
             drop(sender);
 
             let mut next_position = 0usize;
+            let mut skipped = 0usize;
             let mut pending = BTreeMap::new();
             while next_position < chunk_count {
                 let (position, result) = receiver.recv().map_err(|_| {
@@ -316,6 +439,12 @@ impl McapReader {
                         }
                     };
                     for decoded in chunk_messages {
+                        // Chunks are decoded before their position in the topic
+                        // is known, so the offset can only be applied here.
+                        if skipped < request.options.offset {
+                            skipped += 1;
+                            continue;
+                        }
                         if let Err(error) = callback(decoded) {
                             cancelled.store(true, Ordering::Relaxed);
                             return Err(error);
@@ -331,14 +460,14 @@ impl McapReader {
         Ok(())
     }
 
-    fn topic_chunk_indexes(
+    fn matching_chunk_indexes(
         summary: &mcap::read::Summary,
-        channel_id: u16,
+        filter: MessageFilter,
     ) -> impl Iterator<Item = &mcap::records::ChunkIndex> {
         summary
             .chunk_indexes
             .iter()
-            .filter(move |chunk_index| chunk_index.message_index_offsets.contains_key(&channel_id))
+            .filter(move |chunk_index| filter.accepts_chunk(chunk_index))
     }
 
     fn decode_chunk_messages(
@@ -346,14 +475,15 @@ impl McapReader {
         mmap: &Mmap,
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
-        topic: &str,
         chunk_index: &mcap::records::ChunkIndex,
+        request: DecodeRequest<'_>,
         cancelled: &AtomicBool,
     ) -> Result<Vec<DecodedMessage>, McapReaderError> {
         if cancelled.load(Ordering::Relaxed) {
             return Ok(Vec::new());
         }
 
+        let filter = MessageFilter::new(context, request.options);
         let mut decoded_messages = Vec::new();
         for msg_result in summary.stream_chunk(mmap, chunk_index)? {
             if cancelled.load(Ordering::Relaxed) {
@@ -361,12 +491,12 @@ impl McapReader {
             }
 
             let msg = msg_result?;
-            if msg.channel.id != context.channel_id {
+            if !filter.accepts_message(&msg) {
                 continue;
             }
             decoded_messages.push(self.decode_message(
                 context,
-                topic,
+                request.topic,
                 msg.log_time,
                 msg.publish_time,
                 &msg.data,
@@ -381,27 +511,42 @@ impl McapReader {
         mmap: &Mmap,
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
-        topic: &str,
+        request: DecodeRequest<'_>,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        for chunk_index in Self::topic_chunk_indexes(summary, context.channel_id) {
+        if request.options.limit == Some(0) {
+            return Ok(());
+        }
+        let filter = MessageFilter::new(context, request.options);
+        let mut skipped = 0usize;
+        let mut emitted = 0usize;
+        for chunk_index in Self::matching_chunk_indexes(summary, filter) {
             for message in summary.stream_chunk(mmap, chunk_index)? {
                 let message = message?;
-                if message.channel.id != context.channel_id {
+                if !filter.accepts_message(&message) {
+                    continue;
+                }
+                // Skipping here keeps the offset messages out of the decoder.
+                if skipped < request.options.offset {
+                    skipped += 1;
                     continue;
                 }
 
                 let decoded = self.decode_message(
                     context,
-                    topic,
+                    request.topic,
                     message.log_time,
                     message.publish_time,
                     &message.data,
                 )?;
                 callback(decoded)?;
+                emitted += 1;
+                if request.options.limit.is_some_and(|limit| emitted >= limit) {
+                    return Ok(());
+                }
             }
         }
 
@@ -501,6 +646,9 @@ impl McapReaderBuilder {
     }
 
     /// Enable or disable parallel chunk decompression and decoding (default: true).
+    ///
+    /// This is the reader-wide default; a single read can override it through
+    /// [`ReadOptions::parallel`].
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
         self
@@ -603,4 +751,10 @@ pub(crate) struct TopicDecodeContext {
     pub(crate) channel_id: u16,
     pub(crate) decoder: Box<dyn TopicDecoder>,
     pub(crate) field_defs: FieldDefs,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct DecodeRequest<'a> {
+    pub(crate) topic: &'a str,
+    pub(crate) options: &'a ReadOptions,
 }
