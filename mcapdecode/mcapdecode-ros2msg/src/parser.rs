@@ -4,7 +4,9 @@
 //! `re_ros_msg` crate and then maps the resulting `MessageSpecification` into
 //! the types understood by `mcapdecode-ros2-common`.
 
-use mcapdecode_ros2_common::{ConstDef, FieldDef, PrimitiveType, Ros2Error, StructDef, TypeExpr};
+use mcapdecode_ros2_common::{
+    ConstDef, FieldDef, PrimitiveType, Ros2Error, StructDef, TypeExpr, normalize_schema_name,
+};
 use re_ros_msg::{
     MessageSchema,
     message_spec::{
@@ -24,20 +26,10 @@ pub fn parse_msg(schema_name: &str, msg_text: &str) -> Result<StructDef, Ros2Err
     convert_to_struct_def(full_name, schema.spec)
 }
 
-fn parse_schema_name(name: &str) -> Result<Vec<String>, Ros2Error> {
+pub(crate) fn parse_schema_name(name: &str) -> Result<Vec<String>, Ros2Error> {
     // "geometry_msgs/msg/Point" → vec!["geometry_msgs", "msg", "Point"]
-    // "std_msgs/String" → vec!["std_msgs", "msg", "String"]
-    let parts: Vec<&str> = name.split('/').collect();
-
-    match parts.len() {
-        3 => Ok(parts.iter().map(|s| s.to_string()).collect()),
-        2 => Ok(vec![
-            parts[0].to_string(),
-            "msg".to_string(),
-            parts[1].to_string(),
-        ]),
-        _ => Err(format!("invalid schema name format: {name}").into()),
-    }
+    // "geometry_msgs/Point" → vec!["geometry_msgs", "msg", "Point"]
+    normalize_schema_name(name).map(|name| name.split('/').map(ToString::to_string).collect())
 }
 
 fn convert_to_struct_def(

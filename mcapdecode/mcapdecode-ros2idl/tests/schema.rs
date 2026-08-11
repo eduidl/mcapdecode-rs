@@ -1,6 +1,6 @@
 use mcapdecode_core::EnumVariant;
 use mcapdecode_ros2_common::{PrimitiveType, ResolvedType, TypeExpr};
-use mcapdecode_ros2idl::{SchemaBundle, parse_idl_section, resolve_schema};
+use mcapdecode_ros2idl::{parse_idl_section, parse_schema_bundle, resolve_schema};
 
 // ── existing tests ─────────────────────────────────────────────────────────────
 
@@ -27,11 +27,11 @@ module ex {
 };
 "#;
 
-    let bundle = SchemaBundle::parse("ex/msg/B", schema).expect("bundle parse should succeed");
+    let bundle = parse_schema_bundle("ex/msg/B", schema).expect("bundle parse should succeed");
     assert_eq!(bundle.sections.len(), 2);
     assert_eq!(
-        bundle.main_type("ex/msg/B"),
-        Some(vec!["ex".into(), "msg".into(), "B".into()])
+        bundle.main_section("ex/msg/B").map(|section| &section.path),
+        Some(&"ex/msg/B".to_string())
     );
 }
 
@@ -48,16 +48,14 @@ module localization_msgs {
   };
 };
 "#;
-    let bundle = SchemaBundle::parse("localization_msgs/msg/Pose", schema)
+    let bundle = parse_schema_bundle("localization_msgs/msg/Pose", schema)
         .expect("bundle parse should succeed");
     assert_eq!(bundle.sections.len(), 1);
     assert_eq!(
-        bundle.main_type("localization_msgs/msg/Pose"),
-        Some(vec![
-            "localization_msgs".into(),
-            "msg".into(),
-            "Pose".into()
-        ])
+        bundle
+            .main_section("localization_msgs/msg/Pose")
+            .map(|section| &section.path),
+        Some(&"localization_msgs/msg/Pose".to_string())
     );
 }
 
