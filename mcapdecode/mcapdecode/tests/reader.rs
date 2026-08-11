@@ -10,7 +10,11 @@ use std::{
 
 #[cfg(feature = "arrow")]
 use arrow::array::Int64Array;
+#[cfg(feature = "datafusion")]
+use arrow::compute::concat_batches;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
+#[cfg(feature = "datafusion")]
+use mcapdecode::datafusion::prelude::SessionContext;
 use mcapdecode::{
     McapReader, McapReaderError, PreparedTopic, ReadOptions, TimeRange, TopicDecodeStatus,
     TopicInfo,
@@ -274,6 +278,29 @@ impl TopicDecoder for TestJsonTopicDecoder {
 
     fn field_defs(&self) -> &FieldDefs {
         &self.field_defs
+    }
+}
+
+#[cfg(feature = "datafusion")]
+struct CountingJsonDecoder {
+    topic_decoder_builds: Arc<AtomicUsize>,
+}
+
+#[cfg(feature = "datafusion")]
+impl MessageDecoder for CountingJsonDecoder {
+    fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
+    }
+
+    fn build_topic_decoder(
+        &self,
+        _schema_name: &str,
+        _schema_data: &[u8],
+    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
+        self.topic_decoder_builds.fetch_add(1, Ordering::Relaxed);
+        Ok(Box::new(TestJsonTopicDecoder {
+            field_defs: vec![FieldDef::new("value", DataTypeDef::I64, true)].into(),
+        }))
     }
 }
 
@@ -1087,6 +1114,67 @@ fn for_each_record_batch_flushes_final_partial_batch() {
     );
 
     assert_eq!(batch_rows, vec![2]);
+}
+
+#[cfg(feature = "datafusion")]
+#[test]
+fn datafusion_table_registers_decoded_topic_for_sql_queries() {
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+    let provider = reader
+        .datafusion_table(
+            &fixture_path("with_summary.mcap"),
+            "/decoded",
+            &batch_options(1),
+        )
+        .unwrap();
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let batches = runtime.block_on(async {
+        let context = SessionContext::new();
+        context.register_table("messages", provider).unwrap();
+        context
+            .sql("SELECT value FROM messages WHERE value > 1")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap()
+    });
+
+    let schema = batches
+        .first()
+        .expect("query should return a batch containing the decoded message")
+        .schema();
+    let batch = concat_batches(&schema, &batches).unwrap();
+    let values = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .expect("expected Int64Array for 'value' column");
+    assert_eq!(values.values(), &[2]);
+}
+
+#[cfg(feature = "datafusion")]
+#[test]
+fn datafusion_table_prepares_topic_once() {
+    let topic_decoder_builds = Arc::new(AtomicUsize::new(0));
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(CountingJsonDecoder {
+            topic_decoder_builds: Arc::clone(&topic_decoder_builds),
+        }))
+        .build();
+
+    reader
+        .datafusion_table(
+            &fixture_path("with_summary.mcap"),
+            "/decoded",
+            &RecordBatchOptions::default(),
+        )
+        .unwrap();
+
+    assert_eq!(topic_decoder_builds.load(Ordering::Relaxed), 1);
 }
 
 #[cfg(feature = "arrow")]

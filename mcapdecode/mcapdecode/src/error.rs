@@ -48,6 +48,11 @@ pub enum McapReaderError {
     #[error(transparent)]
     ArrowConvert(#[from] mcapdecode_arrow::ArrowConvertError),
 
+    /// DataFusion rejected a generated Arrow table.
+    #[cfg(feature = "datafusion")]
+    #[error(transparent)]
+    DataFusion(#[from] datafusion::error::DataFusionError),
+
     /// Multiple channels found for the same topic in the MCAP file.
     #[error("multiple channels found for requested topic")]
     MultipleChannels,
