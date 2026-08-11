@@ -88,4 +88,9 @@ rm -rf "${MCAPBENCH_FIXTURE_DIR:-${TMPDIR:-/tmp}/mcapbench}"
 
 `dev/mcapbench/tests/roundtrip.rs` decodes every generated combination back to the
 sample it was produced from; a broken schema or payload fails there rather than inside a
-benchmark.
+benchmark. These benchmark-fixture checks are opt-in and do not run as part of a normal
+`cargo test --workspace`; run them explicitly with:
+
+```bash
+cargo test -p mcapbench --features fixture-tests
+```
