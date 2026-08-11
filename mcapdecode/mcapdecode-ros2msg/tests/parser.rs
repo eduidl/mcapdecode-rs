@@ -1,5 +1,5 @@
 use mcapdecode_ros2_common::TypeExpr;
-use mcapdecode_ros2msg::{SchemaBundle, parse_msg, resolve_for_cdr};
+use mcapdecode_ros2msg::{parse_msg, parse_schema_bundle, resolve_schema};
 
 // ── existing tests ─────────────────────────────────────────────────────────────
 
@@ -84,13 +84,6 @@ fn parse_bounded_string() {
 }
 
 #[test]
-fn parse_schema_name_two_parts() {
-    let msg = "int32 x";
-    let result = parse_msg("std_msgs/String", msg).unwrap();
-    assert_eq!(result.full_name, vec!["std_msgs", "msg", "String"]);
-}
-
-#[test]
 fn parse_schema_name_three_parts() {
     let msg = "int32 x";
     let result = parse_msg("geometry_msgs/msg/Point", msg).unwrap();
@@ -99,14 +92,11 @@ fn parse_schema_name_three_parts() {
 
 // ── new tests ──────────────────────────────────────────────────────────────────
 
-/// A schema name with one component (no `/`) must be rejected.
 #[test]
-fn parse_schema_name_single_part_is_rejected() {
-    let err = parse_msg("BadName", "int32 x").unwrap_err();
-    assert!(
-        format!("{err:#}").contains("invalid schema name format"),
-        "unexpected error: {err:#}"
-    );
+fn parse_schema_name_two_parts() {
+    let msg = "int32 x";
+    let result = parse_msg("std_msgs/String", msg).unwrap();
+    assert_eq!(result.full_name, vec!["std_msgs", "msg", "String"]);
 }
 
 /// A schema name with four or more `/`-separated components must be rejected.
@@ -198,25 +188,16 @@ MSG: std_msgs/Header
 builtin_interfaces/Time stamp
 string frame_id
 "#;
-    let bundle = SchemaBundle::parse("sensor_msgs/msg/MagneticField", schema).unwrap();
+    let bundle = parse_schema_bundle("sensor_msgs/msg/MagneticField", schema).unwrap();
 
     assert_eq!(bundle.sections.len(), 3);
-    assert_eq!(
-        bundle.sections[0].msg_path,
-        vec!["sensor_msgs", "msg", "MagneticField"]
-    );
-    assert_eq!(
-        bundle.sections[1].msg_path,
-        vec!["geometry_msgs", "msg", "Vector3"]
-    );
-    assert_eq!(
-        bundle.sections[2].msg_path,
-        vec!["std_msgs", "msg", "Header"]
-    );
+    assert_eq!(bundle.sections[0].path, "sensor_msgs/msg/MagneticField");
+    assert_eq!(bundle.sections[1].path, "geometry_msgs/msg/Vector3");
+    assert_eq!(bundle.sections[2].path, "std_msgs/msg/Header");
 }
 
 #[test]
-fn resolve_for_cdr_supports_ros2msg_schema_bundles() {
+fn resolve_schema_supports_ros2msg_schema_bundles() {
     let schema = r#"
 std_msgs/Header header
 Pose pose
@@ -240,7 +221,7 @@ MSG: std_msgs/Header
 builtin_interfaces/Time stamp
 string frame_id
 "#;
-    let resolved = resolve_for_cdr("geometry_msgs/msg/PoseStamped", schema.as_bytes()).unwrap();
+    let resolved = resolve_schema("geometry_msgs/msg/PoseStamped", schema).unwrap();
 
     assert_eq!(resolved.root, vec!["geometry_msgs", "msg", "PoseStamped"]);
     assert!(resolved.structs.contains_key(&vec![

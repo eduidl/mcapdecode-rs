@@ -13,7 +13,7 @@
 //!
 //! ```text
 //! schema bytes (UTF-8 .msg or bundled .msg sections)
-//!   └─ SchemaBundle::parse      – optional split at `====` / `MSG:`
+//!   └─ parse_schema_bundle     – optional split at `====` / `MSG:`
 //!       └─ parse_msg            – re_ros_msg parser → StructDef
 //!           └─ resolve_schema   – type resolution → ResolvedSchema
 //!               └─ decode_cdr_to_value – CDR bytes → Value
@@ -26,10 +26,11 @@ mod schema_bundle;
 use mcapdecode_core::{
     DecoderError, EncodingKey, MessageDecoder, MessageEncoding, SchemaEncoding, TopicDecoder,
 };
-use mcapdecode_ros2_common::{ResolvedSchema, Ros2CdrTopicDecoder};
+use mcapdecode_ros2_common::build_cdr_topic_decoder;
+pub use mcapdecode_ros2_common::{SchemaBundle, SchemaSection};
 pub use parser::parse_msg;
 pub use resolver::resolve_schema;
-pub use schema_bundle::{MsgSection, SchemaBundle};
+pub use schema_bundle::parse_schema_bundle;
 
 /// [`MessageDecoder`] for ROS 2 .msg schemas with CDR-encoded messages.
 pub struct Ros2MsgDecoder;
@@ -56,22 +57,6 @@ impl MessageDecoder for Ros2MsgDecoder {
         schema_name: &str,
         schema_data: &[u8],
     ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
-        let resolved = resolve_for_cdr(schema_name, schema_data)?;
-        Ok(Box::new(Ros2CdrTopicDecoder::new(resolved)))
+        build_cdr_topic_decoder(schema_name, schema_data, resolve_schema)
     }
-}
-
-/// Parse and resolve a .msg schema into a [`ResolvedSchema`] ready for CDR decoding.
-pub fn resolve_for_cdr(
-    schema_name: &str,
-    schema_data: &[u8],
-) -> Result<ResolvedSchema, DecoderError> {
-    let schema_str = std::str::from_utf8(schema_data).map_err(|e| DecoderError::SchemaParse {
-        schema_name: schema_name.to_string(),
-        source: Box::new(e),
-    })?;
-    resolve_schema(schema_name, schema_str).map_err(|e| DecoderError::SchemaParse {
-        schema_name: schema_name.to_string(),
-        source: e.into(),
-    })
 }

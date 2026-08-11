@@ -79,53 +79,38 @@ pub struct ResolvedSchema {
 /// when the caller has not provided them explicitly (e.g. when only a single
 /// .msg file is available rather than a full [`SchemaBundle`]).
 pub fn ensure_builtin_structs(all_structs: &mut HashMap<Vec<String>, StructDef>) {
-    let time_name = vec![
-        "builtin_interfaces".to_string(),
-        "msg".to_string(),
-        "Time".to_string(),
-    ];
-    all_structs
-        .entry(time_name.clone())
-        .or_insert_with(|| StructDef {
-            full_name: time_name,
-            fields: vec![
-                FieldDef {
-                    name: "sec".to_string(),
-                    ty: TypeExpr::Primitive(PrimitiveType::I32),
-                    fixed_len: None,
-                },
-                FieldDef {
-                    name: "nanosec".to_string(),
-                    ty: TypeExpr::Primitive(PrimitiveType::U32),
-                    fixed_len: None,
-                },
-            ],
-            consts: vec![],
-        });
+    for type_name in ["Time", "Duration"] {
+        all_structs
+            .entry(builtin_interface_name(type_name))
+            .or_insert_with(|| builtin_interface_struct(type_name));
+    }
+}
 
-    let duration_name = vec![
+fn builtin_interface_name(type_name: &str) -> Vec<String> {
+    vec![
         "builtin_interfaces".to_string(),
         "msg".to_string(),
-        "Duration".to_string(),
-    ];
-    all_structs
-        .entry(duration_name.clone())
-        .or_insert_with(|| StructDef {
-            full_name: duration_name,
-            fields: vec![
-                FieldDef {
-                    name: "sec".to_string(),
-                    ty: TypeExpr::Primitive(PrimitiveType::I32),
-                    fixed_len: None,
-                },
-                FieldDef {
-                    name: "nanosec".to_string(),
-                    ty: TypeExpr::Primitive(PrimitiveType::U32),
-                    fixed_len: None,
-                },
-            ],
-            consts: vec![],
-        });
+        type_name.to_string(),
+    ]
+}
+
+fn builtin_interface_struct(type_name: &str) -> StructDef {
+    StructDef {
+        full_name: builtin_interface_name(type_name),
+        fields: vec![
+            FieldDef {
+                name: "sec".to_string(),
+                ty: TypeExpr::Primitive(PrimitiveType::I32),
+                fixed_len: None,
+            },
+            FieldDef {
+                name: "nanosec".to_string(),
+                ty: TypeExpr::Primitive(PrimitiveType::U32),
+                fixed_len: None,
+            },
+        ],
+        consts: vec![],
+    }
 }
 
 /// Resolve all field types in a single struct definition.
