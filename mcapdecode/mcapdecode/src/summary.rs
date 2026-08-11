@@ -9,15 +9,9 @@ pub(crate) fn get_channel_from_summary<'a>(
     topic: &str,
 ) -> Result<&'a Arc<mcap::Channel<'a>>, McapReaderError> {
     let mut channels = summary.channels.values().filter(|ch| ch.topic == topic);
-    let first = channels
-        .next()
-        .ok_or_else(|| McapReaderError::TopicNotFound {
-            topic: topic.to_string(),
-        })?;
+    let first = channels.next().ok_or(McapReaderError::TopicNotFound)?;
     if channels.next().is_some() {
-        return Err(McapReaderError::MultipleChannels {
-            topic: topic.to_string(),
-        });
+        return Err(McapReaderError::MultipleChannels);
     }
     Ok(first)
 }
@@ -67,8 +61,5 @@ pub(crate) fn get_schema_from_channel<'a>(
     channel
         .schema
         .as_ref()
-        .ok_or_else(|| McapReaderError::SchemaNotAvailable {
-            topic: channel.topic.clone(),
-            channel_id: channel.id,
-        })
+        .ok_or(McapReaderError::SchemaNotAvailable)
 }

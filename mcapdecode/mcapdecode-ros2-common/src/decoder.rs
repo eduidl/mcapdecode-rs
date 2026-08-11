@@ -14,16 +14,11 @@ pub fn resolve_for_cdr(
     schema_data: &[u8],
     resolve_schema: ResolveSchemaFn,
 ) -> Result<ResolvedSchema, DecoderError> {
-    let schema_text =
-        std::str::from_utf8(schema_data).map_err(|source| DecoderError::SchemaParse {
-            schema_name: schema_name.to_string(),
-            source: Box::new(source),
-        })?;
+    let schema_text = std::str::from_utf8(schema_data)
+        .map_err(|source| DecoderError::SchemaParse(Box::new(source)))?;
 
-    resolve_schema(schema_name, schema_text).map_err(|source| DecoderError::SchemaParse {
-        schema_name: schema_name.to_string(),
-        source: Box::new(source),
-    })
+    resolve_schema(schema_name, schema_text)
+        .map_err(|source| DecoderError::SchemaParse(Box::new(source)))
 }
 
 /// Build the shared ROS 2 CDR topic decoder from schema bytes.

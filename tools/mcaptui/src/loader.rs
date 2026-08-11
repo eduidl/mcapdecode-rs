@@ -13,7 +13,7 @@ use std::{
 use anyhow::Result;
 use mcapdecode::{
     McapReader, McapReaderError, RawMessage, TopicInfo,
-    core::{DataTypeDef, DecodedMessage, FieldDef, FieldDefs, Value},
+    core::{DataTypeDef, DecodedMessage, DecoderError, FieldDef, FieldDefs, Value},
 };
 
 use crate::{
@@ -279,8 +279,10 @@ fn supports_raw_fallback(error: &McapReaderError) -> bool {
     matches!(
         error,
         McapReaderError::NoDecoder { .. }
-            | McapReaderError::SchemaNotAvailable { .. }
-            | McapReaderError::SchemaDerivationFailed { .. }
+            | McapReaderError::SchemaNotAvailable
+            | McapReaderError::Decoder(
+                DecoderError::SchemaParse(_) | DecoderError::SchemaDerivation(_)
+            )
     )
 }
 

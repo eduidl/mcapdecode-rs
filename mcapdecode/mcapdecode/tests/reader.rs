@@ -226,10 +226,8 @@ fn collect_raw_payloads(reader: &McapReader, path: &Path, topic: &str) -> Vec<Ve
 }
 
 fn decode_test_value(message_data: &[u8]) -> Result<i64, DecoderError> {
-    let text = std::str::from_utf8(message_data).map_err(|source| DecoderError::MessageDecode {
-        schema_name: "test.Msg".to_string(),
-        source: Box::new(source),
-    })?;
+    let text = std::str::from_utf8(message_data)
+        .map_err(|source| DecoderError::MessageDecode(Box::new(source)))?;
 
     for key in ["\"value\":", "\"x\":"] {
         if let Some(start) = text.find(key) {
@@ -243,10 +241,7 @@ fn decode_test_value(message_data: &[u8]) -> Result<i64, DecoderError> {
         }
     }
 
-    Err(DecoderError::MessageDecode {
-        schema_name: "test.Msg".to_string(),
-        source: "missing integer field".into(),
-    })
+    Err(DecoderError::MessageDecode("missing integer field".into()))
 }
 
 struct TestJsonDecoder;
@@ -690,7 +685,7 @@ fn message_count_no_summary_returns_error() {
     let path = fixture_path("no_summary.mcap");
     assert!(matches!(
         reader.message_count(&path, "/decoded"),
-        Err(McapReaderError::SummaryNotAvailable { .. })
+        Err(McapReaderError::SummaryNotAvailable)
     ));
 }
 
@@ -700,7 +695,7 @@ fn message_count_unknown_topic_returns_error() {
     let path = fixture_path("with_summary.mcap");
     assert!(matches!(
         reader.message_count(&path, "/unknown"),
-        Err(McapReaderError::TopicNotFound { .. })
+        Err(McapReaderError::TopicNotFound)
     ));
 }
 
@@ -805,7 +800,7 @@ fn with_prepared_topic_reports_unknown_topic_without_running_callback() {
         })
         .unwrap_err();
 
-    assert!(matches!(err, McapReaderError::TopicNotFound { .. }));
+    assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[test]
@@ -888,7 +883,7 @@ fn list_topics_with_decode_status_reads_topic_metadata_and_decode_errors() {
                 },
                 decodable: false,
                 decode_error: Some(
-                    "no decoder registered for schema_encoding='jsonschema', message_encoding='json' on topic '/decoded'"
+                    "no decoder registered for schema_encoding='jsonschema', message_encoding='json'"
                         .to_string(),
                 ),
             },
@@ -902,9 +897,7 @@ fn list_topics_with_decode_status_reads_topic_metadata_and_decode_errors() {
                     channel_count: 1,
                 },
                 decodable: false,
-                decode_error: Some(
-                    "schema not available for topic '/raw' (channel id 2)".to_string(),
-                ),
+                decode_error: Some("schema not available".to_string()),
             },
         ]
     );
@@ -916,7 +909,7 @@ fn list_topics_no_summary_returns_error() {
 
     assert!(matches!(
         reader.list_topics(&fixture_path("no_summary.mcap")),
-        Err(McapReaderError::SummaryNotAvailable { .. })
+        Err(McapReaderError::SummaryNotAvailable)
     ));
 }
 
@@ -976,10 +969,7 @@ fn for_each_record_batch_unknown_topic_returns_error() {
             Ok(())
         })
         .unwrap_err();
-    assert!(matches!(
-        err,
-        McapReaderError::TopicNotFound { ref topic } if topic == "/unknown"
-    ));
+    assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[cfg(feature = "arrow")]
@@ -990,10 +980,7 @@ fn for_each_record_batch_errors_when_schema_is_missing() {
     let err = reader
         .for_each_record_batch(&fixture_path("with_summary.mcap"), "/raw", |_batch| Ok(()))
         .unwrap_err();
-    assert!(matches!(
-        err,
-        McapReaderError::SchemaNotAvailable { ref topic, .. } if topic == "/raw"
-    ));
+    assert!(matches!(err, McapReaderError::SchemaNotAvailable));
 }
 
 #[cfg(feature = "arrow")]
@@ -1147,10 +1134,7 @@ fn for_each_decoded_message_unknown_topic_returns_error() {
         })
         .unwrap_err();
 
-    assert!(matches!(
-        err,
-        McapReaderError::TopicNotFound { ref topic } if topic == "/unknown"
-    ));
+    assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[test]
@@ -1166,10 +1150,7 @@ fn for_each_decoded_message_errors_when_schema_is_missing() {
         )
         .unwrap_err();
 
-    assert!(matches!(
-        err,
-        McapReaderError::SchemaNotAvailable { ref topic, .. } if topic == "/raw"
-    ));
+    assert!(matches!(err, McapReaderError::SchemaNotAvailable));
 }
 
 #[test]
@@ -1205,10 +1186,7 @@ fn for_each_raw_message_unknown_topic_returns_error() {
         })
         .unwrap_err();
 
-    assert!(matches!(
-        err,
-        McapReaderError::TopicNotFound { ref topic } if topic == "/unknown"
-    ));
+    assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[test]
@@ -1269,7 +1247,10 @@ fn for_each_decoded_message_parallel_propagates_decode_error() {
         .for_each_decoded_message(fixture.path(), "/decoded", |_message| Ok(()))
         .unwrap_err();
 
-    assert!(matches!(err, McapReaderError::MessageDecodeFailed { .. }));
+    assert!(matches!(
+        err,
+        McapReaderError::Decoder(DecoderError::MessageDecode(_))
+    ));
 }
 
 #[test]
@@ -1383,7 +1364,10 @@ fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixtur
         .for_each_record_batch(fixture.path(), "/decoded", |_batch| Ok(()))
         .unwrap_err();
 
-    assert!(matches!(err, McapReaderError::MessageDecodeFailed { .. }));
+    assert!(matches!(
+        err,
+        McapReaderError::Decoder(DecoderError::MessageDecode(_))
+    ));
 }
 
 #[cfg(feature = "arrow")]

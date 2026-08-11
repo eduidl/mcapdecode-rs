@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path};
 
 use anyhow::{Context, Result};
-use mcapdecode::{McapReader, McapReaderError, TopicInfo};
+use mcapdecode::{McapReader, McapReaderError, TopicInfo, core::DecoderError};
 
 use crate::{app, format};
 
@@ -67,7 +67,9 @@ fn supports_raw_schema_view(error: &McapReaderError) -> bool {
     matches!(
         error,
         McapReaderError::NoDecoder { .. }
-            | McapReaderError::SchemaNotAvailable { .. }
-            | McapReaderError::SchemaDerivationFailed { .. }
+            | McapReaderError::SchemaNotAvailable
+            | McapReaderError::Decoder(
+                DecoderError::SchemaParse(_) | DecoderError::SchemaDerivation(_)
+            )
     )
 }

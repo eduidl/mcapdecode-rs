@@ -14,35 +14,34 @@ pub enum McapReaderError {
     Mcap(#[from] mcap::McapError),
 
     /// The MCAP file has no summary section.
-    #[error("MCAP summary not available in {path}")]
-    SummaryNotAvailable { path: String },
+    #[error("MCAP summary not available")]
+    SummaryNotAvailable,
 
     /// The MCAP summary section has no statistics record.
-    #[error("MCAP summary stats not available in {path}")]
-    StatsNotAvailable { path: String },
+    #[error("MCAP summary stats not available")]
+    StatsNotAvailable,
 
     /// A channel that was about to be decoded has no schema attached.
-    #[error("schema not available for topic '{topic}' (channel id {channel_id})")]
-    SchemaNotAvailable { topic: String, channel_id: u16 },
+    #[error("schema not available")]
+    SchemaNotAvailable,
 
     /// The requested topic was not found in the MCAP file.
-    #[error("topic '{topic}' not found")]
-    TopicNotFound { topic: String },
+    #[error("topic not found")]
+    TopicNotFound,
 
     /// No [`MessageDecoder`](mcapdecode_core::MessageDecoder) was registered for
     /// the encoding pair found on a channel.
     #[error(
-        "no decoder registered for schema_encoding='{schema_encoding}', message_encoding='{message_encoding}' on topic '{topic}'"
+        "no decoder registered for schema_encoding='{schema_encoding}', message_encoding='{message_encoding}'"
     )]
     NoDecoder {
         schema_encoding: String,
         message_encoding: String,
-        topic: String,
     },
 
     /// A decoder-derived schema had no fields and cannot be converted to Arrow.
-    #[error("failed to derive schema for topic '{topic}' (schema: '{schema_name}')")]
-    EmptyDerivedSchema { topic: String, schema_name: String },
+    #[error("failed to derive schema (schema: '{schema_name}')")]
+    EmptyDerivedSchema { schema_name: String },
 
     /// Arrow conversion failed while producing a record batch.
     #[cfg(feature = "arrow")]
@@ -50,24 +49,12 @@ pub enum McapReaderError {
     ArrowConvert(#[from] mcapdecode_arrow::ArrowConvertError),
 
     /// Multiple channels found for the same topic in the MCAP file.
-    #[error("multiple channels found for topic '{topic}'")]
-    MultipleChannels { topic: String },
+    #[error("multiple channels found for requested topic")]
+    MultipleChannels,
 
-    /// Decoder failed to derive schema from MCAP schema data.
-    #[error("schema derivation failed for topic '{topic}': {source}")]
-    SchemaDerivationFailed {
-        topic: String,
-        #[source]
-        source: DecoderError,
-    },
-
-    /// Decoder failed to decode a message payload.
-    #[error("message decode failed for topic '{topic}': {source}")]
-    MessageDecodeFailed {
-        topic: String,
-        #[source]
-        source: DecoderError,
-    },
+    /// Error reported by a registered message decoder.
+    #[error(transparent)]
+    Decoder(#[from] DecoderError),
 
     /// An error returned by the user-supplied callback in reader iteration APIs.
     #[error(transparent)]

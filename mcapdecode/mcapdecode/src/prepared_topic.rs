@@ -3,11 +3,7 @@
 use mcapdecode_core::{DecodedMessage, FieldDefs};
 use memmap2::Mmap;
 
-use crate::{
-    McapReader, ReadOptions,
-    decode::{DecodeRequest, TopicDecodeContext},
-    error::McapReaderError,
-};
+use crate::{McapReader, ReadOptions, decode::TopicDecodeContext, error::McapReaderError};
 #[cfg(feature = "arrow")]
 use crate::{MessageBatchSchema, RecordBatchOptions};
 
@@ -71,10 +67,7 @@ impl PreparedTopic<'_> {
             &self.mmap,
             &self.summary,
             &self.context,
-            DecodeRequest {
-                topic: &self.topic,
-                options,
-            },
+            options,
             callback,
         )
     }

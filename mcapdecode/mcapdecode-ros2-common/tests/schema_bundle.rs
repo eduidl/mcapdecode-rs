@@ -48,10 +48,7 @@ fn resolve_for_cdr_maps_invalid_utf8_to_schema_parse_error() {
     let error = resolve_for_cdr("example/msg/Message", &[0xff], resolve_empty_schema)
         .expect_err("invalid UTF-8 should be rejected");
 
-    assert!(matches!(
-        error,
-        DecoderError::SchemaParse { schema_name, .. } if schema_name == "example/msg/Message"
-    ));
+    assert!(matches!(error, DecoderError::SchemaParse(_)));
 }
 
 #[test]
