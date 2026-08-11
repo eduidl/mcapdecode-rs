@@ -9,10 +9,12 @@ mod lifecycle;
 mod navigation;
 mod util;
 
+use util::offset_scroll;
+
 const DEFAULT_PAGE_STEP: usize = 10;
-const DEFAULT_DETAIL_STEP: u16 = 10;
-const DEFAULT_SCHEMA_STEP: u16 = 10;
-const DEFAULT_HORIZONTAL_STEP: u16 = 4;
+const DEFAULT_SCROLL_PAGE_STEP: u16 = 10;
+const DETAIL_HORIZONTAL_STEP: u16 = 4;
+const SCHEMA_HORIZONTAL_STEP: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -182,7 +184,7 @@ pub struct App {
     session: SessionState,
     topics: TopicListState,
     messages: MessageState,
-    detail: DetailPaneState,
+    detail: ScrollPane,
     schema: SchemaPaneState,
     layout: LayoutState,
 }
@@ -217,13 +219,72 @@ struct MessageState {
     loading: LoadingState,
 }
 
+/// Scroll offsets and viewport of one scrollable pane.
+///
+/// The detail and schema panes scroll identically; only the content they
+/// measure against differs, so every method takes the [`ScrollLimits`] derived
+/// from that content instead of reading it back out of [`App`].
 #[derive(Debug)]
-struct DetailPaneState {
+struct ScrollPane {
     scroll: u16,
     hscroll: u16,
     page_step: u16,
     view_height: u16,
     view_width: u16,
+    /// Columns moved per horizontal step. The detail pane advances by a whole
+    /// indent level, the schema pane one column at a time.
+    horizontal_step: u16,
+}
+
+/// How far a pane can scroll before running past the end of its content.
+#[derive(Debug, Clone, Copy)]
+struct ScrollLimits {
+    vertical: u16,
+    horizontal: u16,
+}
+
+impl ScrollLimits {
+    /// The limits of a pane with nothing to show, which pins it to the origin.
+    const NONE: Self = Self {
+        vertical: 0,
+        horizontal: 0,
+    };
+}
+
+impl ScrollPane {
+    fn new(horizontal_step: u16) -> Self {
+        Self {
+            scroll: 0,
+            hscroll: 0,
+            page_step: DEFAULT_SCROLL_PAGE_STEP,
+            view_height: 0,
+            view_width: 0,
+            horizontal_step,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.scroll = 0;
+        self.hscroll = 0;
+    }
+
+    fn scroll_by(&mut self, delta: i32, limits: ScrollLimits) {
+        self.scroll = offset_scroll(self.scroll, delta, 1).min(limits.vertical);
+    }
+
+    fn page_by(&mut self, delta: i32, limits: ScrollLimits) {
+        self.scroll = offset_scroll(self.scroll, delta, self.page_step).min(limits.vertical);
+    }
+
+    fn scroll_horizontal_by(&mut self, delta: i32, limits: ScrollLimits) {
+        self.hscroll =
+            offset_scroll(self.hscroll, delta, self.horizontal_step).min(limits.horizontal);
+    }
+
+    fn clamp(&mut self, limits: ScrollLimits) {
+        self.scroll = self.scroll.min(limits.vertical);
+        self.hscroll = self.hscroll.min(limits.horizontal);
+    }
 }
 
 #[derive(Debug)]
@@ -231,11 +292,7 @@ struct SchemaPaneState {
     enabled: bool,
     view: Option<SchemaView>,
     return_focus: MessageFocus,
-    scroll: u16,
-    hscroll: u16,
-    page_step: u16,
-    view_height: u16,
-    view_width: u16,
+    pane: ScrollPane,
 }
 
 #[derive(Debug)]

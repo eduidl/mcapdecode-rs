@@ -18,8 +18,15 @@ pub(super) fn contains_point(area: Rect, x: u16, y: u16) -> bool {
         && y < area.y.saturating_add(area.height)
 }
 
-pub(super) fn clamp_i32_to_i16(delta: i32) -> i16 {
-    delta.clamp(i16::MIN as i32, i16::MAX as i32) as i16
+/// Move `value` by `delta` steps of `step` columns/rows, saturating at both ends.
+pub(super) fn offset_scroll(value: u16, delta: i32, step: u16) -> u16 {
+    let steps = delta.unsigned_abs().min(u32::from(u16::MAX)) as u16;
+    let offset = step.max(1).saturating_mul(steps);
+    if delta.is_negative() {
+        value.saturating_sub(offset)
+    } else {
+        value.saturating_add(offset)
+    }
 }
 
 pub(super) fn max_vertical_scroll(total_lines: usize, height: u16) -> u16 {
