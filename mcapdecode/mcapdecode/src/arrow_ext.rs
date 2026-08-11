@@ -88,22 +88,32 @@ impl McapReader {
         self.with_prepared_topic(path, topic, |prepared| {
             // Built once, before the read, so every batch shares one schema.
             let batch_schema = prepared.batch_schema(options)?;
-            let batch_size = options.effective_batch_size();
-            let mut rows = Vec::with_capacity(batch_size);
-            prepared.for_each_decoded_message_with_options_internal(
-                &options.read_options,
-                &mut |decoded| {
-                    push_decoded_message(
-                        batch_size,
-                        &batch_schema,
-                        &mut rows,
-                        decoded,
-                        &mut callback,
-                    )
-                },
-            )?;
-            flush_batch(&batch_schema, &mut rows, &mut callback)
+            prepared.for_each_record_batch_with_schema(&batch_schema, options, &mut callback)
         })
+    }
+}
+
+impl PreparedTopic<'_> {
+    /// Emit batches using a caller-provided schema derived from this topic.
+    ///
+    /// Keeping schema derivation and message traversal on the same prepared
+    /// topic guarantees that consumers which need the schema up front, such as
+    /// DataFusion's `MemTable`, receive batches built with that exact schema.
+    pub(crate) fn for_each_record_batch_with_schema(
+        &self,
+        batch_schema: &MessageBatchSchema,
+        options: &RecordBatchOptions,
+        callback: &mut impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        let batch_size = options.effective_batch_size();
+        let mut rows = Vec::with_capacity(batch_size);
+        self.for_each_decoded_message_with_options_internal(
+            &options.read_options,
+            &mut |decoded| {
+                push_decoded_message(batch_size, batch_schema, &mut rows, decoded, callback)
+            },
+        )?;
+        flush_batch(batch_schema, &mut rows, callback)
     }
 }
 

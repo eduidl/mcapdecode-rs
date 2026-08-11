@@ -27,6 +27,21 @@ thiserror = "2.0.18"
 criterion = "0.5.1"
 dhat = "0.3.3"
 
+[workspace.dependencies.datafusion]
+version = "52.0.0"
+default-features = false
+features = [
+    "nested_expressions",
+    "crypto_expressions",
+    "datetime_expressions",
+    "encoding_expressions",
+    "regex_expressions",
+    "string_expressions",
+    "unicode_expressions",
+    "recursive_protection",
+    "sql",
+]
+
 [workspace.metadata.release]
 allow-branch = ["main"]
 shared-version = true
