@@ -1,5 +1,7 @@
 use arrow::datatypes::{DataType, Field, Schema};
-use mcapdecode_arrow::{ArrowConvertError, MessageBatchSchema, MetadataColumns};
+use mcapdecode_arrow::{
+    ArrowConvertError, MessageBatchSchema, MetadataColumns, MetadataTimestampFormat,
+};
 
 fn body_schema(field_names: &[&str]) -> Schema {
     Schema::new(
@@ -39,6 +41,20 @@ fn metadata_prefix_applies_to_every_metadata_column() {
     assert_eq!(
         column_names(&schema),
         ["@log_time", "@publish_time", "speed"]
+    );
+}
+
+#[test]
+fn metadata_timestamps_can_be_emitted_as_unix_nanoseconds() {
+    let metadata =
+        MetadataColumns::default().with_timestamp_format(MetadataTimestampFormat::UnixNanoseconds);
+    let schema = MessageBatchSchema::new(body_schema(&["speed"]), metadata).unwrap();
+
+    assert_eq!(schema.schema().field(0).data_type(), &DataType::Int64);
+    assert_eq!(schema.schema().field(1).data_type(), &DataType::Int64);
+    assert_eq!(
+        schema.metadata().timestamp_format(),
+        MetadataTimestampFormat::UnixNanoseconds
     );
 }
 

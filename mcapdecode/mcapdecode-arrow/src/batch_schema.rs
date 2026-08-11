@@ -3,23 +3,33 @@
 use std::sync::Arc;
 
 use arrow::{
-    array::{ArrayRef, TimestampNanosecondArray},
+    array::{ArrayRef, Int64Array, TimestampNanosecondArray},
     datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit},
 };
 use mcapdecode_core::{DecodedMessage, FieldDefs};
 
 use crate::{error::ArrowConvertError, schema_convert::field_defs_to_arrow_schema};
 
-/// Naming policy for the system metadata columns prepended to every batch.
+/// Physical Arrow type used for MCAP record timestamps.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MetadataTimestampFormat {
+    /// Arrow's timezone-aware nanosecond timestamp type.
+    #[default]
+    TimestampNanosecond,
+    /// A signed integer number of nanoseconds since the Unix epoch.
+    UnixNanoseconds,
+}
+
+/// Naming and timestamp policy for the system metadata columns prepended to every batch.
 ///
 /// The columns carry MCAP record fields that live outside the message payload,
 /// so their names share a namespace with the payload's own top-level fields. A
 /// prefix is how a caller keeps the two apart when they would otherwise collide.
-/// The default is no prefix, which keeps the names usable as bare SQL
-/// identifiers.
+/// The default is no prefix and Arrow nanosecond timestamps.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetadataColumns {
     prefix: String,
+    timestamp_format: MetadataTimestampFormat,
 }
 
 #[derive(Clone, Copy)]
@@ -38,28 +48,41 @@ impl MetadataColumn {
         }
     }
 
-    fn field(self, prefix: &str) -> Field {
+    fn field(self, prefix: &str, timestamp_format: MetadataTimestampFormat) -> Field {
+        let data_type = match timestamp_format {
+            MetadataTimestampFormat::TimestampNanosecond => {
+                DataType::Timestamp(TimeUnit::Nanosecond, Some(Arc::from(crate::TIMESTAMP_TZ)))
+            }
+            MetadataTimestampFormat::UnixNanoseconds => DataType::Int64,
+        };
         Field::new(
             format!("{}{name}", prefix, name = self.name()),
-            DataType::Timestamp(TimeUnit::Nanosecond, Some(Arc::from(crate::TIMESTAMP_TZ))),
+            data_type,
             false,
         )
     }
 
-    fn array(self, rows: &[DecodedMessage]) -> ArrayRef {
-        let values: TimestampNanosecondArray = match self {
+    fn values(self, rows: &[DecodedMessage]) -> Vec<i64> {
+        match self {
             Self::LogTime => rows
                 .iter()
-                .map(|row| Some(i64::try_from(row.log_time).expect("log_time exceeds i64::MAX")))
+                .map(|row| i64::try_from(row.log_time).expect("log_time exceeds i64::MAX"))
                 .collect(),
             Self::PublishTime => rows
                 .iter()
-                .map(|row| {
-                    Some(i64::try_from(row.publish_time).expect("publish_time exceeds i64::MAX"))
-                })
+                .map(|row| i64::try_from(row.publish_time).expect("publish_time exceeds i64::MAX"))
                 .collect(),
-        };
-        Arc::new(values.with_timezone(crate::TIMESTAMP_TZ)) as ArrayRef
+        }
+    }
+
+    fn array(self, rows: &[DecodedMessage], timestamp_format: MetadataTimestampFormat) -> ArrayRef {
+        let values = self.values(rows);
+        match timestamp_format {
+            MetadataTimestampFormat::TimestampNanosecond => {
+                Arc::new(TimestampNanosecondArray::from(values).with_timezone(crate::TIMESTAMP_TZ))
+            }
+            MetadataTimestampFormat::UnixNanoseconds => Arc::new(Int64Array::from(values)),
+        }
     }
 }
 
@@ -68,12 +91,24 @@ impl MetadataColumns {
     pub fn with_prefix(prefix: impl Into<String>) -> Self {
         Self {
             prefix: prefix.into(),
+            ..Self::default()
         }
+    }
+
+    /// Choose how the MCAP record timestamps are represented in Arrow batches.
+    pub fn with_timestamp_format(mut self, timestamp_format: MetadataTimestampFormat) -> Self {
+        self.timestamp_format = timestamp_format;
+        self
     }
 
     /// The prefix applied to every metadata column.
     pub fn prefix(&self) -> &str {
         &self.prefix
+    }
+
+    /// The physical Arrow type used for the MCAP record timestamps.
+    pub fn timestamp_format(&self) -> MetadataTimestampFormat {
+        self.timestamp_format
     }
 
     /// The emitted column names, in the order they are emitted.
@@ -84,14 +119,14 @@ impl MetadataColumns {
     fn fields(&self) -> Vec<Field> {
         MetadataColumn::ALL
             .iter()
-            .map(|column| column.field(&self.prefix))
+            .map(|column| column.field(&self.prefix, self.timestamp_format))
             .collect()
     }
 
     pub(crate) fn arrays(&self, rows: &[DecodedMessage]) -> Vec<ArrayRef> {
         MetadataColumn::ALL
             .iter()
-            .map(|column| column.array(rows))
+            .map(|column| column.array(rows, self.timestamp_format))
             .collect()
     }
 }

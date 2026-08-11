@@ -26,6 +26,8 @@ clap = { version = "4.5.58", features = ["derive"] }
 thiserror = "2.0.18"
 criterion = "0.5.1"
 dhat = "0.3.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
 
 [workspace.dependencies.datafusion]
 version = "52.0.0"
