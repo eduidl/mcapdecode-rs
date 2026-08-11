@@ -24,22 +24,12 @@ impl App {
                 field_defs: None,
                 loading: LoadingState::default(),
             },
-            detail: DetailPaneState {
-                scroll: 0,
-                hscroll: 0,
-                page_step: DEFAULT_DETAIL_STEP,
-                view_height: 0,
-                view_width: 0,
-            },
+            detail: ScrollPane::new(DETAIL_HORIZONTAL_STEP),
             schema: SchemaPaneState {
                 enabled: false,
                 view: None,
                 return_focus: MessageFocus::List,
-                scroll: 0,
-                hscroll: 0,
-                page_step: DEFAULT_SCHEMA_STEP,
-                view_height: 0,
-                view_width: 0,
+                pane: ScrollPane::new(SCHEMA_HORIZONTAL_STEP),
             },
             layout: LayoutState {
                 topics_area: Rect::default(),
@@ -123,11 +113,11 @@ impl App {
     }
 
     pub fn schema_scroll(&self) -> u16 {
-        self.schema.scroll
+        self.schema.pane.scroll
     }
 
     pub fn schema_hscroll(&self) -> u16 {
-        self.schema.hscroll
+        self.schema.pane.hscroll
     }
 
     pub fn detail_scroll(&self) -> u16 {
@@ -151,8 +141,7 @@ impl App {
         self.session.focus = MessageFocus::List;
         self.messages.items.clear();
         self.messages.selected = 0;
-        self.detail.scroll = 0;
-        self.detail.hscroll = 0;
+        self.detail.reset();
         self.messages.loading.label = Some(label.into());
         self.messages.loading.total = total;
         self.messages.loading.progress = 0;
@@ -216,17 +205,14 @@ impl App {
             text,
             line_count,
         });
-        self.schema.scroll = 0;
-        self.schema.hscroll = 0;
-        self.clamp_schema_scroll();
-        self.clamp_schema_hscroll();
+        self.schema.pane.reset();
+        self.clamp_schema();
     }
 
     pub fn clear_schema_view(&mut self) {
         self.schema.enabled = false;
         self.schema.view = None;
-        self.schema.scroll = 0;
-        self.schema.hscroll = 0;
+        self.schema.pane.reset();
         if self.session.focus == MessageFocus::Schema {
             self.session.focus = self.schema.return_focus;
         }
@@ -238,15 +224,13 @@ impl App {
         }
         self.schema.enabled = true;
         self.schema.view = None;
-        self.schema.scroll = 0;
-        self.schema.hscroll = 0;
+        self.schema.pane.reset();
     }
 
     pub fn back_to_topics(&mut self) {
         self.session.screen = Screen::Topics;
         self.session.focus = MessageFocus::List;
-        self.detail.scroll = 0;
-        self.detail.hscroll = 0;
+        self.detail.reset();
         self.messages.loading.label = None;
         self.messages.loading.total = None;
         self.messages.field_defs = None;
@@ -270,7 +254,7 @@ impl App {
     pub fn set_detail_view_height(&mut self, height: u16) {
         self.detail.view_height = height;
         self.detail.page_step = height.max(1);
-        self.clamp_detail_scroll();
+        self.clamp_detail();
     }
 
     pub fn set_topics_area(&mut self, area: Rect) {
@@ -279,18 +263,16 @@ impl App {
 
     pub fn set_schema_area(&mut self, area: Rect) {
         self.layout.schema_area = area;
-        self.schema.view_height = area.height.saturating_sub(2);
-        self.schema.view_width = area.width.saturating_sub(2);
-        self.schema.page_step = self.schema.view_height.max(1);
-        self.clamp_schema_scroll();
-        self.clamp_schema_hscroll();
+        self.schema.pane.view_height = area.height.saturating_sub(2);
+        self.schema.pane.view_width = area.width.saturating_sub(2);
+        self.schema.pane.page_step = self.schema.pane.view_height.max(1);
+        self.clamp_schema();
     }
 
     pub fn set_message_areas(&mut self, list_area: Rect, detail_area: Rect) {
         self.layout.message_list_area = list_area;
         self.layout.message_detail_area = detail_area;
         self.detail.view_width = detail_area.width.saturating_sub(2);
-        self.clamp_detail_scroll();
-        self.clamp_detail_hscroll();
+        self.clamp_detail();
     }
 }

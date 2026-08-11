@@ -37,7 +37,7 @@ impl App {
     pub(super) fn restore_detail_scroll(&mut self, anchor: Option<&DetailScrollAnchor>) {
         let Some(message) = self.materialize_selected_message() else {
             self.detail.scroll = 0;
-            self.clamp_detail_scroll();
+            self.clamp_detail();
             return;
         };
         let detail_rows = message.detail_rows.clone();
@@ -50,7 +50,7 @@ impl App {
             (None, _) => 0,
         };
         self.detail.scroll = next_scroll as u16;
-        self.clamp_detail_scroll();
+        self.clamp_detail();
     }
 
     fn ensure_selected_message_materialized(&mut self) -> Option<()> {

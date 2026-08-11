@@ -317,6 +317,65 @@ fn message_selection_keeps_detail_scroll_at_field_level() {
 }
 
 #[test]
+fn detail_pane_scrolls_with_vim_keys_and_jumps_to_ends() {
+    let mut app = App::new(vec![topic("/a", 1)]);
+    app.start_loading("/a", Some(1));
+    app.append_loaded_messages(vec![message(0, 20)]);
+    app.finish_loading("/a");
+    app.set_detail_view_height(4);
+
+    app.handle_key(KeyCode::Tab.into());
+    assert_eq!(app.focus(), MessageFocus::Detail);
+
+    app.handle_key(KeyCode::Char('j').into());
+    app.handle_key(KeyCode::Char('j').into());
+    assert_eq!(app.detail_scroll(), 2);
+
+    app.handle_key(KeyCode::Char('k').into());
+    assert_eq!(app.detail_scroll(), 1);
+
+    app.handle_key(KeyCode::End.into());
+    assert_eq!(app.detail_scroll(), 16);
+
+    app.handle_key(KeyCode::Home.into());
+    assert_eq!(app.detail_scroll(), 0);
+}
+
+#[test]
+fn schema_pane_scrolls_with_vim_keys_and_jumps_to_ends() {
+    let mut app = App::new(vec![topic("/a", 1)]);
+    app.set_schema_view(
+        "/a",
+        "Schema: /a",
+        "line-0\nline-1\nline-2\nline-3\nline-4\nline-5",
+    );
+    app.set_schema_area(Rect::new(0, 0, 20, 5));
+
+    app.handle_key(KeyCode::Tab.into());
+    assert_eq!(app.focus(), MessageFocus::Schema);
+
+    app.handle_key(KeyCode::Char('j').into());
+    assert_eq!(app.schema_scroll(), 1);
+
+    app.handle_key(KeyCode::End.into());
+    assert_eq!(app.schema_scroll(), 3);
+
+    app.handle_key(KeyCode::Home.into());
+    assert_eq!(app.schema_scroll(), 0);
+}
+
+#[test]
+fn message_list_end_key_is_a_no_op_without_messages() {
+    let mut app = App::new(vec![topic("/a", 1)]);
+    app.start_loading("/a", Some(0));
+
+    let update = app.handle_key(KeyCode::End.into());
+
+    assert_eq!(update, AppUpdate::default());
+    assert_eq!(app.message_selected(), None);
+}
+
+#[test]
 fn append_loaded_messages_keeps_loading_state_incremental() {
     let mut app = App::new(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(3));

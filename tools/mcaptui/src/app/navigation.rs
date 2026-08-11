@@ -1,9 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
 
 use super::{
-    util::{
-        clamp_i32_to_i16, contains_point, max_horizontal_scroll, max_vertical_scroll, move_index,
-    },
+    util::{contains_point, max_horizontal_scroll, max_vertical_scroll, move_index},
     *,
 };
 
@@ -38,63 +36,24 @@ impl App {
             return None;
         }
 
+        navigation_for_code(self.focused_target(), key.code)
+    }
+
+    /// The pane keyboard navigation acts on for the current screen and focus.
+    fn focused_target(&self) -> NavigationTarget {
         match self.session.screen {
-            Screen::Topics => {
-                let target = if self.session.focus == MessageFocus::Schema && self.schema_visible()
-                {
-                    NavigationTarget::Schema
-                } else {
-                    NavigationTarget::Topics
-                };
-
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        Some(NavigationCommand::Relative { target, delta: -1 })
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        Some(NavigationCommand::Relative { target, delta: 1 })
-                    }
-                    KeyCode::PageUp => Some(NavigationCommand::Page { target, delta: -1 }),
-                    KeyCode::PageDown => Some(NavigationCommand::Page { target, delta: 1 }),
-                    KeyCode::Home => Some(NavigationCommand::Absolute {
-                        target,
-                        endpoint: NavigationEndpoint::Start,
-                    }),
-                    KeyCode::End => Some(NavigationCommand::Absolute {
-                        target,
-                        endpoint: NavigationEndpoint::End,
-                    }),
-                    _ => None,
-                }
+            Screen::Topics
+                if self.session.focus == MessageFocus::Schema && self.schema_visible() =>
+            {
+                NavigationTarget::Schema
             }
-            Screen::Messages => {
-                let target = match self.session.focus {
-                    MessageFocus::List => NavigationTarget::MessageList,
-                    MessageFocus::Detail => NavigationTarget::MessageDetail,
-                    MessageFocus::Schema if self.schema_visible() => NavigationTarget::Schema,
-                    MessageFocus::Schema => NavigationTarget::MessageList,
-                };
-
-                match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        Some(NavigationCommand::Relative { target, delta: -1 })
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        Some(NavigationCommand::Relative { target, delta: 1 })
-                    }
-                    KeyCode::PageUp => Some(NavigationCommand::Page { target, delta: -1 }),
-                    KeyCode::PageDown => Some(NavigationCommand::Page { target, delta: 1 }),
-                    KeyCode::Home => Some(NavigationCommand::Absolute {
-                        target,
-                        endpoint: NavigationEndpoint::Start,
-                    }),
-                    KeyCode::End => Some(NavigationCommand::Absolute {
-                        target,
-                        endpoint: NavigationEndpoint::End,
-                    }),
-                    _ => None,
-                }
-            }
+            Screen::Topics => NavigationTarget::Topics,
+            Screen::Messages => match self.session.focus {
+                MessageFocus::List => NavigationTarget::MessageList,
+                MessageFocus::Detail => NavigationTarget::MessageDetail,
+                MessageFocus::Schema if self.schema_visible() => NavigationTarget::Schema,
+                MessageFocus::Schema => NavigationTarget::MessageList,
+            },
         }
     }
 
@@ -135,210 +94,113 @@ impl App {
         let update = match command {
             NavigationCommand::Relative { target, delta } => match target {
                 NavigationTarget::Topics => self.move_topic_selection(delta as isize),
+                NavigationTarget::MessageList => self.move_message_selection(delta as isize),
                 NavigationTarget::Schema => {
-                    self.scroll_schema(clamp_i32_to_i16(delta));
+                    let (pane, limits) = self.schema_pane();
+                    pane.scroll_by(delta, limits);
                     AppUpdate::changed()
                 }
-                NavigationTarget::MessageList => self.move_message_selection(delta as isize),
                 NavigationTarget::MessageDetail => {
-                    self.scroll_detail(clamp_i32_to_i16(delta));
+                    let (pane, limits) = self.detail_pane();
+                    pane.scroll_by(delta, limits);
                     AppUpdate::changed()
                 }
             },
             NavigationCommand::Page { target, delta } => match target {
                 NavigationTarget::Topics => self.page_topic_selection_by(delta),
+                NavigationTarget::MessageList => self.page_message_selection_by(delta),
                 NavigationTarget::Schema => {
-                    self.page_schema_by(delta);
+                    let (pane, limits) = self.schema_pane();
+                    pane.page_by(delta, limits);
                     AppUpdate::changed()
                 }
-                NavigationTarget::MessageList => self.page_message_selection_by(delta),
                 NavigationTarget::MessageDetail => {
-                    self.page_detail_by(delta);
+                    let (pane, limits) = self.detail_pane();
+                    pane.page_by(delta, limits);
                     AppUpdate::changed()
                 }
             },
-            NavigationCommand::Absolute { target, endpoint } => match (target, endpoint) {
-                (NavigationTarget::Topics, NavigationEndpoint::Start) => {
-                    self.set_topic_selection(0)
-                }
-                (NavigationTarget::Topics, NavigationEndpoint::End) => {
-                    if !self.topics.rows.is_empty() {
-                        self.set_topic_selection(self.topics.rows.len() - 1)
-                    } else {
-                        AppUpdate::default()
-                    }
-                }
-                (NavigationTarget::Schema, NavigationEndpoint::Start) => {
-                    self.schema.scroll = 0;
+            NavigationCommand::Absolute { target, endpoint } => match target {
+                NavigationTarget::Topics => match endpoint.index(self.topics.rows.len()) {
+                    Some(index) => self.set_topic_selection(index),
+                    None => AppUpdate::default(),
+                },
+                NavigationTarget::MessageList => match endpoint.index(self.messages.items.len()) {
+                    Some(index) => self.set_message_selection(index),
+                    None => AppUpdate::default(),
+                },
+                NavigationTarget::Schema => {
+                    let limits = self.schema_limits();
+                    self.schema.pane.scroll = endpoint.scroll(limits);
                     AppUpdate::changed()
                 }
-                (NavigationTarget::Schema, NavigationEndpoint::End) => {
-                    self.schema.scroll = self.max_schema_scroll();
-                    AppUpdate::changed()
-                }
-                (NavigationTarget::MessageList, NavigationEndpoint::Start) => {
-                    self.set_message_selection(0)
-                }
-                (NavigationTarget::MessageList, NavigationEndpoint::End) => {
-                    if !self.messages.items.is_empty() {
-                        self.set_message_selection(self.messages.items.len() - 1)
-                    } else {
-                        AppUpdate::default()
-                    }
-                }
-                (NavigationTarget::MessageDetail, NavigationEndpoint::Start) => {
-                    self.detail.scroll = 0;
-                    AppUpdate::changed()
-                }
-                (NavigationTarget::MessageDetail, NavigationEndpoint::End) => {
-                    self.detail.scroll = self.max_detail_scroll();
+                NavigationTarget::MessageDetail => {
+                    let limits = self.detail_limits();
+                    self.detail.scroll = endpoint.scroll(limits);
                     AppUpdate::changed()
                 }
             },
         };
 
-        self.clamp_schema_scroll();
-        self.clamp_detail_scroll();
+        self.clamp_schema();
+        self.clamp_detail();
         update
     }
 
+    /// Keys that are not navigation: everything moving a selection or scrolling a
+    /// pane is routed through [`App::navigation_for_key`] before reaching here.
     fn handle_topics_key(&mut self, code: KeyCode) -> AppUpdate {
         match code {
             KeyCode::Tab => {
                 self.toggle_focus();
-                return AppUpdate::changed();
+                AppUpdate::changed()
             }
-            KeyCode::Up | KeyCode::Char('k') => return self.move_topic_selection(-1),
-            KeyCode::Down | KeyCode::Char('j') => return self.move_topic_selection(1),
-            KeyCode::PageUp => return self.page_topic_selection(false),
-            KeyCode::PageDown => return self.page_topic_selection(true),
-            KeyCode::Home => return self.set_topic_selection(0),
-            KeyCode::End if !self.topics.rows.is_empty() => {
-                return self.set_topic_selection(self.topics.rows.len() - 1);
-            }
-            KeyCode::Char('s') => return self.toggle_schema(),
+            KeyCode::Char('s') => self.toggle_schema(),
             KeyCode::Left | KeyCode::Char('h') if self.schema_visible() => {
-                self.scroll_schema_horizontal(-1);
-                return AppUpdate::changed();
+                self.scroll_schema_horizontal(-1)
             }
             KeyCode::Right | KeyCode::Char('l') if self.schema_visible() => {
-                self.scroll_schema_horizontal(1);
-                return AppUpdate::changed();
+                self.scroll_schema_horizontal(1)
             }
-            KeyCode::Enter => return self.open_selected_topic(),
-            _ => {}
+            KeyCode::Enter => self.open_selected_topic(),
+            _ => AppUpdate::default(),
         }
-
-        AppUpdate::default()
     }
 
+    /// See [`App::handle_topics_key`] for what does *not* reach this function.
     fn handle_messages_key(&mut self, code: KeyCode) -> AppUpdate {
         match code {
             KeyCode::Esc => {
                 self.back_to_topics();
-                return AppUpdate::changed_with_request(AppRequest::CancelLoader);
+                AppUpdate::changed_with_request(AppRequest::CancelLoader)
             }
-            KeyCode::Char('s') => return self.toggle_schema(),
+            KeyCode::Char('s') => self.toggle_schema(),
             KeyCode::Tab => {
                 self.toggle_focus();
-                return AppUpdate::changed();
+                AppUpdate::changed()
             }
-            KeyCode::Up | KeyCode::Char('k') => match self.session.focus {
-                MessageFocus::List => return self.move_message_selection(-1),
-                MessageFocus::Detail => {
-                    self.scroll_detail(-1);
-                    return AppUpdate::changed();
-                }
-                MessageFocus::Schema => {
-                    self.scroll_schema(-1);
-                    return AppUpdate::changed();
-                }
-            },
-            KeyCode::Down | KeyCode::Char('j') => match self.session.focus {
-                MessageFocus::List => return self.move_message_selection(1),
-                MessageFocus::Detail => {
-                    self.scroll_detail(1);
-                    return AppUpdate::changed();
-                }
-                MessageFocus::Schema => {
-                    self.scroll_schema(1);
-                    return AppUpdate::changed();
-                }
-            },
-            KeyCode::Left | KeyCode::Char('h') => {
-                if self.session.focus == MessageFocus::Detail {
-                    self.scroll_detail_horizontal(-1);
-                    return AppUpdate::changed();
-                } else if self.session.focus == MessageFocus::Schema && self.schema_visible() {
-                    self.scroll_schema_horizontal(-1);
-                    return AppUpdate::changed();
-                }
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                if self.session.focus == MessageFocus::Detail {
-                    self.scroll_detail_horizontal(1);
-                    return AppUpdate::changed();
-                } else if self.session.focus == MessageFocus::Schema && self.schema_visible() {
-                    self.scroll_schema_horizontal(1);
-                    return AppUpdate::changed();
-                }
-            }
-            KeyCode::PageUp => match self.session.focus {
-                MessageFocus::List => return self.page_message_selection(false),
-                MessageFocus::Detail => {
-                    self.page_detail(false);
-                    return AppUpdate::changed();
-                }
-                MessageFocus::Schema => {
-                    self.page_schema_by(-1);
-                    return AppUpdate::changed();
-                }
-            },
-            KeyCode::PageDown => match self.session.focus {
-                MessageFocus::List => return self.page_message_selection(true),
-                MessageFocus::Detail => {
-                    self.page_detail(true);
-                    return AppUpdate::changed();
-                }
-                MessageFocus::Schema => {
-                    self.page_schema_by(1);
-                    return AppUpdate::changed();
-                }
-            },
-            KeyCode::Home => match self.session.focus {
-                MessageFocus::List => return self.set_message_selection(0),
-                MessageFocus::Detail => {
-                    self.detail.scroll = 0;
-                    return AppUpdate::changed();
-                }
-                MessageFocus::Schema => {
-                    self.schema.scroll = 0;
-                    return AppUpdate::changed();
-                }
-            },
-            KeyCode::End => match self.session.focus {
-                MessageFocus::List => {
-                    if !self.messages.items.is_empty() {
-                        return self.set_message_selection(self.messages.items.len() - 1);
-                    }
-                }
-                MessageFocus::Detail => {
-                    self.detail.scroll = self.max_detail_scroll();
-                    return AppUpdate::changed();
-                }
-                MessageFocus::Schema => {
-                    self.schema.scroll = self.max_schema_scroll();
-                    return AppUpdate::changed();
-                }
-            },
-            _ => {}
+            KeyCode::Left | KeyCode::Char('h') => self.scroll_focused_horizontal(-1),
+            KeyCode::Right | KeyCode::Char('l') => self.scroll_focused_horizontal(1),
+            _ => AppUpdate::default(),
         }
+    }
 
-        self.clamp_detail_scroll();
-        self.clamp_detail_hscroll();
-        self.clamp_schema_scroll();
-        self.clamp_schema_hscroll();
-        AppUpdate::default()
+    fn scroll_schema_horizontal(&mut self, delta: i32) -> AppUpdate {
+        let (pane, limits) = self.schema_pane();
+        pane.scroll_horizontal_by(delta, limits);
+        AppUpdate::changed()
+    }
+
+    fn scroll_focused_horizontal(&mut self, delta: i32) -> AppUpdate {
+        match self.session.focus {
+            MessageFocus::Detail => {
+                let (pane, limits) = self.detail_pane();
+                pane.scroll_horizontal_by(delta, limits);
+                AppUpdate::changed()
+            }
+            MessageFocus::Schema if self.schema_visible() => self.scroll_schema_horizontal(delta),
+            MessageFocus::List | MessageFocus::Schema => AppUpdate::default(),
+        }
     }
 
     pub(super) fn cycle_topics_focus(&mut self) {
@@ -369,32 +231,9 @@ impl App {
         self.set_topic_selection(next)
     }
 
-    fn page_topic_selection(&mut self, forward: bool) -> AppUpdate {
-        let step = self.topics.page_step as isize;
-        self.move_topic_selection(if forward { step } else { -step })
-    }
-
     fn page_topic_selection_by(&mut self, delta: i32) -> AppUpdate {
         let step = self.topics.page_step as isize;
         self.move_topic_selection(step.saturating_mul(delta as isize))
-    }
-
-    fn scroll_schema(&mut self, delta: i16) {
-        let next = if delta.is_negative() {
-            self.schema.scroll.saturating_sub(delta.unsigned_abs())
-        } else {
-            self.schema.scroll.saturating_add(delta as u16)
-        };
-        self.schema.scroll = next.min(self.max_schema_scroll());
-    }
-
-    fn scroll_schema_horizontal(&mut self, delta: i16) {
-        let next = if delta.is_negative() {
-            self.schema.hscroll.saturating_sub(delta.unsigned_abs())
-        } else {
-            self.schema.hscroll.saturating_add(delta as u16)
-        };
-        self.schema.hscroll = next.min(self.max_schema_hscroll());
     }
 
     fn move_message_selection(&mut self, delta: isize) -> AppUpdate {
@@ -409,119 +248,59 @@ impl App {
         self.set_message_selection(next)
     }
 
-    fn page_message_selection(&mut self, forward: bool) -> AppUpdate {
-        let step = self.messages.page_step as isize;
-        self.move_message_selection(if forward { step } else { -step })
-    }
-
     fn page_message_selection_by(&mut self, delta: i32) -> AppUpdate {
         let step = self.messages.page_step as isize;
         self.move_message_selection(step.saturating_mul(delta as isize))
     }
 
-    fn scroll_detail(&mut self, delta: i16) {
-        let next = if delta.is_negative() {
-            self.detail.scroll.saturating_sub(delta.unsigned_abs())
-        } else {
-            self.detail.scroll.saturating_add(delta as u16)
-        };
-        self.detail.scroll = next.min(self.max_detail_scroll());
+    /// The detail pane together with the limits of the selected message's rows.
+    fn detail_pane(&mut self) -> (&mut ScrollPane, ScrollLimits) {
+        let limits = self.detail_limits();
+        (&mut self.detail, limits)
     }
 
-    fn scroll_detail_horizontal(&mut self, delta: i16) {
-        let step = DEFAULT_HORIZONTAL_STEP.max(1);
-        let offset = step.saturating_mul(delta.unsigned_abs());
-        self.detail.hscroll = if delta.is_negative() {
-            self.detail.hscroll.saturating_sub(offset)
-        } else {
-            self.detail.hscroll.saturating_add(offset)
-        };
-        self.clamp_detail_hscroll();
+    /// The schema pane together with the limits of the loaded schema text.
+    fn schema_pane(&mut self) -> (&mut ScrollPane, ScrollLimits) {
+        let limits = self.schema_limits();
+        (&mut self.schema.pane, limits)
     }
 
-    fn page_detail(&mut self, forward: bool) {
-        let step = self.detail.page_step.max(1);
-        self.detail.scroll = if forward {
-            self.detail.scroll.saturating_add(step)
-        } else {
-            self.detail.scroll.saturating_sub(step)
+    fn detail_limits(&self) -> ScrollLimits {
+        let Some(detail_rows) = self
+            .messages
+            .items
+            .get(self.messages.selected)
+            .and_then(|message| message.detail_rows.as_ref())
+        else {
+            return ScrollLimits::NONE;
         };
-        self.clamp_detail_scroll();
+        ScrollLimits {
+            vertical: max_vertical_scroll(detail_rows.len(), self.detail.view_height),
+            horizontal: max_horizontal_scroll(
+                detail_rows.iter().map(|row| row.text.as_str()),
+                self.detail.view_width,
+            ),
+        }
     }
 
-    fn page_detail_by(&mut self, delta: i32) {
-        let step = self.detail.page_step.max(1);
-        let offset = step.saturating_mul(delta.unsigned_abs() as u16);
-        self.detail.scroll = if delta.is_negative() {
-            self.detail.scroll.saturating_sub(offset)
-        } else {
-            self.detail.scroll.saturating_add(offset)
-        };
-        self.clamp_detail_scroll();
-    }
-
-    fn max_detail_scroll(&self) -> u16 {
-        let Some(message) = self.messages.items.get(self.messages.selected) else {
-            return 0;
-        };
-        let Some(detail_rows) = message.detail_rows.as_ref() else {
-            return 0;
-        };
-        max_vertical_scroll(detail_rows.len(), self.detail.view_height)
-    }
-
-    pub(super) fn clamp_detail_scroll(&mut self) {
-        self.detail.scroll = self.detail.scroll.min(self.max_detail_scroll());
-    }
-
-    fn max_detail_hscroll(&self) -> u16 {
-        let Some(message) = self.messages.items.get(self.messages.selected) else {
-            return 0;
-        };
-        let Some(detail_rows) = message.detail_rows.as_ref() else {
-            return 0;
-        };
-        max_horizontal_scroll(
-            detail_rows.iter().map(|row| row.text.as_str()),
-            self.detail.view_width,
-        )
-    }
-
-    pub(super) fn clamp_detail_hscroll(&mut self) {
-        self.detail.hscroll = self.detail.hscroll.min(self.max_detail_hscroll());
-    }
-
-    fn max_schema_scroll(&self) -> u16 {
+    fn schema_limits(&self) -> ScrollLimits {
         let Some(schema) = self.schema_view() else {
-            return 0;
+            return ScrollLimits::NONE;
         };
-        max_vertical_scroll(schema.line_count, self.schema.view_height)
+        ScrollLimits {
+            vertical: max_vertical_scroll(schema.line_count, self.schema.pane.view_height),
+            horizontal: max_horizontal_scroll(schema.text.lines(), self.schema.pane.view_width),
+        }
     }
 
-    pub(super) fn clamp_schema_scroll(&mut self) {
-        self.schema.scroll = self.schema.scroll.min(self.max_schema_scroll());
+    pub(super) fn clamp_detail(&mut self) {
+        let (pane, limits) = self.detail_pane();
+        pane.clamp(limits);
     }
 
-    fn max_schema_hscroll(&self) -> u16 {
-        let Some(schema) = self.schema_view() else {
-            return 0;
-        };
-        max_horizontal_scroll(schema.text.lines(), self.schema.view_width)
-    }
-
-    pub(super) fn clamp_schema_hscroll(&mut self) {
-        self.schema.hscroll = self.schema.hscroll.min(self.max_schema_hscroll());
-    }
-
-    fn page_schema_by(&mut self, delta: i32) {
-        let step = self.schema.page_step.max(1);
-        let offset = step.saturating_mul(delta.unsigned_abs() as u16);
-        self.schema.scroll = if delta.is_negative() {
-            self.schema.scroll.saturating_sub(offset)
-        } else {
-            self.schema.scroll.saturating_add(offset)
-        };
-        self.clamp_schema_scroll();
+    pub(super) fn clamp_schema(&mut self) {
+        let (pane, limits) = self.schema_pane();
+        pane.clamp(limits);
     }
 
     fn set_message_selection(&mut self, next: usize) -> AppUpdate {
@@ -539,7 +318,7 @@ impl App {
         let anchor = self.current_detail_scroll_anchor();
         self.messages.selected = next;
         self.restore_detail_scroll(anchor.as_ref());
-        self.clamp_detail_hscroll();
+        self.clamp_detail();
         AppUpdate::changed()
     }
 
@@ -610,5 +389,47 @@ impl App {
 
         self.begin_schema_view();
         AppUpdate::changed_with_request(AppRequest::LoadSelectedSchema)
+    }
+}
+
+/// The one mapping from keys to navigation commands, shared by every screen and
+/// pane: only the target a key applies to varies, never the key itself.
+fn navigation_for_code(target: NavigationTarget, code: KeyCode) -> Option<NavigationCommand> {
+    let command = match code {
+        KeyCode::Up | KeyCode::Char('k') => NavigationCommand::Relative { target, delta: -1 },
+        KeyCode::Down | KeyCode::Char('j') => NavigationCommand::Relative { target, delta: 1 },
+        KeyCode::PageUp => NavigationCommand::Page { target, delta: -1 },
+        KeyCode::PageDown => NavigationCommand::Page { target, delta: 1 },
+        KeyCode::Home => NavigationCommand::Absolute {
+            target,
+            endpoint: NavigationEndpoint::Start,
+        },
+        KeyCode::End => NavigationCommand::Absolute {
+            target,
+            endpoint: NavigationEndpoint::End,
+        },
+        _ => return None,
+    };
+    Some(command)
+}
+
+impl NavigationEndpoint {
+    /// The index this endpoint selects in a list of `len` items, or `None` when
+    /// the list is too short to have one.
+    fn index(self, len: usize) -> Option<usize> {
+        match self {
+            // An empty list still selects index 0, which the selection setters
+            // treat as "nothing to select" rather than an out-of-range index.
+            Self::Start => Some(0),
+            Self::End => len.checked_sub(1),
+        }
+    }
+
+    /// The scroll offset this endpoint puts a pane at.
+    fn scroll(self, limits: ScrollLimits) -> u16 {
+        match self {
+            Self::Start => 0,
+            Self::End => limits.vertical,
+        }
     }
 }
