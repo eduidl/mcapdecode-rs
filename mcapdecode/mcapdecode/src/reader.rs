@@ -63,19 +63,12 @@ impl McapReader {
         Ok(unsafe { Mmap::map(&file) }?)
     }
 
-    pub(crate) fn read_summary(
-        &self,
-        path: &Path,
-        mmap: &Mmap,
-    ) -> Result<mcap::read::Summary, McapReaderError> {
-        mcap::read::Summary::read(mmap)?.ok_or_else(|| McapReaderError::SummaryNotAvailable {
-            path: path.display().to_string(),
-        })
+    pub(crate) fn read_summary(&self, mmap: &Mmap) -> Result<mcap::read::Summary, McapReaderError> {
+        mcap::read::Summary::read(mmap)?.ok_or(McapReaderError::SummaryNotAvailable)
     }
 
     fn find_decoder(
         &self,
-        topic: &str,
         schema_enc: &SchemaEncoding,
         message_enc: &MessageEncoding,
     ) -> Result<&Arc<dyn MessageDecoder>, McapReaderError> {
@@ -85,7 +78,6 @@ impl McapReader {
             .ok_or_else(|| McapReaderError::NoDecoder {
                 schema_encoding: schema_enc.to_string(),
                 message_encoding: message_enc.to_string(),
-                topic: topic.to_string(),
             })
     }
 
@@ -98,13 +90,8 @@ impl McapReader {
         let schema = Arc::clone(get_schema_from_channel(channel)?);
         let schema_enc = SchemaEncoding::from(schema.encoding.as_str());
         let message_enc = MessageEncoding::from(channel.message_encoding.as_str());
-        let decoder = Arc::clone(self.find_decoder(&channel.topic, &schema_enc, &message_enc)?);
-        let topic_decoder = decoder
-            .build_topic_decoder(&schema.name, &schema.data)
-            .map_err(|e| McapReaderError::SchemaDerivationFailed {
-                topic: topic.to_string(),
-                source: e,
-            })?;
+        let decoder = Arc::clone(self.find_decoder(&schema_enc, &message_enc)?);
+        let topic_decoder = decoder.build_topic_decoder(&schema.name, &schema.data)?;
         let field_defs = topic_decoder.field_defs().clone();
 
         Ok(TopicDecodeContext {
@@ -126,7 +113,7 @@ impl McapReader {
         callback: impl FnOnce(&PreparedTopic<'_>) -> Result<T, McapReaderError>,
     ) -> Result<T, McapReaderError> {
         let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
+        let summary = self.read_summary(&mmap)?;
         let context = self.resolve_topic_decode_context(&summary, topic)?;
         callback(&PreparedTopic {
             reader: self,
@@ -140,7 +127,7 @@ impl McapReader {
     /// List topics present in the MCAP summary section.
     pub fn list_topics(&self, path: &Path) -> Result<Vec<TopicInfo>, McapReaderError> {
         let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
+        let summary = self.read_summary(&mmap)?;
         Ok(topic_infos_from_summary(&summary))
     }
 
@@ -151,7 +138,7 @@ impl McapReader {
         path: &Path,
     ) -> Result<Vec<TopicDecodeStatus>, McapReaderError> {
         let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
+        let summary = self.read_summary(&mmap)?;
 
         Ok(topic_infos_from_summary(&summary)
             .into_iter()
@@ -203,7 +190,7 @@ impl McapReader {
         mut callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
         let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
+        let summary = self.read_summary(&mmap)?;
         let channel = get_channel_from_summary(&summary, topic)?;
 
         for message in mcap::MessageStream::new(&mmap)? {
@@ -228,15 +215,13 @@ impl McapReader {
     /// MCAP summary and summary stats are required.
     pub fn message_count(&self, path: &Path, topic: &str) -> Result<u64, McapReaderError> {
         let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
+        let summary = self.read_summary(&mmap)?;
         let channel = get_channel_from_summary(&summary, topic)?;
 
         let stats = summary
             .stats
             .as_ref()
-            .ok_or_else(|| McapReaderError::StatsNotAvailable {
-                path: path.display().to_string(),
-            })?;
+            .ok_or(McapReaderError::StatsNotAvailable)?;
 
         Ok(stats
             .channel_message_counts
@@ -248,7 +233,7 @@ impl McapReader {
     /// Derive and return schema IR (`FieldDef`) for a topic without reading message payloads.
     pub fn topic_field_defs(&self, path: &Path, topic: &str) -> Result<FieldDefs, McapReaderError> {
         let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
+        let summary = self.read_summary(&mmap)?;
         let context = self.resolve_topic_decode_context(&summary, topic)?;
         Ok(context.field_defs)
     }
@@ -258,7 +243,7 @@ impl McapReader {
     /// The MCAP file and its summary are each read once for this operation.
     pub fn topic_schema(&self, path: &Path, topic: &str) -> Result<TopicSchema, McapReaderError> {
         let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(path, &mmap)?;
+        let summary = self.read_summary(&mmap)?;
         let context = self.resolve_topic_decode_context(&summary, topic)?;
         let info = topic_infos_from_summary(&summary)
             .into_iter()

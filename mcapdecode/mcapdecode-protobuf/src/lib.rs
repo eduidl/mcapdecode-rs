@@ -53,10 +53,8 @@ impl MessageDecoder for ProtobufDecoder {
         schema_data: &[u8],
     ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
         let desc = schema::parse_message_descriptor(schema_name, schema_data)?;
-        let field_defs =
-            schema::message_fields_to_field_defs(schema_name, &desc, self.presence_policy)?;
+        let field_defs = schema::message_fields_to_field_defs(&desc, self.presence_policy)?;
         Ok(Box::new(ProtobufTopicDecoder {
-            schema_name: schema_name.to_string(),
             desc,
             field_defs,
             presence_policy: self.presence_policy,
@@ -65,7 +63,6 @@ impl MessageDecoder for ProtobufDecoder {
 }
 
 struct ProtobufTopicDecoder {
-    schema_name: String,
     desc: MessageDescriptor,
     field_defs: FieldDefs,
     presence_policy: PresencePolicy,
@@ -73,12 +70,7 @@ struct ProtobufTopicDecoder {
 
 impl TopicDecoder for ProtobufTopicDecoder {
     fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError> {
-        proto_to_arrow::decode_from_descriptor(
-            &self.schema_name,
-            &self.desc,
-            message_data,
-            self.presence_policy,
-        )
+        proto_to_arrow::decode_from_descriptor(&self.desc, message_data, self.presence_policy)
     }
 
     fn field_defs(&self) -> &FieldDefs {

@@ -28,14 +28,14 @@ fn info_outputs_topic_metadata_as_json() {
                 "schema": "test.Msg",
                 "count": 2,
                 "decodable": false,
-                "decode_error": "no decoder registered for schema_encoding='jsonschema', message_encoding='json' on topic '/decoded'"
+                "decode_error": "no decoder registered for schema_encoding='jsonschema', message_encoding='json'"
             },
             {
                 "topic": "/raw",
                 "schema": null,
                 "count": 1,
                 "decodable": false,
-                "decode_error": "schema not available for topic '/raw' (channel id 2)"
+                "decode_error": "schema not available"
             }
         ])
     );

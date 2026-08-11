@@ -61,7 +61,7 @@ impl McapReader {
         mmap: &Mmap,
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
-        request: DecodeRequest<'_>,
+        options: &ReadOptions,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
@@ -71,11 +71,11 @@ impl McapReader {
         // identify the minimal set of chunks that can satisfy it, then decode that
         // bounded set in parallel. Message indexes are optional in MCAP, so files
         // without them must retain this sequential, immediate-stop fallback.
-        let parallel = request.options.parallel.unwrap_or(self.parallel);
-        if parallel && request.options.limit.is_none() {
-            self.for_each_decoded_message_parallel(mmap, summary, context, request, callback)
+        let parallel = options.parallel.unwrap_or(self.parallel);
+        if parallel && options.limit.is_none() {
+            self.for_each_decoded_message_parallel(mmap, summary, context, options, callback)
         } else {
-            self.for_each_decoded_message_sequential(mmap, summary, context, request, callback)
+            self.for_each_decoded_message_sequential(mmap, summary, context, options, callback)
         }
     }
 
@@ -84,7 +84,7 @@ impl McapReader {
         mmap: &Mmap,
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
-        request: DecodeRequest<'_>,
+        options: &ReadOptions,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
@@ -92,7 +92,7 @@ impl McapReader {
     {
         use rayon::prelude::*;
 
-        let filter = MessageFilter::new(context, request.options);
+        let filter = MessageFilter::new(context, options);
         let chunk_indexes: Vec<_> = Self::matching_chunk_indexes(summary, filter).collect();
         let chunk_count = chunk_indexes.len();
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -109,7 +109,7 @@ impl McapReader {
                             summary,
                             context,
                             chunk_index,
-                            request,
+                            options,
                             &cancelled,
                         );
                         let _ = sender.send((position, result));
@@ -140,7 +140,7 @@ impl McapReader {
                     for decoded in chunk_messages {
                         // Chunks are decoded before their position in the topic
                         // is known, so the offset can only be applied here.
-                        if skipped < request.options.offset {
+                        if skipped < options.offset {
                             skipped += 1;
                             continue;
                         }
@@ -175,14 +175,14 @@ impl McapReader {
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
         chunk_index: &mcap::records::ChunkIndex,
-        request: DecodeRequest<'_>,
+        options: &ReadOptions,
         cancelled: &AtomicBool,
     ) -> Result<Vec<DecodedMessage>, McapReaderError> {
         if cancelled.load(Ordering::Relaxed) {
             return Ok(Vec::new());
         }
 
-        let filter = MessageFilter::new(context, request.options);
+        let filter = MessageFilter::new(context, options);
         let mut decoded_messages = Vec::new();
         for msg_result in summary.stream_chunk(mmap, chunk_index)? {
             if cancelled.load(Ordering::Relaxed) {
@@ -193,7 +193,7 @@ impl McapReader {
             if !filter.accepts_message(&msg) {
                 continue;
             }
-            decoded_messages.push(self.decode_message(context, request.topic, &msg)?);
+            decoded_messages.push(self.decode_message(context, &msg)?);
         }
 
         Ok(decoded_messages)
@@ -204,16 +204,16 @@ impl McapReader {
         mmap: &Mmap,
         summary: &mcap::read::Summary,
         context: &TopicDecodeContext,
-        request: DecodeRequest<'_>,
+        options: &ReadOptions,
         callback: &mut F,
     ) -> Result<(), McapReaderError>
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        if request.options.limit == Some(0) {
+        if options.limit == Some(0) {
             return Ok(());
         }
-        let filter = MessageFilter::new(context, request.options);
+        let filter = MessageFilter::new(context, options);
         let mut skipped = 0usize;
         let mut emitted = 0usize;
         for chunk_index in Self::matching_chunk_indexes(summary, filter) {
@@ -223,15 +223,15 @@ impl McapReader {
                     continue;
                 }
                 // Skipping here keeps the offset messages out of the decoder.
-                if skipped < request.options.offset {
+                if skipped < options.offset {
                     skipped += 1;
                     continue;
                 }
 
-                let decoded = self.decode_message(context, request.topic, &message)?;
+                let decoded = self.decode_message(context, &message)?;
                 callback(decoded)?;
                 emitted += 1;
-                if request.options.limit.is_some_and(|limit| emitted >= limit) {
+                if options.limit.is_some_and(|limit| emitted >= limit) {
                     return Ok(());
                 }
             }
@@ -243,15 +243,9 @@ impl McapReader {
     fn decode_message(
         &self,
         context: &TopicDecodeContext,
-        topic: &str,
         message: &mcap::Message<'_>,
     ) -> Result<DecodedMessage, McapReaderError> {
-        let value = context.decoder.decode(&message.data).map_err(|e| {
-            McapReaderError::MessageDecodeFailed {
-                topic: topic.to_string(),
-                source: e,
-            }
-        })?;
+        let value = context.decoder.decode(&message.data)?;
 
         Ok(DecodedMessage {
             log_time: message.log_time,
@@ -266,10 +260,4 @@ pub(crate) struct TopicDecodeContext {
     pub(crate) schema_name: String,
     pub(crate) decoder: Box<dyn TopicDecoder>,
     pub(crate) field_defs: FieldDefs,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct DecodeRequest<'a> {
-    pub(crate) topic: &'a str,
-    pub(crate) options: &'a ReadOptions,
 }

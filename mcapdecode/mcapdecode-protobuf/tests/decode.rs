@@ -308,14 +308,17 @@ fn decode_unknown_message_returns_error() {
     };
     let fds = build_fds("test.proto", vec![msg]);
     let err = decode_protobuf_to_value("NoSuchMessage", &fds, &[]).unwrap_err();
-    assert!(matches!(err, DecoderError::SchemaInvalid { .. }));
-    assert!(err.to_string().contains("NoSuchMessage"));
+    assert!(matches!(err, DecoderError::SchemaDerivation(_)));
+    assert_eq!(
+        err.to_string(),
+        "schema derivation failed: message descriptor not found"
+    );
 }
 
 #[test]
 fn decode_invalid_schema_data_returns_error() {
     let err = decode_protobuf_to_value("Foo", &[0xff, 0xff], &[]).unwrap_err();
-    assert!(matches!(err, DecoderError::SchemaParse { .. }));
+    assert!(matches!(err, DecoderError::SchemaParse(_)));
 }
 
 #[test]

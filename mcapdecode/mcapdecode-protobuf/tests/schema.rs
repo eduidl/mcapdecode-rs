@@ -14,7 +14,7 @@ fn derive_schema(
     policy: PresencePolicy,
 ) -> Result<mcapdecode_core::FieldDefs, DecoderError> {
     let desc = parse_message_descriptor(schema_name, schema_data)?;
-    message_fields_to_field_defs(schema_name, &desc, policy)
+    message_fields_to_field_defs(&desc, policy)
 }
 
 #[test]
@@ -176,14 +176,17 @@ fn unknown_message_name_returns_error() {
     };
     let fds = build_fds("test.proto", vec![msg]);
     let err = derive_schema("DoesNotExist", &fds, PresencePolicy::PresenceAware).unwrap_err();
-    assert!(matches!(err, DecoderError::SchemaInvalid { .. }));
-    assert!(err.to_string().contains("DoesNotExist"));
+    assert!(matches!(err, DecoderError::SchemaDerivation(_)));
+    assert_eq!(
+        err.to_string(),
+        "schema derivation failed: message descriptor not found"
+    );
 }
 
 #[test]
 fn invalid_schema_data_returns_error() {
     let err = derive_schema("Foo", &[0xff, 0xff, 0xff], PresencePolicy::PresenceAware).unwrap_err();
-    assert!(matches!(err, DecoderError::SchemaParse { .. }));
+    assert!(matches!(err, DecoderError::SchemaParse(_)));
 }
 
 #[test]

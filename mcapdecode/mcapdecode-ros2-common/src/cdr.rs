@@ -14,16 +14,10 @@ use crate::{
 pub fn decode_cdr_to_value(schema: &ResolvedSchema, data: &[u8]) -> Result<Value, DecoderError> {
     let mut d = Decoder::new(data);
     d.read_encapsulation()
-        .map_err(|detail| DecoderError::MessageDecode {
-            schema_name: schema.root.join("::"),
-            source: detail.into(),
-        })?;
+        .map_err(|detail| DecoderError::MessageDecode(detail.into()))?;
     let mut path = schema.root.join(".");
     d.decode_struct(schema, &schema.root, &mut path)
-        .map_err(|detail| DecoderError::MessageDecode {
-            schema_name: schema.root.join("::"),
-            source: detail.into(),
-        })
+        .map_err(|detail| DecoderError::MessageDecode(detail.into()))
 }
 
 fn primitive_align_size(p: &PrimitiveType) -> usize {

@@ -16,18 +16,12 @@ use crate::{PresencePolicy, schema::parse_message_descriptor};
 /// the decoder passes a cached descriptor so that `FileDescriptorSet` parsing
 /// is not repeated on every message.
 pub(crate) fn decode_from_descriptor(
-    schema_name: &str,
     message_desc: &MessageDescriptor,
     message_data: &[u8],
     policy: PresencePolicy,
 ) -> Result<Value, DecoderError> {
-    let dynamic_message =
-        DynamicMessage::decode(message_desc.clone(), message_data).map_err(|e| {
-            DecoderError::MessageDecode {
-                schema_name: schema_name.to_string(),
-                source: Box::new(e),
-            }
-        })?;
+    let dynamic_message = DynamicMessage::decode(message_desc.clone(), message_data)
+        .map_err(|e| DecoderError::MessageDecode(Box::new(e)))?;
     Ok(message_to_value(&dynamic_message, message_desc, policy))
 }
 
@@ -59,7 +53,7 @@ pub fn decode_protobuf_to_value_with_policy(
     policy: PresencePolicy,
 ) -> Result<Value, DecoderError> {
     let desc = parse_message_descriptor(schema_name, schema_data)?;
-    decode_from_descriptor(schema_name, &desc, message_data, policy)
+    decode_from_descriptor(&desc, message_data, policy)
 }
 
 fn message_to_value(

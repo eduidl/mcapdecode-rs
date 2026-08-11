@@ -115,7 +115,6 @@ pub(crate) fn batch_schema_for(
 ) -> Result<MessageBatchSchema, McapReaderError> {
     if prepared.field_defs().is_empty() {
         return Err(McapReaderError::EmptyDerivedSchema {
-            topic: prepared.topic().to_string(),
             schema_name: prepared.schema_name().to_string(),
         });
     }

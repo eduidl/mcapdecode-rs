@@ -5,24 +5,16 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum DecoderError {
     /// Schema data (e.g., a serialized `FileDescriptorSet`) could not be parsed.
-    #[error("failed to parse schema '{schema_name}': {source}")]
-    SchemaParse {
-        schema_name: String,
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+    #[error("failed to parse schema: {0}")]
+    SchemaParse(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// Schema data is structurally invalid (e.g., missing descriptor, broken map fields).
-    #[error("invalid schema '{schema_name}': {detail}")]
-    SchemaInvalid { schema_name: String, detail: String },
+    /// Schema data was parsed but could not be derived into a decoder schema.
+    #[error("schema derivation failed: {0}")]
+    SchemaDerivation(String),
 
     /// Message payload bytes could not be decoded.
-    #[error("failed to decode message for schema '{schema_name}': {source}")]
-    MessageDecode {
-        schema_name: String,
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+    #[error("failed to decode message: {0}")]
+    MessageDecode(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
