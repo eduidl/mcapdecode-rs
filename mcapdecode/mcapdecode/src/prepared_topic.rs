@@ -8,6 +8,8 @@ use crate::{
     decode::{DecodeRequest, TopicDecodeContext},
     error::McapReaderError,
 };
+#[cfg(feature = "arrow")]
+use crate::{MessageBatchSchema, RecordBatchOptions};
 
 /// A topic whose MCAP summary and decoder have already been resolved.
 ///
@@ -39,12 +41,31 @@ impl PreparedTopic<'_> {
         &self.context.field_defs
     }
 
+    /// The Arrow schema that a record-batch read emits under `options`.
+    #[cfg(feature = "arrow")]
+    pub fn batch_schema(
+        &self,
+        options: &RecordBatchOptions,
+    ) -> Result<MessageBatchSchema, McapReaderError> {
+        crate::arrow_ext::batch_schema_for(self, options)
+    }
+
     /// Read decoded messages subject to `options` and emit them one-by-one to
     /// callback.
     pub fn for_each_decoded_message_with_options(
         &self,
         options: &ReadOptions,
         mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        self.for_each_decoded_message_with_options_internal(options, &mut |decoded| {
+            callback(decoded).map_err(McapReaderError::Callback)
+        })
+    }
+
+    pub(crate) fn for_each_decoded_message_with_options_internal(
+        &self,
+        options: &ReadOptions,
+        callback: &mut impl FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     ) -> Result<(), McapReaderError> {
         self.reader.for_each_decoded_message_impl(
             &self.mmap,
@@ -54,7 +75,7 @@ impl PreparedTopic<'_> {
                 topic: &self.topic,
                 options,
             },
-            &mut |decoded| callback(decoded).map_err(McapReaderError::Callback),
+            callback,
         )
     }
 }

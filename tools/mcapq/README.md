@@ -27,6 +27,9 @@ Enum `enum` values are the variants declared by the source schema; an unknown
 wire value may still decode as its numeric string representation. Numeric enum
 values are available in `x-mcap-enum-values` metadata.
 
+The JTD metadata advertises the two MCAP record columns `log_time` and
+`publish_time` in `x-mcap.columns`. They are not payload fields.
+
 ```bash
 mcapq schema drive.mcap --topic /imu/data
 mcapq schema drive.mcap --topic /imu/data --format native

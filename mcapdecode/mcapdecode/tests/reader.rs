@@ -11,12 +11,12 @@ use std::{
 #[cfg(feature = "arrow")]
 use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
-#[cfg(feature = "arrow")]
-use mcapdecode::RecordBatchOptions;
 use mcapdecode::{
     McapReader, McapReaderError, PreparedTopic, ReadOptions, TimeRange, TopicDecodeStatus,
     TopicInfo,
 };
+#[cfg(feature = "arrow")]
+use mcapdecode::{MetadataColumns, RecordBatchOptions};
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,
@@ -279,6 +279,63 @@ impl TopicDecoder for TestJsonTopicDecoder {
 
     fn field_defs(&self) -> &FieldDefs {
         &self.field_defs
+    }
+}
+
+/// Derives a payload field named `log_time`, which is what a metadata column
+/// is called under the default naming.
+#[cfg(feature = "arrow")]
+struct CollidingJsonDecoder;
+
+#[cfg(feature = "arrow")]
+impl MessageDecoder for CollidingJsonDecoder {
+    fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
+    }
+
+    fn build_topic_decoder(
+        &self,
+        _schema_name: &str,
+        _schema_data: &[u8],
+    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
+        Ok(Box::new(TestJsonTopicDecoder {
+            field_defs: vec![FieldDef::new("log_time", DataTypeDef::I64, true)].into(),
+        }))
+    }
+}
+
+/// Declares an integer field but produces a string to exercise Arrow conversion
+/// failures at the public reader boundary.
+#[cfg(feature = "arrow")]
+struct MismatchedJsonDecoder;
+
+#[cfg(feature = "arrow")]
+impl MessageDecoder for MismatchedJsonDecoder {
+    fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
+    }
+
+    fn build_topic_decoder(
+        &self,
+        _schema_name: &str,
+        _schema_data: &[u8],
+    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
+        Ok(Box::new(MismatchedJsonTopicDecoder))
+    }
+}
+
+#[cfg(feature = "arrow")]
+struct MismatchedJsonTopicDecoder;
+
+#[cfg(feature = "arrow")]
+impl TopicDecoder for MismatchedJsonTopicDecoder {
+    fn decode(&self, _message_data: &[u8]) -> Result<Value, DecoderError> {
+        Ok(Value::Struct(vec![Value::string("not an integer")]))
+    }
+
+    fn field_defs(&self) -> &FieldDefs {
+        static FIELDS: std::sync::OnceLock<FieldDefs> = std::sync::OnceLock::new();
+        FIELDS.get_or_init(|| vec![FieldDef::new("value", DataTypeDef::I64, true)].into())
     }
 }
 
@@ -963,6 +1020,21 @@ fn for_each_record_batch_propagates_callback_error() {
 
 #[cfg(feature = "arrow")]
 #[test]
+fn for_each_record_batch_reports_arrow_conversion_errors_separately() {
+    let fixture = write_chunked_fixture("arrow-conversion-error", &[br#"{"value":1}"#]);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(MismatchedJsonDecoder))
+        .build();
+
+    let err = reader
+        .for_each_record_batch(fixture.path(), "/decoded", |_batch| Ok(()))
+        .unwrap_err();
+
+    assert!(matches!(err, McapReaderError::ArrowConvert(_)));
+}
+
+#[cfg(feature = "arrow")]
+#[test]
 fn for_each_record_batch_emits_batches_by_batch_size() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
@@ -1312,4 +1384,87 @@ fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixtur
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::MessageDecodeFailed { .. }));
+}
+
+#[cfg(feature = "arrow")]
+#[test]
+fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
+    // Consumers that must declare a schema up front (a DataFusion MemTable)
+    // take it from `topic_batch_schema`. If the two ever diverge the mismatch
+    // only shows up at run time deep inside the consumer, so pin it here.
+    let fixture = write_chunked_fixture("batch-schema-agreement", &[br#"{"value":1}"#]);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+
+    for metadata in [
+        MetadataColumns::default(),
+        MetadataColumns::with_prefix("@"),
+    ] {
+        let options = RecordBatchOptions {
+            metadata: metadata.clone(),
+            ..RecordBatchOptions::default()
+        };
+        let declared = reader
+            .topic_batch_schema(fixture.path(), "/decoded", &options)
+            .unwrap();
+        let prepared_declared = reader
+            .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
+                prepared.batch_schema(&options)
+            })
+            .unwrap();
+        assert_eq!(prepared_declared.schema(), declared.schema());
+
+        let mut emitted = Vec::new();
+        reader
+            .for_each_record_batch_with_options(fixture.path(), "/decoded", &options, |batch| {
+                emitted.push(batch.schema());
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(!emitted.is_empty());
+        for schema in emitted {
+            assert_eq!(&schema, declared.schema());
+        }
+
+        let names: Vec<&str> = declared
+            .schema()
+            .fields()
+            .iter()
+            .take(2)
+            .map(|field| field.name().as_str())
+            .collect();
+        assert_eq!(names, metadata.names());
+    }
+}
+
+#[cfg(feature = "arrow")]
+#[test]
+fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
+    let fixture = write_chunked_fixture("batch-schema-collision", &[br#"{"value":1}"#]);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(CollidingJsonDecoder))
+        .build();
+
+    let err = reader
+        .topic_batch_schema(fixture.path(), "/decoded", &RecordBatchOptions::default())
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        McapReaderError::ArrowConvert(
+            mcapdecode_arrow::ArrowConvertError::MetadataColumnCollision { ref names }
+        ) if names == "log_time"
+    ));
+
+    // A prefix moves the metadata columns out of the payload's way.
+    let options = RecordBatchOptions {
+        metadata: MetadataColumns::with_prefix("_"),
+        ..RecordBatchOptions::default()
+    };
+    let schema = reader
+        .topic_batch_schema(fixture.path(), "/decoded", &options)
+        .unwrap();
+    assert_eq!(schema.schema().field(0).name(), "_log_time");
+    assert_eq!(schema.schema().field(2).name(), "log_time");
 }

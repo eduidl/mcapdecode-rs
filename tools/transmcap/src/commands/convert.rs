@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcapdecode::{
-    McapReader,
+    McapReader, MetadataColumns, RecordBatchOptions,
     arrow::{
         ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, StructPolicy, flatten_record_batch,
         project_record_batch,
@@ -54,6 +54,12 @@ pub struct ConvertArgs {
     #[arg(long, value_delimiter = ',')]
     fields: Option<Vec<String>>,
 
+    /// Prefix for the log_time and publish_time metadata columns.
+    /// Keeps them apart from payload fields of the same name. Dots are not
+    /// allowed because field paths and flattened columns use them as separators.
+    #[arg(long, default_value = "@", value_parser = parse_metadata_prefix)]
+    metadata_prefix: String,
+
     /// Enable parallel chunk decompression and decoding.
     #[arg(short, long)]
     parallel: bool,
@@ -89,26 +95,36 @@ impl ConvertArgs {
         };
         let mut dropped_warned = false;
 
-        reader.for_each_record_batch(&self.input, &self.topic, |batch| {
-            let projected = if let Some(fields) = &self.fields {
-                project_record_batch(&batch, fields)?
-            } else {
-                batch
-            };
-            let (flat_batch, dropped_columns) =
-                flatten_record_batch(&projected, None, &flatten_policy)?;
-            if !dropped_warned && !dropped_columns.is_empty() {
-                dropped_warned = true;
-                eprintln!(
-                    "Warning: output policy skipped columns: {}",
-                    dropped_columns.join(", ")
-                );
-            }
-            let n = flat_batch.num_rows() as u64;
-            writer.write_batch(flat_batch)?;
-            pb.inc(n);
-            Ok(())
-        })?;
+        let batch_options = RecordBatchOptions {
+            metadata: MetadataColumns::with_prefix(&self.metadata_prefix),
+            ..RecordBatchOptions::default()
+        };
+
+        reader.for_each_record_batch_with_options(
+            &self.input,
+            &self.topic,
+            &batch_options,
+            |batch| {
+                let projected = if let Some(fields) = &self.fields {
+                    project_record_batch(&batch, fields)?
+                } else {
+                    batch
+                };
+                let (flat_batch, dropped_columns) =
+                    flatten_record_batch(&projected, None, &flatten_policy)?;
+                if !dropped_warned && !dropped_columns.is_empty() {
+                    dropped_warned = true;
+                    eprintln!(
+                        "Warning: output policy skipped columns: {}",
+                        dropped_columns.join(", ")
+                    );
+                }
+                let n = flat_batch.num_rows() as u64;
+                writer.write_batch(flat_batch)?;
+                pb.inc(n);
+                Ok(())
+            },
+        )?;
 
         writer.finish()?;
         // Reported here rather than inside the writer so that benchmarking a parquet
@@ -153,6 +169,13 @@ fn parse_list_policy(raw: &str) -> Result<ListPolicy, String> {
 
 fn parse_array_policy(raw: &str) -> Result<ArrayPolicy, String> {
     ArrayPolicy::from_str(raw)
+}
+
+fn parse_metadata_prefix(raw: &str) -> Result<String, String> {
+    if raw.contains('.') {
+        return Err("metadata prefix must not contain '.' because field paths and flattened columns use it as a separator".to_string());
+    }
+    Ok(raw.to_string())
 }
 
 fn parse_map_policy(raw: &str) -> Result<MapPolicy, String> {

@@ -2,6 +2,8 @@
 mod arrow_ext;
 #[cfg(feature = "arrow")]
 pub use arrow_ext::RecordBatchOptions;
+#[cfg(feature = "arrow")]
+pub use mcapdecode_arrow::{MessageBatchSchema, MetadataColumns};
 mod decode;
 mod error;
 mod prepared_topic;

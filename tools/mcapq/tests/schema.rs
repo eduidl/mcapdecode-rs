@@ -80,6 +80,10 @@ fn schema_defaults_to_jtd_and_preserves_constraints() {
     let schema: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(schema["metadata"]["title"], "ex/msg/Sample");
     assert_eq!(schema["metadata"]["x-mcap"]["schema_encoding"], "ros2idl");
+    assert_eq!(
+        schema["metadata"]["x-mcap"]["columns"],
+        serde_json::json!(["log_time", "publish_time"])
+    );
     assert_eq!(schema["properties"]["reading"]["type"], "float32");
     assert_eq!(
         schema["properties"]["values"]["metadata"]["x-mcap-max-items"],
@@ -136,4 +140,16 @@ fn schema_errors_are_json() {
     assert_eq!(output.status.code(), Some(1));
     let error: Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(error["error"]["code"], "runtime_error");
+}
+
+#[test]
+fn schema_help_does_not_advertise_a_metadata_prefix_without_a_batch_output_command() {
+    let output = Command::new(env!("CARGO_BIN_EXE_mcapq"))
+        .args(["schema", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(!help.contains("metadata-prefix"));
 }

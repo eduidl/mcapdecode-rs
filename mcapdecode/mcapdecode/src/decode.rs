@@ -193,13 +193,7 @@ impl McapReader {
             if !filter.accepts_message(&msg) {
                 continue;
             }
-            decoded_messages.push(self.decode_message(
-                context,
-                request.topic,
-                msg.log_time,
-                msg.publish_time,
-                &msg.data,
-            )?);
+            decoded_messages.push(self.decode_message(context, request.topic, &msg)?);
         }
 
         Ok(decoded_messages)
@@ -234,13 +228,7 @@ impl McapReader {
                     continue;
                 }
 
-                let decoded = self.decode_message(
-                    context,
-                    request.topic,
-                    message.log_time,
-                    message.publish_time,
-                    &message.data,
-                )?;
+                let decoded = self.decode_message(context, request.topic, &message)?;
                 callback(decoded)?;
                 emitted += 1;
                 if request.options.limit.is_some_and(|limit| emitted >= limit) {
@@ -256,22 +244,18 @@ impl McapReader {
         &self,
         context: &TopicDecodeContext,
         topic: &str,
-        log_time: u64,
-        publish_time: u64,
-        data: &[u8],
+        message: &mcap::Message<'_>,
     ) -> Result<DecodedMessage, McapReaderError> {
-        let value =
-            context
-                .decoder
-                .decode(data)
-                .map_err(|e| McapReaderError::MessageDecodeFailed {
-                    topic: topic.to_string(),
-                    source: e,
-                })?;
+        let value = context.decoder.decode(&message.data).map_err(|e| {
+            McapReaderError::MessageDecodeFailed {
+                topic: topic.to_string(),
+                source: e,
+            }
+        })?;
 
         Ok(DecodedMessage {
-            log_time,
-            publish_time,
+            log_time: message.log_time,
+            publish_time: message.publish_time,
             value,
         })
     }
