@@ -14,7 +14,8 @@
 //! identical to the schema of the batches produced from it.
 //!
 //! Both conversions follow the conventions used by this project:
-//! - Timestamp columns are represented as nanosecond `Timestamp` with `UTC`.
+//! - Timestamp columns default to nanosecond `Timestamp` with `UTC`, or can be
+//!   emitted as Unix-epoch-nanosecond `Int64` through [`MetadataColumns`].
 //! - `RecordBatch` output prepends `log_time` and `publish_time`, named by a
 //!   [`MetadataColumns`] policy that defaults to no prefix.
 //!
@@ -39,17 +40,20 @@ pub mod arrow_convert;
 pub mod batch_schema;
 pub mod error;
 pub mod flatten;
+pub mod json;
 pub mod projection;
 pub mod schema_convert;
 
 /// Re-exports from [`batch_schema`].
-pub use batch_schema::{MessageBatchSchema, MetadataColumns};
+pub use batch_schema::{MessageBatchSchema, MetadataColumns, MetadataTimestampFormat};
 /// Re-export of [`error::ArrowConvertError`].
 pub use error::ArrowConvertError;
 /// Re-exports from [`flatten`].
 pub use flatten::{
     ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, StructPolicy, flatten_record_batch,
 };
+/// Re-export of [`json::JsonlWriter`].
+pub use json::JsonlWriter;
 /// Re-export of [`projection::project_record_batch`].
 pub use projection::project_record_batch;
 /// Re-export of [`schema_convert::field_defs_to_arrow_schema`].

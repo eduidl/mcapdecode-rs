@@ -2428,7 +2428,10 @@ name = "mcapdecode-arrow"
 version = "0.5.1"
 dependencies = [
  "arrow",
+ "base64",
  "mcapdecode-core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
