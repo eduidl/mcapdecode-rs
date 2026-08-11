@@ -8,6 +8,18 @@ intentionally excluded.
 
 ### Breaking Changes
 
+- The names of the Arrow metadata columns are no longer fixed, and the default
+  prefix changed from `@` to the empty string, so `@log_time` and
+  `@publish_time` become `log_time` and `publish_time`. Set
+  `RecordBatchOptions::metadata` to `MetadataColumns::with_prefix("@")` to keep
+  the old names. A payload field with the same name as a metadata column is now
+  an error rather than producing duplicate column names.
+- Replaced `arrow_value_rows_to_record_batch` and
+  `try_arrow_value_rows_to_record_batch` with `MessageBatchSchema`, which pairs
+  a body schema with its metadata column naming and produces batches from it.
+  Deriving the emitted schema and the batches separately let the two drift.
+- RecordBatch reader APIs now report Arrow conversion failures as
+  `McapReaderError::ArrowConvert` instead of panicking.
 - Removed `McapReaderBuilder::with_batch_size`. Arrow RecordBatch size is now
   set per read through `RecordBatchOptions::batch_size`, and
   `McapReader::for_each_record_batch_with_options` takes `&RecordBatchOptions`
@@ -23,6 +35,11 @@ intentionally excluded.
 
 ### Added
 
+- Added `McapReader::topic_batch_schema`, which returns the exact Arrow schema a
+  RecordBatch read will emit for a topic. Consumers that must declare a schema
+  up front should take it from here rather than deriving their own.
+- Added `MetadataColumns`, the naming policy for the Arrow metadata system
+  columns, and `RecordBatchOptions::metadata` to select it per read.
 - Added `McapReader::with_prepared_topic` and `PreparedTopic`, which resolve a
   topic's summary and decoder once so an output adapter can derive its schema
   and scan messages without reopening the file. [#40]

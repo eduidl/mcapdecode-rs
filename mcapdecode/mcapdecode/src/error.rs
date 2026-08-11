@@ -44,6 +44,11 @@ pub enum McapReaderError {
     #[error("failed to derive schema for topic '{topic}' (schema: '{schema_name}')")]
     EmptyDerivedSchema { topic: String, schema_name: String },
 
+    /// Arrow conversion failed while producing a record batch.
+    #[cfg(feature = "arrow")]
+    #[error(transparent)]
+    ArrowConvert(#[from] mcapdecode_arrow::ArrowConvertError),
+
     /// Multiple channels found for the same topic in the MCAP file.
     #[error("multiple channels found for topic '{topic}'")]
     MultipleChannels { topic: String },

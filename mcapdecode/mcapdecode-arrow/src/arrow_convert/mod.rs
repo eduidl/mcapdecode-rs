@@ -1,75 +1,50 @@
 //! Conversion from decoded `DecodedMessage` rows to Arrow `RecordBatch`.
 //!
-//! The output schema is the given body schema with `@log_time` and
-//! `@publish_time` timestamp columns prepended.
+//! The output schema comes from a [`MessageBatchSchema`], so the metadata
+//! columns are named by the policy that schema was built with.
 
 mod append;
 mod builder;
 mod scalar;
 
-use std::sync::Arc;
-
-use arrow::{
-    array::{ArrayRef, TimestampNanosecondArray},
-    datatypes::{DataType, Schema},
-    record_batch::RecordBatch,
-};
+use arrow::{array::ArrayRef, datatypes::DataType, record_batch::RecordBatch};
 use mcapdecode_core::{DecodedMessage, Value};
 
-use crate::error::ArrowConvertError;
+use crate::{batch_schema::MessageBatchSchema, error::ArrowConvertError};
 
-/// Convert decoded rows to a RecordBatch.
-///
-/// `body_schema` must describe only the message body fields (no timestamp columns).
-/// The returned `RecordBatch` prepends `@log_time` and `@publish_time`.
-///
-/// # Panics
-/// Panics if:
-/// - `rows` is empty.
-/// - a row root value is neither `Struct` nor `Null`.
-/// - a value shape does not match the provided Arrow data type.
-/// - an unsupported Arrow data type is present in `body_schema`.
-pub fn arrow_value_rows_to_record_batch(
-    body_schema: &Schema,
-    rows: &[DecodedMessage],
-) -> RecordBatch {
-    try_arrow_value_rows_to_record_batch(body_schema, rows).unwrap_or_else(|e| panic!("{e}"))
-}
+impl MessageBatchSchema {
+    /// Convert decoded rows to a `RecordBatch` with this schema.
+    ///
+    /// Metadata fields and arrays come from the same `MetadataColumns` column
+    /// definitions, so their order and count cannot drift.
+    ///
+    /// # Errors
+    /// Returns an error if `rows` is empty, if a value's shape does not match
+    /// its field's Arrow data type, or if Arrow rejects the assembled batch.
+    ///
+    /// # Panics
+    /// Panics if the body schema contains a data type unsupported by this
+    /// crate's array builders, or a malformed `Map` entry field. It also
+    /// panics if a row root value is neither `Struct` nor `Null`, or if
+    /// `log_time` or `publish_time` exceeds `i64::MAX` nanoseconds.
+    pub fn to_record_batch(
+        &self,
+        rows: &[DecodedMessage],
+    ) -> Result<RecordBatch, ArrowConvertError> {
+        if rows.is_empty() {
+            return Err(ArrowConvertError::EmptyRows);
+        }
 
-pub fn try_arrow_value_rows_to_record_batch(
-    body_schema: &Schema,
-    rows: &[DecodedMessage],
-) -> Result<RecordBatch, ArrowConvertError> {
-    if rows.is_empty() {
-        return Err(ArrowConvertError::EmptyRows);
+        let body_fields = self.body().fields();
+        let mut arrays = self.metadata().arrays(rows);
+
+        for (i, field) in body_fields.iter().enumerate() {
+            let values: Vec<&Value> = rows.iter().map(|r| extract_field(&r.value, i)).collect();
+            arrays.push(build_array_from_values(field.data_type(), &values)?);
+        }
+
+        Ok(RecordBatch::try_new(self.schema().clone(), arrays)?)
     }
-
-    let full_schema = Arc::new(crate::schema_convert::with_timestamp_fields(
-        body_schema.clone(),
-    ));
-    let body_fields = body_schema.fields();
-    let mut arrays: Vec<ArrayRef> = Vec::with_capacity(body_fields.len() + 2);
-
-    arrays.push(Arc::new(
-        rows.iter()
-            .map(|r| Some(i64::try_from(r.log_time).expect("log_time exceeds i64::MAX")))
-            .collect::<TimestampNanosecondArray>()
-            .with_timezone(crate::TIMESTAMP_TZ),
-    ) as ArrayRef);
-
-    arrays.push(Arc::new(
-        rows.iter()
-            .map(|r| Some(i64::try_from(r.publish_time).expect("publish_time exceeds i64::MAX")))
-            .collect::<TimestampNanosecondArray>()
-            .with_timezone(crate::TIMESTAMP_TZ),
-    ) as ArrayRef);
-
-    for (i, field) in body_fields.iter().enumerate() {
-        let values: Vec<&Value> = rows.iter().map(|r| extract_field(&r.value, i)).collect();
-        arrays.push(build_array_from_values(field.data_type(), &values)?);
-    }
-
-    Ok(RecordBatch::try_new(full_schema, arrays)?)
 }
 
 fn extract_field(root: &Value, field_index: usize) -> &Value {

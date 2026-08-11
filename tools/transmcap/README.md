@@ -42,7 +42,14 @@ Commands:
 - `--list-flatten-size <N>`: only valid with `--list-policy flatten-fixed`
 - `--array-policy <POLICY>`: `drop | keep | flatten`
 - `--map-policy <POLICY>`: `drop | keep`
-- `--fields <FIELDS>`: comma-separated field paths to include (applied before flattening)
+- `--fields <FIELDS>`: comma-separated field paths to include (applied before flattening).
+  Metadata columns are named with their prefix, so the default requires
+  `--fields @log_time,x`. To select unprefixed metadata columns, pass
+  `--metadata-prefix ''` and use `--fields log_time,x`.
+- `--metadata-prefix <PREFIX>`: prefix for the `log_time` and `publish_time`
+  metadata columns (default: `@`). It keeps them apart from payload fields of the same name;
+  pass an empty string to drop it. `PREFIX` must not contain `.` because field paths and
+  flattened column names use `.` as their separator.
 - `-p, --parallel`: enable parallel chunk decompression and decoding
 
 ## `schema` Options

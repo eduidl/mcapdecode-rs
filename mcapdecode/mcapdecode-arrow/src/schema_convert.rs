@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::datatypes::{DataType, Field, Schema};
 use mcapdecode_core::{DataTypeDef, ElementDef, FieldDef, FieldDefs};
 
 // ---------------------------------------------------------------------------
-// Convert FieldDef schema IR to Arrow schema (without timestamp prefix)
+// Convert FieldDef schema IR to Arrow schema (body fields only)
 // ---------------------------------------------------------------------------
 
 /// Converts `mcapdecode-core` schema IR into an Arrow `Schema`.
 ///
-/// The input is expected to represent message body fields only. Timestamp
-/// system columns are not included in the returned schema.
+/// The input is expected to represent message body fields only. Metadata system
+/// columns are not included in the returned schema; see
+/// [`MessageBatchSchema`](crate::MessageBatchSchema) for the emitted schema.
 pub fn field_defs_to_arrow_schema(fields: &FieldDefs) -> Schema {
     let arrow_fields: Vec<Field> = fields.iter().map(field_def_to_arrow_field).collect();
     Schema::new(arrow_fields)
@@ -67,25 +68,4 @@ fn element_def_to_datatype(elem: &ElementDef) -> DataType {
             DataType::Map(Arc::new(entry_field), false)
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Prepend log_time / publish_time timestamp columns to a schema
-// ---------------------------------------------------------------------------
-
-pub(crate) fn with_timestamp_fields(schema: Schema) -> Schema {
-    let mut fields: Vec<Field> = vec![
-        Field::new(
-            "@log_time",
-            DataType::Timestamp(TimeUnit::Nanosecond, Some(Arc::from(crate::TIMESTAMP_TZ))),
-            false,
-        ),
-        Field::new(
-            "@publish_time",
-            DataType::Timestamp(TimeUnit::Nanosecond, Some(Arc::from(crate::TIMESTAMP_TZ))),
-            false,
-        ),
-    ];
-    fields.extend(schema.fields().iter().map(|f| f.as_ref().clone()));
-    Schema::new(fields)
 }

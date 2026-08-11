@@ -75,7 +75,7 @@ fn jtd_schema(
             "x-mcap": {
                 "schema_encoding": schema_encoding,
                 "message_encoding": message_encoding,
-                "columns": ["log_time", "publish_time", "sequence"]
+                "columns": ["log_time", "publish_time"]
             }
         }
     })

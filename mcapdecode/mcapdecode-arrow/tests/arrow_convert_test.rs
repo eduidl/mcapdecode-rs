@@ -1,15 +1,14 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use arrow::{
     array::{
         Array, FixedSizeListArray, Float32Array, Float64Array, Int32Array, ListArray, MapArray,
         StringArray, StructArray, TimestampNanosecondArray,
     },
-    datatypes::{DataType, Field, Schema},
+    datatypes::{DataType, Field, Schema, TimeUnit},
+    record_batch::RecordBatch,
 };
-use mcapdecode_arrow::{
-    ArrowConvertError, arrow_value_rows_to_record_batch, try_arrow_value_rows_to_record_batch,
-};
+use mcapdecode_arrow::{ArrowConvertError, MessageBatchSchema, MetadataColumns};
 use mcapdecode_core::{DecodedMessage, Value};
 
 fn make_row(log_time: u64, publish_time: u64, value: Value) -> DecodedMessage {
@@ -18,6 +17,21 @@ fn make_row(log_time: u64, publish_time: u64, value: Value) -> DecodedMessage {
         publish_time,
         value,
     }
+}
+
+/// Panics on failure so the tests that assert on an error message can keep
+/// using `#[should_panic]`; `try_to_batch` covers the fallible cases.
+fn to_batch(body: &Arc<Schema>, rows: &[DecodedMessage]) -> RecordBatch {
+    try_to_batch(body, rows).unwrap_or_else(|e| panic!("{e}"))
+}
+
+fn try_to_batch(
+    body: &Arc<Schema>,
+    rows: &[DecodedMessage],
+) -> Result<RecordBatch, ArrowConvertError> {
+    MessageBatchSchema::new(body.as_ref().clone(), MetadataColumns::default())
+        .expect("test body schemas never collide with metadata columns")
+        .to_record_batch(rows)
 }
 
 fn test_schema() -> Arc<Schema> {
@@ -104,7 +118,7 @@ fn arrow_value_rows_to_record_batch_mixed_types() {
         make_row(3_u64, 30_u64, Value::Null),
     ];
 
-    let batch = arrow_value_rows_to_record_batch(&schema, &rows);
+    let batch = to_batch(&schema, &rows);
     assert_eq!(batch.num_rows(), 3);
     assert_eq!(batch.num_columns(), 8);
 
@@ -207,7 +221,7 @@ fn arrow_value_rows_to_record_batch_mixed_types() {
 fn empty_rows_panics() {
     let schema = test_schema();
     let rows: Vec<DecodedMessage> = Vec::new();
-    arrow_value_rows_to_record_batch(&schema, &rows);
+    to_batch(&schema, &rows);
 }
 
 #[test]
@@ -215,7 +229,7 @@ fn null_root_sets_body_columns_to_null() {
     let schema = test_schema();
     let rows = vec![make_row(10_u64, 20_u64, Value::Null)];
 
-    let batch = arrow_value_rows_to_record_batch(&schema, &rows);
+    let batch = to_batch(&schema, &rows);
     let scalar = batch
         .column(2)
         .as_any()
@@ -239,7 +253,7 @@ fn null_root_sets_body_columns_to_null() {
 fn non_struct_root_panics() {
     let schema = test_schema();
     let rows = vec![make_row(10_u64, 20_u64, Value::I32(123))];
-    arrow_value_rows_to_record_batch(&schema, &rows);
+    to_batch(&schema, &rows);
 }
 
 #[test]
@@ -247,12 +261,45 @@ fn non_struct_root_panics() {
 fn unsupported_arrow_type_panics() {
     let schema = Arc::new(Schema::new(vec![Field::new(
         "unsupported",
-        DataType::Date32,
+        DataType::Duration(TimeUnit::Nanosecond),
         true,
     )]));
 
     let rows = vec![make_row(1_u64, 2_u64, Value::Struct(vec![Value::Null]))];
-    arrow_value_rows_to_record_batch(&schema, &rows);
+    to_batch(&schema, &rows);
+}
+
+#[test]
+#[should_panic(expected = "log_time exceeds i64::MAX")]
+fn out_of_range_log_time_panics_with_the_column_name() {
+    let schema = Arc::new(Schema::empty());
+    let rows = vec![make_row(u64::MAX, 1, Value::Struct(vec![]))];
+
+    to_batch(&schema, &rows);
+}
+
+#[test]
+#[should_panic(expected = "publish_time exceeds i64::MAX")]
+fn out_of_range_publish_time_panics_with_the_column_name() {
+    let schema = Arc::new(Schema::empty());
+    let rows = vec![make_row(1, u64::MAX, Value::Struct(vec![]))];
+
+    to_batch(&schema, &rows);
+}
+
+#[test]
+fn batch_schema_preserves_body_schema_metadata() {
+    let body = Schema::new_with_metadata(
+        vec![Field::new("value", DataType::Int32, true)],
+        HashMap::from([("source".to_string(), "fixture".to_string())]),
+    );
+
+    let batch_schema = MessageBatchSchema::new(body, MetadataColumns::default()).unwrap();
+
+    assert_eq!(
+        batch_schema.schema().metadata().get("source"),
+        Some(&"fixture".to_string())
+    );
 }
 
 #[test]
@@ -271,7 +318,7 @@ fn fixed_size_list_length_mismatch_panics() {
         2_u64,
         Value::Struct(vec![Value::Array(vec![Value::F32(1.0), Value::F32(2.0)])]),
     )];
-    arrow_value_rows_to_record_batch(&schema, &rows);
+    to_batch(&schema, &rows);
 }
 
 #[test]
@@ -288,7 +335,7 @@ fn fixed_size_list_length_mismatch_returns_error_in_try_api() {
         Value::Struct(vec![Value::Array(vec![Value::F32(1.0), Value::F32(2.0)])]),
     )];
 
-    let err = try_arrow_value_rows_to_record_batch(&schema, &rows).unwrap_err();
+    let err = try_to_batch(&schema, &rows).unwrap_err();
     assert!(matches!(err, ArrowConvertError::ValueType(_)));
     assert_eq!(
         err.to_string(),
@@ -306,7 +353,7 @@ fn fixed_size_list_non_array_returns_error_in_try_api() {
 
     let rows = vec![make_row(1_u64, 2_u64, Value::Struct(vec![Value::I32(99)]))];
 
-    let err = try_arrow_value_rows_to_record_batch(&schema, &rows).unwrap_err();
+    let err = try_to_batch(&schema, &rows).unwrap_err();
     assert!(matches!(err, ArrowConvertError::ValueType(_)));
     assert_eq!(
         err.to_string(),
@@ -327,7 +374,7 @@ fn list_item_nullability_is_preserved() {
         Value::Struct(vec![Value::List(vec![Value::I32(1), Value::I32(2)])]),
     )];
 
-    let batch = arrow_value_rows_to_record_batch(&schema, &rows);
+    let batch = to_batch(&schema, &rows);
     let batch_schema = batch.schema();
     let dt = batch_schema.field(2).data_type();
     assert_eq!(
@@ -362,7 +409,7 @@ fn map_value_nullability_is_preserved() {
         Value::Struct(vec![Value::Map(vec![(Value::string("k"), Value::I32(1))])]),
     )];
 
-    let batch = arrow_value_rows_to_record_batch(&schema, &rows);
+    let batch = to_batch(&schema, &rows);
     let batch_schema = batch.schema();
     let dt = batch_schema.field(2).data_type();
     assert_eq!(
@@ -393,7 +440,7 @@ fn scalar_type_mismatch_returns_error_in_try_api() {
     )]));
     let rows = vec![make_row(1_u64, 2_u64, Value::Struct(vec![Value::I16(10)]))];
 
-    let err = try_arrow_value_rows_to_record_batch(&schema, &rows).unwrap_err();
+    let err = try_to_batch(&schema, &rows).unwrap_err();
     assert!(matches!(err, ArrowConvertError::ValueType(_)));
     assert_eq!(err.to_string(), "value type mismatch: expected I8, got I16");
 }
