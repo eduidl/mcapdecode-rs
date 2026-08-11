@@ -7,9 +7,30 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Fixture generation is benchmark-only work. Keep its verification suite opt-in so a
+# normal workspace test run does not materialize large MCAP files.
+fixture-tests = []
+
 [[bin]]
 name = "mcapbench"
 path = "src/main.rs"
+
+[[test]]
+name = "generate"
+required-features = ["fixture-tests"]
+
+[[test]]
+name = "reader_alloc_budget"
+required-features = ["fixture-tests"]
+
+[[test]]
+name = "reader_contract"
+required-features = ["fixture-tests"]
+
+[[test]]
+name = "roundtrip"
+required-features = ["fixture-tests"]
 
 [dependencies]
 clap.workspace = true
