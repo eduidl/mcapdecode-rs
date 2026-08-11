@@ -29,7 +29,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Test
-        run: cargo test --workspace --all-features
+        run: cargo test --locked --workspace --all-features
 
   release:
     name: Build (${{ matrix.package }})
@@ -72,7 +72,7 @@ jobs:
       - name: Build
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --target ${{ matrix.target }} -p ${{ matrix.package }}
+        run: cargo build --locked --release --target ${{ matrix.target }} -p ${{ matrix.package }}
 
       - name: Strip binary
         run: strip --strip-all target/${{ matrix.target }}/release/${{ matrix.binary }}
