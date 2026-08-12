@@ -1,38 +1,64 @@
 # mcapq
 
-`mcapq` is a machine-readable MCAP inspection CLI.
+`mcapq` is a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP)
+server for AI-assisted MCAP inspection. It communicates over standard
+input/output; do not run it through a shell pipeline or use its standard output
+for logs.
 
-## Usage
+## Start the server
 
-```bash
-mcapq info <input.mcap>
-mcapq schema <input.mcap> --topic /imu/data
-```
-
-`info` writes one JSON object to standard output. It lists every topic with its
-schema name, summary message count, and whether the built-in `mcapdecode`
-decoders can derive its schema. When a topic is not decodable, `decode_error`
-states why.
-
-Errors are JSON objects on standard error. Exit status is `0` on success, `1`
-for runtime errors, and `2` for invalid arguments.
-
-## Schema inspection
-
-`schema` derives a topic's payload schema without reading message payloads. Its
-default `jtd` format is [JSON Type Definition](https://jsontypedef.com/): it
-preserves integer and floating-point widths, nullability, and enum variants.
-Fixed lengths and bounded collections are included as `x-mcap-*` metadata.
-Enum `enum` values are the variants declared by the source schema; an unknown
-wire value may still decode as its numeric string representation. Numeric enum
-values are available in `x-mcap-enum-values` metadata.
-
-The JTD metadata advertises the two MCAP record columns `log_time` and
-`publish_time` in `x-mcap.columns`. They are not payload fields.
+Pass every directory from which the server may read MCAP files. A requested
+path is canonicalized before use, so symlinks cannot escape an allowed root.
 
 ```bash
-mcapq schema drive.mcap --topic /imu/data
-mcapq schema drive.mcap --topic /imu/data --format native
+mcapq --allow-root /data/recordings --allow-root /tmp/investigations
 ```
 
-`native` emits mcapdecode's FieldDefs text.
+The server accepts no single-shot subcommands. It stays alive for its MCP
+connection and reads each MCAP file on demand.
+
+## Codex setup
+
+Build or install `mcapq`, then add a local stdio server to your Codex
+configuration. Keep the configured roots as narrow as practical.
+
+```toml
+[mcp_servers.mcapq]
+command = "/absolute/path/to/mcapq"
+args = ["--allow-root", "/absolute/path/to/recordings"]
+```
+
+Alternatively, use Cargo while developing this repository:
+
+```toml
+[mcp_servers.mcapq]
+command = "cargo"
+args = ["run", "--quiet", "--release", "-p", "mcapq", "--", "--allow-root", "/absolute/path/to/recordings"]
+```
+
+The process's current directory must be this workspace for the Cargo form.
+
+## Tools
+
+Every tool accepts a `path` beneath an allowed root and returns structured JSON.
+
+| Tool | Purpose |
+| --- | --- |
+| `mcap_info(path)` | List topics, schemas, summary counts, and decode errors. |
+| `mcap_schema(path, topic)` | Return the topic schema as JTD. |
+
+Pass absolute paths beneath an `--allow-root` to every tool. `mcap_schema`
+describes the payload as it would appear in JSON: `log_time` and `publish_time`
+lead every message as Unix-epoch nanoseconds, binary values are hex-encoded
+strings, string-keyed maps are JSON objects, and maps with other protobuf key
+types are arrays of `{"key": ..., "value": ...}` entries. The schema carries
+`x-mcap-original-type` metadata when a source type is represented differently in
+JSON; enums additionally provide `x-mcap-enum-variants` name/value pairs.
+
+All tools currently require an MCAP Summary section. Files without one are not
+supported.
+
+## Not yet implemented
+
+This server describes MCAP files; it does not yet return their messages. Reading
+decoded rows and querying across topics with SQL are both planned.

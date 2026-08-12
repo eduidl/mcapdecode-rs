@@ -1,58 +1,23 @@
-use std::process::ExitCode;
+use std::{path::PathBuf, process::ExitCode};
 
-use clap::{Parser, Subcommand, error::ErrorKind};
-use commands::{info::InfoArgs, schema::SchemaArgs};
-
-mod commands;
+use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "mcapq", about = "Machine-readable MCAP inspection")]
+#[command(name = "mcapq", about = "MCP server for inspecting MCAP files")]
 struct Cli {
-    #[command(subcommand)]
-    command: Commands,
+    /// Directory containing MCAP files that tools may read. Specify at least once.
+    #[arg(long = "allow-root", required = true, value_name = "DIR")]
+    allow_roots: Vec<PathBuf>,
 }
 
-#[derive(Subcommand)]
-enum Commands {
-    /// List topics and their schema metadata as JSON.
-    Info(InfoArgs),
-    /// Describe a topic's payload schema.
-    Schema(SchemaArgs),
-}
-
-fn main() -> ExitCode {
-    let cli = match Cli::try_parse() {
-        Ok(cli) => cli,
-        Err(error) => {
-            if matches!(
-                error.kind(),
-                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
-            ) {
-                error.print().expect("failed to write clap output");
-                return ExitCode::SUCCESS;
-            }
-            emit_error("invalid_arguments", &error.to_string());
-            return ExitCode::from(2);
-        }
-    };
-
-    let result = match cli.command {
-        Commands::Info(args) => args.run(),
-        Commands::Schema(args) => args.run(),
-    };
-
-    match result {
+#[tokio::main]
+async fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match mcapq::serve_stdio(cli.allow_roots).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            emit_error("runtime_error", &error);
-            ExitCode::from(1)
+            eprintln!("mcapq: {error}");
+            ExitCode::FAILURE
         }
     }
-}
-
-fn emit_error(code: &str, message: &str) {
-    eprintln!(
-        "{}",
-        serde_json::json!({"error": {"code": code, "message": message}})
-    );
 }
