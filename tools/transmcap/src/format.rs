@@ -5,6 +5,7 @@ use mcapdecode::arrow::{ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, Struc
 #[value(rename_all = "kebab-case")]
 pub enum OutputFormat {
     Jsonl,
+    JsonlExt,
     Csv,
     Parquet,
 }
@@ -12,7 +13,7 @@ pub enum OutputFormat {
 impl OutputFormat {
     pub fn default_policy(&self) -> FlattenPolicy {
         match self {
-            OutputFormat::Jsonl => FlattenPolicy {
+            OutputFormat::Jsonl | OutputFormat::JsonlExt => FlattenPolicy {
                 list: ListPolicy::Keep,
                 list_flatten_fixed_size: 1,
                 array: ArrayPolicy::Keep,

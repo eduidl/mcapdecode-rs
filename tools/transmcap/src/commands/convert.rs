@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcapdecode::{
-    McapReader, MetadataColumns, RecordBatchOptions,
+    McapReader, MetadataColumns, MetadataTimestampFormat, NonFiniteFloats, RecordBatchOptions,
     arrow::{
         ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, StructPolicy, flatten_record_batch,
         project_record_batch,
@@ -60,6 +60,10 @@ pub struct ConvertArgs {
     #[arg(long, default_value = "@", value_parser = parse_metadata_prefix)]
     metadata_prefix: String,
 
+    /// Emit log_time and publish_time as Unix epoch nanoseconds (`int64`).
+    #[arg(long)]
+    time_ns: bool,
+
     /// Enable parallel chunk decompression and decoding.
     #[arg(short, long)]
     parallel: bool,
@@ -83,7 +87,14 @@ impl ConvertArgs {
         );
 
         let mut writer: Box<dyn RecordBatchWriter> = match self.format {
-            OutputFormat::Jsonl => Box::new(JsonlWriter::new(self.output.as_deref())?),
+            OutputFormat::Jsonl => Box::new(JsonlWriter::new(
+                self.output.as_deref(),
+                NonFiniteFloats::Null,
+            )?),
+            OutputFormat::JsonlExt => Box::new(JsonlWriter::new(
+                self.output.as_deref(),
+                NonFiniteFloats::String,
+            )?),
             OutputFormat::Csv => Box::new(CsvWriter::new(self.output.as_deref())?),
             OutputFormat::Parquet => {
                 let path = self
@@ -95,8 +106,13 @@ impl ConvertArgs {
         };
         let mut dropped_warned = false;
 
+        let metadata = MetadataColumns::with_prefix(&self.metadata_prefix);
         let batch_options = RecordBatchOptions {
-            metadata: MetadataColumns::with_prefix(&self.metadata_prefix),
+            metadata: if self.time_ns {
+                metadata.with_timestamp_format(MetadataTimestampFormat::UnixNanoseconds)
+            } else {
+                metadata
+            },
             ..RecordBatchOptions::default()
         };
 
@@ -155,7 +171,7 @@ impl ConvertArgs {
             policy.map = v;
         }
         policy.struct_ = match self.format {
-            OutputFormat::Jsonl => StructPolicy::Keep,
+            OutputFormat::Jsonl | OutputFormat::JsonlExt => StructPolicy::Keep,
             OutputFormat::Csv | OutputFormat::Parquet => StructPolicy::Flatten,
         };
 

@@ -18,7 +18,7 @@ transmcap <command> <input.mcap> [options]
 
 Commands:
 
-- `convert`: convert MCAP messages to `jsonl/csv/parquet`
+- `convert`: convert MCAP messages to `jsonl/jsonl-ext/csv/parquet`
 - `schema`: print inferred field schema for a topic
 
 ## Supported Schema Encodings
@@ -35,9 +35,9 @@ Commands:
 
 ## `convert` Options
 
-- `-f, --format <FORMAT>`: `jsonl | csv | parquet` (default: `jsonl`)
+- `-f, --format <FORMAT>`: `jsonl | jsonl-ext | csv | parquet` (default: `jsonl`)
 - `-t, --topic <TOPIC>`: topic name to convert (required)
-- `-o, --output <PATH>`: output file path (`jsonl/csv` defaults to stdout)
+- `-o, --output <PATH>`: output file path (`jsonl/jsonl-ext/csv` defaults to stdout)
 - `--list-policy <POLICY>`: `drop | keep | flatten-fixed`
 - `--list-flatten-size <N>`: only valid with `--list-policy flatten-fixed`
 - `--array-policy <POLICY>`: `drop | keep | flatten`
@@ -50,6 +50,7 @@ Commands:
   metadata columns (default: `@`). It keeps them apart from payload fields of the same name;
   pass an empty string to drop it. `PREFIX` must not contain `.` because field paths and
   flattened column names use `.` as their separator.
+- `--time-ns`: emit `log_time` and `publish_time` as Unix epoch nanoseconds.
 - `-p, --parallel`: enable parallel chunk decompression and decoding
 
 ## `schema` Options
@@ -80,6 +81,7 @@ If `--list-flatten-size` is set without `--list-policy flatten-fixed`, command r
 | Format | list-policy | array-policy | map-policy | struct-policy | list-flatten-size |
 | --- | --- | --- | --- | --- | --- |
 | `jsonl` | `keep` | `keep` | `keep` | `keep` | `1` |
+| `jsonl-ext` | `keep` | `keep` | `keep` | `keep` | `1` |
 | `csv` | `drop` | `drop` | `drop` | `flatten` | `1` |
 | `parquet` | `keep` | `keep` | `keep` | `flatten` | `1` |
 
@@ -127,6 +129,10 @@ transmcap schema sample.mcap --topic /imu/data
 - `parquet` requires `-o/--output`.
 - `convert` runs sequentially by default; use `-p/--parallel` to enable parallel chunk decompression and decoding.
 - Column name collisions during flattening return an error.
+- `jsonl` preserves Arrow's existing output behavior. Use `jsonl-ext` when
+  `NaN`, `Infinity`, and `-Infinity` must remain distinguishable.
+- All output formats use Arrow timestamps by default. Pass `--time-ns` to emit
+  `log_time` and `publish_time` as Unix epoch nanoseconds instead.
 
 ## Development
 

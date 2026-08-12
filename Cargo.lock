@@ -3569,6 +3569,7 @@ dependencies = [
  "mcapbench",
  "mcapdecode",
  "parquet",
+ "serde_json",
 ]
 
 [[package]]
