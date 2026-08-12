@@ -35,7 +35,6 @@ version = "54.1.0"
 default-features = false
 features = [
     "nested_expressions",
-    "crypto_expressions",
     "datetime_expressions",
     "encoding_expressions",
     "regex_expressions",
