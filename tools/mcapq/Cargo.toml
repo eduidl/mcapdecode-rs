@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 include.workspace = true
 publish = false
-description = "Stateful MCP server for inspecting MCAP files."
+description = "Machine-readable MCAP inspection CLI."
 readme = "README.md"
 
 [[bin]]
@@ -16,11 +16,9 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-mcapdecode = { workspace = true, features = ["arrow"] }
-rmcp = { version = "3.0.0", features = ["server", "transport-io", "schemars"] }
-serde.workspace = true
-serde_json.workspace = true
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
+mcapdecode.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
 
 [dev-dependencies]
 mcap.workspace = true
