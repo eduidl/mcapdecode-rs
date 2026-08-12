@@ -12,5 +12,5 @@ description = "ROS 2 .msg schema decoder for mcapdecode CDR payloads."
 [dependencies]
 mcapdecode-core.workspace = true
 mcapdecode-ros2-common.workspace = true
-re_ros_msg = "0.29.2"
+re_ros_msg = "0.36.0"
 thiserror.workspace = true

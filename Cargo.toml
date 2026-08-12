@@ -5,7 +5,7 @@ resolver = "3"
 [workspace.package]
 version = "0.5.1"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/eduidl/mcapdecode-rs"
 include = ["src/**/*", "tests/**/*", "Cargo.toml", "README.md"]
@@ -21,7 +21,8 @@ mcapdecode-ros2-common = { path = "mcapdecode/mcapdecode-ros2-common", version =
 mcapdecode-ros2idl = { path = "mcapdecode/mcapdecode-ros2idl", version = "=0.5.1" }
 mcapdecode-ros2msg = { path = "mcapdecode/mcapdecode-ros2msg", version = "=0.5.1" }
 
-arrow = { version = "57.3.0", default-features = false }
+arrow = { version = "58.4.0", default-features = false }
+mcap = "0.25.0"
 clap = { version = "4.5.58", features = ["derive"] }
 thiserror = "2.0.18"
 criterion = "0.5.1"
@@ -30,7 +31,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 
 [workspace.dependencies.datafusion]
-version = "52.0.0"
+version = "54.1.0"
 default-features = false
 features = [
     "nested_expressions",

@@ -14,7 +14,7 @@ mcapdecode-arrow = { workspace = true, optional = true }
 mcapdecode-core.workspace = true
 arrow = { workspace = true, optional = true }
 datafusion = { workspace = true, optional = true }
-mcap = "0.24.0"
+mcap.workspace = true
 memmap2 = "0.9.10"
 rayon = "1.11.0"
 thiserror.workspace = true

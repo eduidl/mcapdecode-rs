@@ -21,4 +21,4 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 
 [dev-dependencies]
-mcap = "0.24.0"
+mcap.workspace = true

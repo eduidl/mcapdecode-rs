@@ -86,7 +86,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain:
-          - 1.90.0
+          - 1.95.0
           - stable
           - beta
           - nightly
