@@ -52,8 +52,8 @@ pub use error::ArrowConvertError;
 pub use flatten::{
     ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, StructPolicy, flatten_record_batch,
 };
-/// Re-export of [`json::JsonlWriter`].
-pub use json::JsonlWriter;
+/// Re-exports from [`json`].
+pub use json::{JsonlWriter, NonFiniteFloats};
 /// Re-export of [`projection::project_record_batch`].
 pub use projection::project_record_batch;
 /// Re-export of [`schema_convert::field_defs_to_arrow_schema`].

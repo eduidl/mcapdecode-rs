@@ -5,10 +5,9 @@ use arrow::{
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
-use mcapdecode_arrow::JsonlWriter;
+use mcapdecode_arrow::{JsonlWriter, NonFiniteFloats};
 
-#[test]
-fn preserves_non_finite_floats_and_uses_arrow_binary_encoding() {
+fn non_finite_batch() -> RecordBatch {
     let schema = Arc::new(Schema::new(vec![
         Field::new("log_time", DataType::Int64, false),
         Field::new("reading", DataType::Float32, false),
@@ -16,7 +15,7 @@ fn preserves_non_finite_floats_and_uses_arrow_binary_encoding() {
         Field::new("nan", DataType::Float64, false),
         Field::new("bytes", DataType::Binary, false),
     ]));
-    let batch = RecordBatch::try_new(
+    RecordBatch::try_new(
         schema,
         vec![
             Arc::new(Int64Array::from(vec![123_i64])),
@@ -26,15 +25,29 @@ fn preserves_non_finite_floats_and_uses_arrow_binary_encoding() {
             Arc::new(BinaryArray::from_iter_values([b"\0\x01\xff".as_slice()])),
         ],
     )
-    .unwrap();
+    .unwrap()
+}
 
+fn write_jsonl(batch: &RecordBatch, non_finite_floats: NonFiniteFloats) -> String {
     let mut output = Vec::new();
-    let mut writer = JsonlWriter::new(&mut output);
-    writer.write(&batch).unwrap();
+    let mut writer = JsonlWriter::new(&mut output, non_finite_floats);
+    writer.write(batch).unwrap();
     writer.finish().unwrap();
+    String::from_utf8(output).unwrap()
+}
 
+#[test]
+fn preserves_non_finite_floats_and_uses_arrow_binary_encoding() {
     assert_eq!(
-        String::from_utf8(output).unwrap(),
+        write_jsonl(&non_finite_batch(), NonFiniteFloats::String),
         "{\"log_time\":123,\"reading\":0.1,\"range\":\"Infinity\",\"nan\":\"NaN\",\"bytes\":\"0001ff\"}\n"
+    );
+}
+
+#[test]
+fn encodes_non_finite_floats_as_null_by_request() {
+    assert_eq!(
+        write_jsonl(&non_finite_batch(), NonFiniteFloats::Null),
+        "{\"log_time\":123,\"reading\":0.1,\"range\":null,\"nan\":null,\"bytes\":\"0001ff\"}\n"
     );
 }

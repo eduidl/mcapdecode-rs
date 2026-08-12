@@ -16,22 +16,38 @@ use arrow::{
     record_batch::RecordBatch,
 };
 
+/// How non-finite floats (`NaN`, `Infinity`, `-Infinity`) are encoded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NonFiniteFloats {
+    /// Encode them as `null`, which is Arrow's default and keeps the output
+    /// parseable by strict JSON readers.
+    Null,
+    /// Encode them as the strings `"NaN"`, `"Infinity"`, and `"-Infinity"` so
+    /// that the distinction between them survives the round trip.
+    String,
+}
+
 /// A JSON Lines writer for decoded MCAP Arrow batches.
 ///
-/// It preserves Arrow's default binary encoding and writes non-finite floats
-/// as `"NaN"`, `"Infinity"`, or `"-Infinity"`. Configure timestamp column
-/// types through [`crate::MetadataColumns`] before creating the record batch.
+/// It preserves Arrow's default binary encoding and encodes non-finite floats
+/// according to [`NonFiniteFloats`]. Configure timestamp column types through
+/// [`crate::MetadataColumns`] before creating the record batch.
 pub struct JsonlWriter<W: Write> {
     writer: Writer<W, LineDelimited>,
 }
 
 impl<W: Write> JsonlWriter<W> {
     /// Create a writer that uses the JSON representation shared by mcapdecode tools.
-    pub fn new(writer: W) -> Self {
+    pub fn new(writer: W, non_finite_floats: NonFiniteFloats) -> Self {
+        let builder = WriterBuilder::new();
+        let builder = match non_finite_floats {
+            NonFiniteFloats::Null => builder,
+            NonFiniteFloats::String => {
+                builder.with_encoder_factory(Arc::new(McapJsonEncoderFactory))
+            }
+        };
         Self {
-            writer: WriterBuilder::new()
-                .with_encoder_factory(Arc::new(McapJsonEncoderFactory))
-                .build(writer),
+            writer: builder.build(writer),
         }
     }
 
@@ -52,8 +68,9 @@ impl<W: Write> JsonlWriter<W> {
 }
 
 /// Arrow's default JSON encoder converts non-finite floats to `null`. This
-/// factory keeps the distinction between `NaN` and infinities while leaving
-/// every other type, including binary values, to Arrow's default encoding.
+/// factory backs [`NonFiniteFloats::String`]: it keeps the distinction between
+/// `NaN` and infinities while leaving every other type, including binary
+/// values, to Arrow's default encoding.
 #[derive(Debug)]
 struct McapJsonEncoderFactory;
 
