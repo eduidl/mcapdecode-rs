@@ -9,7 +9,7 @@ use arrow::{
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
-use mcapdecode_arrow::{JsonlWriter, NonFiniteFloats};
+use mcapdecode_arrow::{JsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
 
 fn non_finite_batch() -> RecordBatch {
     let schema = Arc::new(Schema::new(vec![
@@ -30,6 +30,21 @@ fn non_finite_batch() -> RecordBatch {
         ],
     )
     .unwrap()
+}
+
+fn write_jsonl_with_explicit_nulls(
+    batch: &RecordBatch,
+    non_finite_floats: NonFiniteFloats,
+    explicit_nulls: bool,
+) -> String {
+    let mut output = Vec::new();
+    let mut writer = JsonlWriterBuilder::new()
+        .with_non_finite_floats(non_finite_floats)
+        .with_explicit_nulls(explicit_nulls)
+        .build(&mut output);
+    writer.write(batch).unwrap();
+    writer.finish().unwrap();
+    String::from_utf8(output).unwrap()
 }
 
 fn write_jsonl(batch: &RecordBatch, non_finite_floats: NonFiniteFloats) -> String {
@@ -53,6 +68,38 @@ fn encodes_non_finite_floats_as_null_by_request() {
     assert_eq!(
         write_jsonl(&non_finite_batch(), NonFiniteFloats::Null),
         "{\"log_time\":123,\"reading\":0.1,\"range\":null,\"nan\":null,\"bytes\":\"0001ff\"}\n"
+    );
+}
+
+#[test]
+fn optionally_emits_null_struct_fields() {
+    let nested = StructArray::from(vec![
+        (
+            Arc::new(Field::new("present", DataType::Int64, true)),
+            Arc::new(Int64Array::from(vec![Some(42)])) as ArrayRef,
+        ),
+        (
+            Arc::new(Field::new("missing", DataType::Int64, true)),
+            Arc::new(Int64Array::from(vec![None])) as ArrayRef,
+        ),
+    ]);
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![Field::new(
+            "nested",
+            nested.data_type().clone(),
+            false,
+        )])),
+        vec![Arc::new(nested)],
+    )
+    .unwrap();
+
+    assert_eq!(
+        write_jsonl(&batch, NonFiniteFloats::Null),
+        "{\"nested\":{\"present\":42}}\n"
+    );
+    assert_eq!(
+        write_jsonl_with_explicit_nulls(&batch, NonFiniteFloats::Null, true),
+        "{\"nested\":{\"present\":42,\"missing\":null}}\n"
     );
 }
 

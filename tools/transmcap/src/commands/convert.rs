@@ -64,6 +64,10 @@ pub struct ConvertArgs {
     #[arg(long)]
     time_ns: bool,
 
+    /// Emit JSON fields and map entries whose values are null.
+    #[arg(long)]
+    explicit_null: bool,
+
     /// Enable parallel chunk decompression and decoding.
     #[arg(short, long)]
     parallel: bool,
@@ -90,10 +94,12 @@ impl ConvertArgs {
             OutputFormat::Jsonl => Box::new(JsonlWriter::new(
                 self.output.as_deref(),
                 NonFiniteFloats::Null,
+                self.explicit_null,
             )?),
             OutputFormat::JsonlExt => Box::new(JsonlWriter::new(
                 self.output.as_deref(),
                 NonFiniteFloats::String,
+                self.explicit_null,
             )?),
             OutputFormat::Csv => Box::new(CsvWriter::new(self.output.as_deref())?),
             OutputFormat::Parquet => {

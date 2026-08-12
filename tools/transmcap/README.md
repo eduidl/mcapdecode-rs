@@ -51,6 +51,7 @@ Commands:
   pass an empty string to drop it. `PREFIX` must not contain `.` because field paths and
   flattened column names use `.` as their separator.
 - `--time-ns`: emit `log_time` and `publish_time` as Unix epoch nanoseconds.
+- `--explicit-null`: emit null JSON fields and map entries for `jsonl` and `jsonl-ext`.
 - `-p, --parallel`: enable parallel chunk decompression and decoding
 
 ## `schema` Options
@@ -131,6 +132,8 @@ transmcap schema sample.mcap --topic /imu/data
 - Column name collisions during flattening return an error.
 - `jsonl` preserves Arrow's existing output behavior. Use `jsonl-ext` when
   `NaN`, `Infinity`, and `-Infinity` must remain distinguishable.
+- JSONL output omits null fields and map entries by default; pass `--explicit-null`
+  to emit them as `null`.
 - All output formats use Arrow timestamps by default. Pass `--time-ns` to emit
   `log_time` and `publish_time` as Unix epoch nanoseconds instead.
 
