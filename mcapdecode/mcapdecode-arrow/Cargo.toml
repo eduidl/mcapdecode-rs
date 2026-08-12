@@ -12,7 +12,6 @@ description = "Arrow conversion utilities built on top of mcapdecode-core schema
 [dependencies]
 mcapdecode-core.workspace = true
 arrow = { workspace = true, features = ["json"] }
-base64 = "0.22.1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

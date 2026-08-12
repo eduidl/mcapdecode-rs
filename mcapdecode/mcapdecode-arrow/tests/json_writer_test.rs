@@ -8,7 +8,7 @@ use arrow::{
 use mcapdecode_arrow::JsonlWriter;
 
 #[test]
-fn writes_mcap_json_conventions() {
+fn preserves_non_finite_floats_and_uses_arrow_binary_encoding() {
     let schema = Arc::new(Schema::new(vec![
         Field::new("log_time", DataType::Int64, false),
         Field::new("reading", DataType::Float32, false),
@@ -35,6 +35,6 @@ fn writes_mcap_json_conventions() {
 
     assert_eq!(
         String::from_utf8(output).unwrap(),
-        "{\"log_time\":123,\"reading\":0.1,\"range\":\"Infinity\",\"nan\":\"NaN\",\"bytes\":\"AAH/\"}\n"
+        "{\"log_time\":123,\"reading\":0.1,\"range\":\"Infinity\",\"nan\":\"NaN\",\"bytes\":\"0001ff\"}\n"
     );
 }
