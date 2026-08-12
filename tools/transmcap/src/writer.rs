@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
+use mcapdecode::{JsonlWriter as McapJsonlWriter, NonFiniteFloats};
 
 pub trait RecordBatchWriter {
     fn write_batch(&mut self, batch: RecordBatch) -> Result<()>;
@@ -14,20 +15,22 @@ pub trait RecordBatchWriter {
 
 // --- JSON Lines ---
 
+/// JSON Lines writer whose handling of non-finite floats is selected by
+/// [`NonFiniteFloats`].
 pub struct JsonlWriter {
-    dest: Box<dyn Write>,
+    inner: McapJsonlWriter<Box<dyn Write>>,
     flush_each_batch: bool,
 }
 
 impl JsonlWriter {
-    pub fn new(output: Option<&Path>) -> Result<Self> {
+    pub fn new(output: Option<&Path>, non_finite_floats: NonFiniteFloats) -> Result<Self> {
         let flush_each_batch = output.is_none();
         let dest: Box<dyn Write> = match output {
             Some(path) => Box::new(BufWriter::new(fs::File::create(path)?)),
             None => Box::new(BufWriter::new(io::stdout().lock())),
         };
         Ok(Self {
-            dest,
+            inner: McapJsonlWriter::new(dest, non_finite_floats),
             flush_each_batch,
         })
     }
@@ -35,20 +38,16 @@ impl JsonlWriter {
 
 impl RecordBatchWriter for JsonlWriter {
     fn write_batch(&mut self, batch: RecordBatch) -> Result<()> {
-        let buf = Vec::new();
-        let mut json_writer = arrow::json::LineDelimitedWriter::new(buf);
-        json_writer.write(&batch)?;
-        json_writer.finish()?;
-        let buf = json_writer.into_inner();
-        self.dest.write_all(&buf)?;
+        self.inner.write(&batch)?;
         if self.flush_each_batch {
-            self.dest.flush()?;
+            self.inner.flush()?;
         }
         Ok(())
     }
 
     fn finish(&mut self) -> Result<()> {
-        self.dest.flush()?;
+        self.inner.finish()?;
+        self.inner.flush()?;
         Ok(())
     }
 }
