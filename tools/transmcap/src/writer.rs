@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use mcapdecode::{JsonlWriter as McapJsonlWriter, NonFiniteFloats};
+use mcapdecode::{JsonlWriter as McapJsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
 
 pub trait RecordBatchWriter {
     fn write_batch(&mut self, batch: RecordBatch) -> Result<()>;
@@ -23,14 +23,21 @@ pub struct JsonlWriter {
 }
 
 impl JsonlWriter {
-    pub fn new(output: Option<&Path>, non_finite_floats: NonFiniteFloats) -> Result<Self> {
+    pub fn new(
+        output: Option<&Path>,
+        non_finite_floats: NonFiniteFloats,
+        explicit_nulls: bool,
+    ) -> Result<Self> {
         let flush_each_batch = output.is_none();
         let dest: Box<dyn Write> = match output {
             Some(path) => Box::new(BufWriter::new(fs::File::create(path)?)),
             None => Box::new(BufWriter::new(io::stdout().lock())),
         };
         Ok(Self {
-            inner: McapJsonlWriter::new(dest, non_finite_floats),
+            inner: JsonlWriterBuilder::new()
+                .with_non_finite_floats(non_finite_floats)
+                .with_explicit_nulls(explicit_nulls)
+                .build(dest),
             flush_each_batch,
         })
     }

@@ -30,6 +30,54 @@ pub enum NonFiniteFloats {
     String,
 }
 
+/// Configures a [`JsonlWriter`].
+#[derive(Clone, Copy, Debug)]
+pub struct JsonlWriterBuilder {
+    non_finite_floats: NonFiniteFloats,
+    explicit_nulls: bool,
+}
+
+impl Default for JsonlWriterBuilder {
+    fn default() -> Self {
+        Self {
+            non_finite_floats: NonFiniteFloats::Null,
+            explicit_nulls: false,
+        }
+    }
+}
+
+impl JsonlWriterBuilder {
+    /// Create a builder with the default JSON Lines representation.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set how non-finite floats are encoded.
+    pub fn with_non_finite_floats(mut self, non_finite_floats: NonFiniteFloats) -> Self {
+        self.non_finite_floats = non_finite_floats;
+        self
+    }
+
+    /// Set whether fields and map entries whose values are `null` are emitted.
+    ///
+    /// The default is `false`, matching Arrow's default JSON writer behavior.
+    pub fn with_explicit_nulls(mut self, explicit_nulls: bool) -> Self {
+        self.explicit_nulls = explicit_nulls;
+        self
+    }
+
+    /// Build a JSON Lines writer that writes to `writer`.
+    pub fn build<W: Write>(self, writer: W) -> JsonlWriter<W> {
+        let writer = WriterBuilder::new()
+            .with_explicit_nulls(self.explicit_nulls)
+            .with_encoder_factory(Arc::new(McapJsonEncoderFactory {
+                non_finite_floats: self.non_finite_floats,
+            }))
+            .build(writer);
+        JsonlWriter { writer }
+    }
+}
+
 /// A JSON Lines writer for decoded MCAP Arrow batches.
 ///
 /// It preserves Arrow's default binary encoding and encodes non-finite floats
@@ -45,11 +93,9 @@ pub struct JsonlWriter<W: Write> {
 impl<W: Write> JsonlWriter<W> {
     /// Create a writer that uses the JSON representation shared by mcapdecode tools.
     pub fn new(writer: W, non_finite_floats: NonFiniteFloats) -> Self {
-        let builder = WriterBuilder::new()
-            .with_encoder_factory(Arc::new(McapJsonEncoderFactory { non_finite_floats }));
-        Self {
-            writer: builder.build(writer),
-        }
+        JsonlWriterBuilder::new()
+            .with_non_finite_floats(non_finite_floats)
+            .build(writer)
     }
 
     /// Write one record batch as JSON Lines.

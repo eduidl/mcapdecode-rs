@@ -6,7 +6,8 @@ mod datafusion_ext;
 pub use arrow_ext::RecordBatchOptions;
 #[cfg(feature = "arrow")]
 pub use mcapdecode_arrow::{
-    JsonlWriter, MessageBatchSchema, MetadataColumns, MetadataTimestampFormat, NonFiniteFloats,
+    JsonlWriter, JsonlWriterBuilder, MessageBatchSchema, MetadataColumns, MetadataTimestampFormat,
+    NonFiniteFloats,
 };
 mod decode;
 mod error;

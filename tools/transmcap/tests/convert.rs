@@ -57,6 +57,29 @@ fn convert_jsonl_keeps_metadata_timestamps_by_default() {
 }
 
 #[test]
+fn convert_accepts_explicit_null_for_jsonl() {
+    let fixture = common::fixture();
+    let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
+        .args([
+            "convert",
+            fixture.to_str().unwrap(),
+            "--topic",
+            "/demo/velocity",
+            "--metadata-prefix",
+            "",
+            "--explicit-null",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn convert_jsonl_ext_is_available_for_special_float_encoding() {
     let fixture = common::fixture();
     let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
