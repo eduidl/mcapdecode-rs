@@ -6,10 +6,7 @@ use std::{
 };
 
 use arrow::{
-    array::{
-        Array, ArrayAccessor, BinaryArray, BinaryViewArray, FixedSizeBinaryArray, Float32Array,
-        Float64Array, LargeBinaryArray,
-    },
+    array::{Array, Float32Array, Float64Array},
     datatypes::{DataType, FieldRef},
     error::ArrowError,
     json::{
@@ -18,13 +15,12 @@ use arrow::{
     },
     record_batch::RecordBatch,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 /// A JSON Lines writer for decoded MCAP Arrow batches.
 ///
-/// It writes bytes as base64 strings and non-finite floats as `"NaN"`,
-/// `"Infinity"`, or `"-Infinity"`. Configure timestamp column types through
-/// [`crate::MetadataColumns`] before creating the record batch.
+/// It preserves Arrow's default binary encoding and writes non-finite floats
+/// as `"NaN"`, `"Infinity"`, or `"-Infinity"`. Configure timestamp column
+/// types through [`crate::MetadataColumns`] before creating the record batch.
 pub struct JsonlWriter<W: Write> {
     writer: Writer<W, LineDelimited>,
 }
@@ -55,9 +51,9 @@ impl<W: Write> JsonlWriter<W> {
     }
 }
 
-/// Arrow's default JSON encoder converts non-finite floats to `null` and
-/// binary values to hexadecimal. This factory keeps the representation stable
-/// across tools and is used recursively for nested values as well.
+/// Arrow's default JSON encoder converts non-finite floats to `null`. This
+/// factory keeps the distinction between `NaN` and infinities while leaving
+/// every other type, including binary values, to Arrow's default encoding.
 #[derive(Debug)]
 struct McapJsonEncoderFactory;
 
@@ -81,30 +77,6 @@ impl EncoderFactory for McapJsonEncoderFactory {
                     .downcast_ref::<Float64Array>()
                     .expect("Float64 data type must have a Float64Array"),
             )),
-            DataType::Binary => Box::new(Base64Encoder {
-                values: array
-                    .as_any()
-                    .downcast_ref::<BinaryArray>()
-                    .expect("Binary data type must have a BinaryArray"),
-            }),
-            DataType::LargeBinary => Box::new(Base64Encoder {
-                values: array
-                    .as_any()
-                    .downcast_ref::<LargeBinaryArray>()
-                    .expect("LargeBinary data type must have a LargeBinaryArray"),
-            }),
-            DataType::BinaryView => Box::new(Base64Encoder {
-                values: array
-                    .as_any()
-                    .downcast_ref::<BinaryViewArray>()
-                    .expect("BinaryView data type must have a BinaryViewArray"),
-            }),
-            DataType::FixedSizeBinary(_) => Box::new(Base64Encoder {
-                values: array
-                    .as_any()
-                    .downcast_ref::<FixedSizeBinaryArray>()
-                    .expect("FixedSizeBinary data type must have a FixedSizeBinaryArray"),
-            }),
             _ => return Ok(None),
         };
         Ok(Some(NullableEncoder::new(encoder, array.nulls().cloned())))
@@ -141,18 +113,4 @@ fn write_float_json(value: impl Into<f64> + Copy + serde::Serialize, output: &mu
         "-Infinity"
     };
     serde_json::to_writer(output, text).expect("writing JSON to memory cannot fail");
-}
-
-struct Base64Encoder<B> {
-    values: B,
-}
-
-impl<'a, B> Encoder for Base64Encoder<B>
-where
-    B: ArrayAccessor<Item = &'a [u8]>,
-{
-    fn encode(&mut self, index: usize, output: &mut Vec<u8>) {
-        serde_json::to_writer(output, &STANDARD.encode(self.values.value(index)))
-            .expect("writing JSON to memory cannot fail");
-    }
 }
