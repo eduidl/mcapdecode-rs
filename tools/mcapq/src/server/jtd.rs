@@ -49,10 +49,12 @@ pub fn jtd_schema(
 
 fn timestamp_jtd() -> Value {
     with_metadata(
-        json!({"type": "int64"}),
+        json!({"type": "string"}),
         [
             ("x-mcap-clock", json!("unix")),
             ("x-mcap-unit", json!("nanoseconds")),
+            ("x-mcap-original-type", json!("int64")),
+            ("x-mcap-encoding", json!("decimal")),
         ],
     )
 }
@@ -82,11 +84,23 @@ fn data_type_jtd(data_type: &DataTypeDef) -> Value {
         DataTypeDef::I8 => json!({"type": "int8"}),
         DataTypeDef::I16 => json!({"type": "int16"}),
         DataTypeDef::I32 => json!({"type": "int32"}),
-        DataTypeDef::I64 => json!({"type": "int64"}),
+        DataTypeDef::I64 => with_metadata(
+            json!({"type": "string"}),
+            [
+                ("x-mcap-original-type", json!("int64")),
+                ("x-mcap-encoding", json!("decimal")),
+            ],
+        ),
         DataTypeDef::U8 => json!({"type": "uint8"}),
         DataTypeDef::U16 => json!({"type": "uint16"}),
         DataTypeDef::U32 => json!({"type": "uint32"}),
-        DataTypeDef::U64 => json!({"type": "uint64"}),
+        DataTypeDef::U64 => with_metadata(
+            json!({"type": "string"}),
+            [
+                ("x-mcap-original-type", json!("uint64")),
+                ("x-mcap-encoding", json!("decimal")),
+            ],
+        ),
         DataTypeDef::F32 => json!({"type": "float32"}),
         DataTypeDef::F64 => json!({"type": "float64"}),
         DataTypeDef::String => json!({"type": "string"}),

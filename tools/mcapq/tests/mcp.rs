@@ -225,7 +225,12 @@ fn mcp_discovers_tools_and_inspects_topics_and_schemas() {
         json!({"path": fixture, "topic": "/demo/velocity"}),
     );
     assert_eq!(jtd["format"], "jtd");
-    assert_eq!(jtd["schema"]["properties"]["log_time"]["type"], "int64");
+    assert_eq!(jtd["schema"]["properties"]["log_time"]["type"], "string");
+    assert!(
+        jtd["schema"]["properties"]["log_time"]
+            .get("nullable")
+            .is_none()
+    );
     assert_eq!(jtd["schema"]["properties"]["speed_mps"]["type"], "float64");
 }
 
