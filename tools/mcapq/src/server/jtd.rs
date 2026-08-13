@@ -161,32 +161,14 @@ fn data_type_jtd(data_type: &DataTypeDef) -> Value {
                 ("x-mcap-fixed-length", json!(size)),
             ],
         ),
-        DataTypeDef::Map { key, value } if is_string_map_key(key) => with_metadata(
-            json!({"values": element_jtd(value)}),
-            [("x-mcap-original-type", json!("map"))],
-        ),
         DataTypeDef::Map { key, value } => with_metadata(
-            json!({
-                "elements": {
-                    "properties": {
-                        "key": element_jtd(key),
-                        "value": element_jtd(value),
-                    },
-                },
-            }),
-            [("x-mcap-original-type", json!("map"))],
+            json!({"values": element_jtd(value)}),
+            [
+                ("x-mcap-original-type", json!("map")),
+                ("x-mcap-key-type", json!(key.data_type.to_string())),
+            ],
         ),
     }
-}
-
-fn is_string_map_key(key: &ElementDef) -> bool {
-    matches!(
-        key.data_type,
-        DataTypeDef::String
-            | DataTypeDef::WString
-            | DataTypeDef::BoundedString(_)
-            | DataTypeDef::BoundedWString(_)
-    )
 }
 
 fn with_metadata<const N: usize>(schema: Value, entries: [(&str, Value); N]) -> Value {

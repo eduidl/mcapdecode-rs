@@ -81,9 +81,8 @@ impl JsonlWriterBuilder {
 /// A JSON Lines writer for decoded MCAP Arrow batches.
 ///
 /// It preserves Arrow's default binary encoding and encodes non-finite floats
-/// according to [`NonFiniteFloats`]. String-keyed maps are encoded as JSON
-/// objects; maps with protobuf boolean or integer keys are encoded as
-/// `[{"key": ..., "value": ...}]` entries to preserve their key types.
+/// according to [`NonFiniteFloats`]. Protobuf maps are encoded as JSON objects,
+/// with boolean and integer keys converted to their protobuf JSON strings.
 /// Configure timestamp column types through [`crate::MetadataColumns`] before
 /// creating the record batch.
 pub struct JsonlWriter<W: Write> {
@@ -151,7 +150,7 @@ impl EncoderFactory for McapJsonEncoderFactory {
                     .as_any()
                     .downcast_ref::<MapArray>()
                     .expect("Map data type must have a MapArray");
-                match MapEntryArrayEncoder::try_new(field, map, options)? {
+                match MapObjectEncoder::try_new(field, map, options)? {
                     Some(encoder) => Box::new(encoder),
                     None => return Ok(None),
                 }
@@ -162,20 +161,17 @@ impl EncoderFactory for McapJsonEncoderFactory {
     }
 }
 
-/// JSON encoder for protobuf maps whose keys cannot be represented as JSON
-/// object keys without converting them to strings.
-///
-/// `map<string, V>` is left to Arrow's object encoder. Protobuf's other map
-/// key types are emitted as `[{"key": K, "value": V}]`, preserving `K`'s JSON
-/// type at every nesting depth.
-struct MapEntryArrayEncoder<'a> {
+/// JSON encoder for protobuf maps whose keys need conversion to JSON object
+/// keys. `map<string, V>` is left to Arrow's object encoder; protobuf boolean
+/// and integer map keys are represented by their protobuf JSON string values.
+struct MapObjectEncoder<'a> {
     map: &'a MapArray,
     keys: ProtobufMapKeyEncoder<'a>,
     values: NullableEncoder<'a>,
     explicit_nulls: bool,
 }
 
-impl<'a> MapEntryArrayEncoder<'a> {
+impl<'a> MapObjectEncoder<'a> {
     fn try_new(
         field: &'a FieldRef,
         map: &'a MapArray,
@@ -205,13 +201,13 @@ impl<'a> MapEntryArrayEncoder<'a> {
     }
 }
 
-impl Encoder for MapEntryArrayEncoder<'_> {
+impl Encoder for MapObjectEncoder<'_> {
     fn encode(&mut self, index: usize, output: &mut Vec<u8>) {
         let start = self.map.offsets()[index] as usize;
         let end = self.map.offsets()[index + 1] as usize;
         let mut first = true;
 
-        output.push(b'[');
+        output.push(b'{');
         for index in start..end {
             let value_is_null = self.values.is_null(index);
             if value_is_null && !self.explicit_nulls {
@@ -222,17 +218,15 @@ impl Encoder for MapEntryArrayEncoder<'_> {
             }
             first = false;
 
-            output.extend_from_slice(br#"{"key":"#);
-            self.keys.encode(index, output);
-            output.extend_from_slice(b",\"value\":");
+            self.keys.encode_json_object_key(index, output);
+            output.push(b':');
             if value_is_null {
                 output.extend_from_slice(b"null");
             } else {
                 self.values.encode(index, output);
             }
-            output.push(b'}');
         }
-        output.push(b']');
+        output.push(b'}');
     }
 }
 
@@ -256,7 +250,8 @@ impl<'a> ProtobufMapKeyEncoder<'a> {
         })
     }
 
-    fn encode(&self, index: usize, output: &mut Vec<u8>) {
+    fn encode_json_object_key(&self, index: usize, output: &mut Vec<u8>) {
+        output.push(b'\"');
         let result = match self {
             Self::Boolean(array) => {
                 output.extend_from_slice(if array.value(index) {
@@ -272,6 +267,7 @@ impl<'a> ProtobufMapKeyEncoder<'a> {
             Self::UInt64(array) => write!(output, "{}", array.value(index)),
         };
         result.expect("writing JSON to memory cannot fail");
+        output.push(b'\"');
     }
 }
 

@@ -89,7 +89,7 @@ fn jtd_preserves_enum_values_and_transformed_source_types() {
 }
 
 #[test]
-fn jtd_describes_string_and_non_string_keyed_maps() {
+fn jtd_describes_maps_as_json_objects() {
     let fields: FieldDefs = vec![
         FieldDef::new(
             "labels",
@@ -116,21 +116,15 @@ fn jtd_describes_string_and_non_string_keyed_maps() {
         schema["properties"]["labels"]["metadata"]["x-mcap-original-type"],
         "map"
     );
-    assert_eq!(
-        schema["properties"]["indexed"]["elements"]["properties"]["key"]["type"],
-        "int64"
-    );
-    assert_eq!(
-        schema["properties"]["indexed"]["elements"]["properties"]["value"]["type"],
-        "boolean"
-    );
-    assert_eq!(
-        schema["properties"]["indexed"]["elements"]["properties"]["value"]["nullable"],
-        true
-    );
+    assert_eq!(schema["properties"]["indexed"]["values"]["type"], "boolean");
+    assert_eq!(schema["properties"]["indexed"]["values"]["nullable"], true);
     assert_eq!(
         schema["properties"]["indexed"]["metadata"]["x-mcap-original-type"],
         "map"
+    );
+    assert_eq!(
+        schema["properties"]["indexed"]["metadata"]["x-mcap-key-type"],
+        "i64"
     );
 }
 

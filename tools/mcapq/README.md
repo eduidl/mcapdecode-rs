@@ -50,10 +50,11 @@ Every tool accepts a `path` beneath an allowed root and returns structured JSON.
 Pass absolute paths beneath an `--allow-root` to every tool. `mcap_schema`
 describes the payload as it would appear in JSON: `log_time` and `publish_time`
 lead every message as Unix-epoch nanoseconds, binary values are hex-encoded
-strings, string-keyed maps are JSON objects, and maps with other protobuf key
-types are arrays of `{"key": ..., "value": ...}` entries. The schema carries
-`x-mcap-original-type` metadata when a source type is represented differently in
-JSON; enums additionally provide `x-mcap-enum-variants` name/value pairs.
+strings, and protobuf maps are JSON objects. Non-string map keys are converted
+to protobuf JSON key strings; their source type is available as
+`x-mcap-key-type` metadata. The schema carries `x-mcap-original-type` metadata
+when a source type is represented differently in JSON; enums additionally
+provide `x-mcap-enum-variants` name/value pairs.
 
 All tools currently require an MCAP Summary section. Files without one are not
 supported.
