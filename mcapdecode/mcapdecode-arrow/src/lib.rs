@@ -53,7 +53,7 @@ pub use flatten::{
     ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, StructPolicy, flatten_record_batch,
 };
 /// Re-exports from [`json`].
-pub use json::{JsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
+pub use json::{Integer64Encoding, JsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
 /// Re-export of [`projection::project_record_batch`].
 pub use projection::project_record_batch;
 /// Re-export of [`schema_convert::field_defs_to_arrow_schema`].

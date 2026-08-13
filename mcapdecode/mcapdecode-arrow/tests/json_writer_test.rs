@@ -4,12 +4,12 @@ use arrow::{
     array::{
         Array, ArrayRef, BinaryArray, BooleanBuilder, Float32Array, Float64Array, Int32Builder,
         Int64Array, Int64Builder, MapBuilder, StringBuilder, StructArray, UInt32Builder,
-        UInt64Builder,
+        UInt64Array, UInt64Builder,
     },
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
-use mcapdecode_arrow::{JsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
+use mcapdecode_arrow::{Integer64Encoding, JsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
 
 fn non_finite_batch() -> RecordBatch {
     let schema = Arc::new(Schema::new(vec![
@@ -41,6 +41,19 @@ fn write_jsonl_with_explicit_nulls(
     let mut writer = JsonlWriterBuilder::new()
         .with_non_finite_floats(non_finite_floats)
         .with_explicit_nulls(explicit_nulls)
+        .build(&mut output);
+    writer.write(batch).unwrap();
+    writer.finish().unwrap();
+    String::from_utf8(output).unwrap()
+}
+
+fn write_jsonl_with_integer64_encoding(
+    batch: &RecordBatch,
+    integer64_encoding: Integer64Encoding,
+) -> String {
+    let mut output = Vec::new();
+    let mut writer = JsonlWriterBuilder::new()
+        .with_integer64_encoding(integer64_encoding)
         .build(&mut output);
     writer.write(batch).unwrap();
     writer.finish().unwrap();
@@ -100,6 +113,38 @@ fn optionally_emits_null_struct_fields() {
     assert_eq!(
         write_jsonl_with_explicit_nulls(&batch, NonFiniteFloats::Null, true),
         "{\"nested\":{\"present\":42,\"missing\":null}}\n"
+    );
+}
+
+#[test]
+fn encodes_64_bit_integers_as_strings_when_configured() {
+    let nested = StructArray::from(vec![
+        (
+            Arc::new(Field::new("signed", DataType::Int64, false)),
+            Arc::new(Int64Array::from(vec![-42_i64])) as ArrayRef,
+        ),
+        (
+            Arc::new(Field::new("unsigned", DataType::UInt64, false)),
+            Arc::new(UInt64Array::from(vec![u64::MAX])) as ArrayRef,
+        ),
+    ]);
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("minimum", DataType::Int64, false),
+            Field::new("maximum", DataType::UInt64, false),
+            Field::new("nested", nested.data_type().clone(), false),
+        ])),
+        vec![
+            Arc::new(Int64Array::from(vec![i64::MIN])),
+            Arc::new(UInt64Array::from(vec![u64::MAX])),
+            Arc::new(nested),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(
+        write_jsonl_with_integer64_encoding(&batch, Integer64Encoding::String),
+        "{\"minimum\":\"-9223372036854775808\",\"maximum\":\"18446744073709551615\",\"nested\":{\"signed\":\"-42\",\"unsigned\":\"18446744073709551615\"}}\n"
     );
 }
 
@@ -176,5 +221,46 @@ fn encodes_nested_protobuf_maps_as_json_objects() {
             r#""string_map":{"one":1}}}"#,
             "\n",
         )
+    );
+}
+
+#[test]
+fn encodes_64_bit_protobuf_map_values_as_strings_when_configured() {
+    let mut int64_map = MapBuilder::new(None, Int64Builder::new(), StringBuilder::new());
+    int64_map.keys().append_value(i64::MIN);
+    int64_map.values().append_value("minimum");
+    int64_map.append(true).unwrap();
+
+    let mut uint64_map = MapBuilder::new(None, UInt64Builder::new(), StringBuilder::new());
+    uint64_map.keys().append_value(u64::MAX);
+    uint64_map.values().append_value("maximum");
+    uint64_map.append(true).unwrap();
+
+    let mut int64_value_map = MapBuilder::new(None, Int32Builder::new(), Int64Builder::new());
+    int64_value_map.keys().append_value(1);
+    int64_value_map.values().append_value(i64::MIN);
+    int64_value_map.append(true).unwrap();
+
+    let int64_map = Arc::new(int64_map.finish());
+    let uint64_map = Arc::new(uint64_map.finish());
+    let int64_value_map = Arc::new(int64_value_map.finish());
+
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("int64_map", int64_map.data_type().clone(), false),
+            Field::new("uint64_map", uint64_map.data_type().clone(), false),
+            Field::new(
+                "int64_value_map",
+                int64_value_map.data_type().clone(),
+                false,
+            ),
+        ])),
+        vec![int64_map, uint64_map, int64_value_map],
+    )
+    .unwrap();
+
+    assert_eq!(
+        write_jsonl_with_integer64_encoding(&batch, Integer64Encoding::String),
+        "{\"int64_map\":{\"-9223372036854775808\":\"minimum\"},\"uint64_map\":{\"18446744073709551615\":\"maximum\"},\"int64_value_map\":{\"1\":\"-9223372036854775808\"}}\n"
     );
 }

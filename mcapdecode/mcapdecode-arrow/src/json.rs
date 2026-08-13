@@ -30,10 +30,22 @@ pub enum NonFiniteFloats {
     String,
 }
 
+/// How 64-bit integers are encoded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Integer64Encoding {
+    /// Encode integers as JSON numbers, matching Arrow's default behavior.
+    #[default]
+    Number,
+    /// Encode integers as decimal JSON strings to preserve their precision in
+    /// JSON consumers that use IEEE 754 numbers.
+    String,
+}
+
 /// Configures a [`JsonlWriter`].
 #[derive(Clone, Copy, Debug)]
 pub struct JsonlWriterBuilder {
     non_finite_floats: NonFiniteFloats,
+    integer64_encoding: Integer64Encoding,
     explicit_nulls: bool,
 }
 
@@ -41,6 +53,7 @@ impl Default for JsonlWriterBuilder {
     fn default() -> Self {
         Self {
             non_finite_floats: NonFiniteFloats::Null,
+            integer64_encoding: Integer64Encoding::Number,
             explicit_nulls: false,
         }
     }
@@ -58,6 +71,15 @@ impl JsonlWriterBuilder {
         self
     }
 
+    /// Set how `Int64` and `UInt64` values are encoded.
+    ///
+    /// The default is [`Integer64Encoding::Number`], matching Arrow's default
+    /// JSON writer behavior.
+    pub fn with_integer64_encoding(mut self, integer64_encoding: Integer64Encoding) -> Self {
+        self.integer64_encoding = integer64_encoding;
+        self
+    }
+
     /// Set whether fields and map entries whose values are `null` are emitted.
     ///
     /// The default is `false`, matching Arrow's default JSON writer behavior.
@@ -72,6 +94,7 @@ impl JsonlWriterBuilder {
             .with_explicit_nulls(self.explicit_nulls)
             .with_encoder_factory(Arc::new(McapJsonEncoderFactory {
                 non_finite_floats: self.non_finite_floats,
+                integer64_encoding: self.integer64_encoding,
             }))
             .build(writer);
         JsonlWriter { writer }
@@ -81,8 +104,9 @@ impl JsonlWriterBuilder {
 /// A JSON Lines writer for decoded MCAP Arrow batches.
 ///
 /// It preserves Arrow's default binary encoding and encodes non-finite floats
-/// according to [`NonFiniteFloats`]. Protobuf maps are encoded as JSON objects,
-/// with boolean and integer keys converted to their protobuf JSON strings.
+/// according to [`NonFiniteFloats`] and 64-bit integers according to
+/// [`Integer64Encoding`]. Protobuf maps are encoded as JSON objects, with
+/// boolean and integer keys converted to their protobuf JSON strings.
 /// Configure timestamp column types through [`crate::MetadataColumns`] before
 /// creating the record batch.
 pub struct JsonlWriter<W: Write> {
@@ -113,12 +137,13 @@ impl<W: Write> JsonlWriter<W> {
     }
 }
 
-/// Customizes JSON encoding for configured non-finite floats and protobuf maps
-/// with non-string keys. The factory is installed for every writer so that map
-/// encoding is independent of the [`NonFiniteFloats`] setting.
+/// Customizes JSON encoding for configured scalar types and protobuf maps. The
+/// factory is installed for every writer so that map encoding is independent of
+/// the scalar encoding settings.
 #[derive(Debug)]
 struct McapJsonEncoderFactory {
     non_finite_floats: NonFiniteFloats,
+    integer64_encoding: Integer64Encoding,
 }
 
 impl EncoderFactory for McapJsonEncoderFactory {
@@ -143,6 +168,22 @@ impl EncoderFactory for McapJsonEncoderFactory {
                         .as_any()
                         .downcast_ref::<Float64Array>()
                         .expect("Float64 data type must have a Float64Array"),
+                ))
+            }
+            DataType::Int64 if self.integer64_encoding == Integer64Encoding::String => {
+                Box::new(Int64Encoder(
+                    array
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .expect("Int64 data type must have an Int64Array"),
+                ))
+            }
+            DataType::UInt64 if self.integer64_encoding == Integer64Encoding::String => {
+                Box::new(UInt64Encoder(
+                    array
+                        .as_any()
+                        .downcast_ref::<UInt64Array>()
+                        .expect("UInt64 data type must have a UInt64Array"),
                 ))
             }
             DataType::Map(_, _) => {
@@ -285,6 +326,39 @@ impl Encoder for Float64Encoder<'_> {
     fn encode(&mut self, index: usize, output: &mut Vec<u8>) {
         write_float_json(self.0.value(index), output);
     }
+}
+
+struct Int64Encoder<'a>(&'a Int64Array);
+
+impl Encoder for Int64Encoder<'_> {
+    fn encode(&mut self, index: usize, output: &mut Vec<u8>) {
+        write_integer_json(self.0.value(index), Integer64Encoding::String, output);
+    }
+}
+
+struct UInt64Encoder<'a>(&'a UInt64Array);
+
+impl Encoder for UInt64Encoder<'_> {
+    fn encode(&mut self, index: usize, output: &mut Vec<u8>) {
+        write_integer_json(self.0.value(index), Integer64Encoding::String, output);
+    }
+}
+
+fn write_integer_json(
+    value: impl std::fmt::Display,
+    encoding: Integer64Encoding,
+    output: &mut Vec<u8>,
+) {
+    match encoding {
+        Integer64Encoding::Number => {
+            write!(output, "{value}").expect("writing JSON to memory cannot fail")
+        }
+        Integer64Encoding::String => write_json_string(value, output),
+    }
+}
+
+fn write_json_string(value: impl std::fmt::Display, output: &mut Vec<u8>) {
+    serde_json::to_writer(output, &value.to_string()).expect("writing JSON to memory cannot fail");
 }
 
 fn write_float_json(value: impl Into<f64> + Copy + serde::Serialize, output: &mut Vec<u8>) {
