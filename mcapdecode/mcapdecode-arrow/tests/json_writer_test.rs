@@ -104,7 +104,7 @@ fn optionally_emits_null_struct_fields() {
 }
 
 #[test]
-fn encodes_nested_non_string_protobuf_maps_as_map_entries() {
+fn encodes_nested_protobuf_maps_as_json_objects() {
     let mut bool_map = MapBuilder::new(None, BooleanBuilder::new(), StringBuilder::new());
     bool_map.keys().append_value(true);
     bool_map.values().append_value("yes");
@@ -168,11 +168,11 @@ fn encodes_nested_non_string_protobuf_maps_as_map_entries() {
     assert_eq!(
         write_jsonl(&batch, NonFiniteFloats::Null),
         concat!(
-            r#"{"nested":{"bool_map":[{"key":true,"value":"yes"}],"#,
-            r#""int32_map":[{"key":-1,"value":"negative"},{"key":42,"value":"answer"}],"#,
-            r#""int64_map":[{"key":-9223372036854775808,"value":"minimum"}],"#,
-            r#""uint32_map":[{"key":4294967295,"value":"maximum"}],"#,
-            r#""uint64_map":[{"key":18446744073709551615,"value":"maximum"}],"#,
+            r#"{"nested":{"bool_map":{"true":"yes"},"#,
+            r#""int32_map":{"-1":"negative","42":"answer"},"#,
+            r#""int64_map":{"-9223372036854775808":"minimum"},"#,
+            r#""uint32_map":{"4294967295":"maximum"},"#,
+            r#""uint64_map":{"18446744073709551615":"maximum"},"#,
             r#""string_map":{"one":1}}}"#,
             "\n",
         )
