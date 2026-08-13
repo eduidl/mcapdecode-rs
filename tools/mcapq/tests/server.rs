@@ -4,7 +4,7 @@ use mcapdecode::{
     TopicDecodeStatus, TopicInfo,
     core::{
         DataTypeDef,
-        DataTypeDef::{Bytes, I32, I64, Map},
+        DataTypeDef::{Bytes, I32, I64, Map, U64},
         ElementDef, EnumVariant, FieldDef, FieldDefs,
     },
 };
@@ -140,7 +140,8 @@ fn jtd_describes_metadata_timestamps_as_unix_nanoseconds() {
     let fields: FieldDefs = vec![FieldDef::new("value", I64, false)].into();
     let schema = jtd::jtd_schema(&fields, "Example", "ros2msg", "cdr").unwrap();
     for name in ["log_time", "publish_time"] {
-        assert_eq!(schema["properties"][name]["type"], "int64");
+        assert_eq!(schema["properties"][name]["type"], "string");
+        assert!(schema["properties"][name].get("nullable").is_none());
         assert_eq!(
             schema["properties"][name]["metadata"]["x-mcap-clock"],
             "unix"
@@ -148,6 +149,41 @@ fn jtd_describes_metadata_timestamps_as_unix_nanoseconds() {
         assert_eq!(
             schema["properties"][name]["metadata"]["x-mcap-unit"],
             "nanoseconds"
+        );
+        assert_eq!(
+            schema["properties"][name]["metadata"]["x-mcap-original-type"],
+            "int64"
+        );
+        assert_eq!(
+            schema["properties"][name]["metadata"]["x-mcap-encoding"],
+            "decimal"
+        );
+    }
+}
+
+#[test]
+fn jtd_encodes_64_bit_integers_as_nullable_decimal_strings() {
+    let fields: FieldDefs = vec![
+        FieldDef::new("signed", I64, false),
+        FieldDef::new("unsigned", U64, true),
+    ]
+    .into();
+
+    let schema = jtd::jtd_schema(&fields, "Example", "ros2msg", "cdr").unwrap();
+    for (name, original_type) in [("signed", "int64"), ("unsigned", "uint64")] {
+        assert_eq!(schema["properties"][name]["type"], "string");
+        if name == "unsigned" {
+            assert_eq!(schema["properties"][name]["nullable"], true);
+        } else {
+            assert!(schema["properties"][name].get("nullable").is_none());
+        }
+        assert_eq!(
+            schema["properties"][name]["metadata"]["x-mcap-original-type"],
+            original_type
+        );
+        assert_eq!(
+            schema["properties"][name]["metadata"]["x-mcap-encoding"],
+            "decimal"
         );
     }
 }
