@@ -3,7 +3,7 @@ members = ["dev/*", "mcapdecode/*", "tools/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -13,13 +13,13 @@ include = ["src/**/*", "tests/**/*", "Cargo.toml", "README.md"]
 [workspace.dependencies]
 # Unpublished dev crate, so it carries no version requirement.
 mcapbench = { path = "dev/mcapbench" }
-mcapdecode = { path = "mcapdecode/mcapdecode", version = "=0.6.0" }
-mcapdecode-arrow = { path = "mcapdecode/mcapdecode-arrow", version = "=0.6.0" }
-mcapdecode-core = { path = "mcapdecode/mcapdecode-core", version = "=0.6.0" }
-mcapdecode-protobuf = { path = "mcapdecode/mcapdecode-protobuf", version = "=0.6.0" }
-mcapdecode-ros2-common = { path = "mcapdecode/mcapdecode-ros2-common", version = "=0.6.0" }
-mcapdecode-ros2idl = { path = "mcapdecode/mcapdecode-ros2idl", version = "=0.6.0" }
-mcapdecode-ros2msg = { path = "mcapdecode/mcapdecode-ros2msg", version = "=0.6.0" }
+mcapdecode = { path = "mcapdecode/mcapdecode", version = "=0.7.0" }
+mcapdecode-arrow = { path = "mcapdecode/mcapdecode-arrow", version = "=0.7.0" }
+mcapdecode-core = { path = "mcapdecode/mcapdecode-core", version = "=0.7.0" }
+mcapdecode-protobuf = { path = "mcapdecode/mcapdecode-protobuf", version = "=0.7.0" }
+mcapdecode-ros2-common = { path = "mcapdecode/mcapdecode-ros2-common", version = "=0.7.0" }
+mcapdecode-ros2idl = { path = "mcapdecode/mcapdecode-ros2idl", version = "=0.7.0" }
+mcapdecode-ros2msg = { path = "mcapdecode/mcapdecode-ros2msg", version = "=0.7.0" }
 
 arrow = { version = "58.4.0", default-features = false }
 mcap = "0.25.0"

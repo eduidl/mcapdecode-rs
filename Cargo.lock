@@ -1622,7 +1622,7 @@ dependencies = [
 
 [[package]]
 name = "mcapbench"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bytes",
  "clap",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "mcapdecode"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arrow",
  "criterion",
@@ -1658,7 +1658,7 @@ dependencies = [
 
 [[package]]
 name = "mcapdecode-arrow"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "arrow",
  "mcapdecode-core",
@@ -1669,14 +1669,14 @@ dependencies = [
 
 [[package]]
 name = "mcapdecode-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "mcapdecode-protobuf"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bytes",
  "mcapdecode-core",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "mcapdecode-ros2-common"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "bytes",
  "dhat",
@@ -1698,7 +1698,7 @@ dependencies = [
 
 [[package]]
 name = "mcapdecode-ros2idl"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "mcapdecode-core",
  "mcapdecode-ros2-common",
@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "mcapdecode-ros2msg"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "mcapdecode-core",
  "mcapdecode-ros2-common",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "mcaptui"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "transmcap"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "arrow",
