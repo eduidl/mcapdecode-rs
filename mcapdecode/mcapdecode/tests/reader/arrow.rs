@@ -253,9 +253,9 @@ fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixtur
 #[cfg(feature = "arrow")]
 #[test]
 fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
-    // Consumers that must declare a schema up front (a DataFusion MemTable)
-    // take it from `topic_batch_schema`. If the two ever diverge the mismatch
-    // only shows up at run time deep inside the consumer, so pin it here.
+    // Consumers that must declare a schema up front take it from
+    // `topic_batch_schema`. If the two ever diverge the mismatch only shows up
+    // at run time deep inside the consumer, so pin it here.
     let fixture = write_chunked_fixture("batch-schema-agreement", &[br#"{"value":1}"#]);
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))

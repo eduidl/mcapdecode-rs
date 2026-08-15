@@ -30,20 +30,6 @@ dhat = "0.3.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 
-[workspace.dependencies.datafusion]
-version = "54.1.0"
-default-features = false
-features = [
-    "nested_expressions",
-    "datetime_expressions",
-    "encoding_expressions",
-    "regex_expressions",
-    "string_expressions",
-    "unicode_expressions",
-    "recursive_protection",
-    "sql",
-]
-
 [workspace.metadata.release]
 allow-branch = ["main"]
 shared-version = true
