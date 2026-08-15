@@ -64,9 +64,9 @@ pub struct ConvertArgs {
     #[arg(long)]
     time_ns: bool,
 
-    /// Emit JSON fields and map entries whose values are null.
+    /// Emit JSONL fields and map entries whose values are null.
     #[arg(long)]
-    explicit_null: bool,
+    jsonl_explicit_null: bool,
 
     /// Enable parallel chunk decompression and decoding.
     #[arg(short, long)]
@@ -75,6 +75,12 @@ pub struct ConvertArgs {
 
 impl ConvertArgs {
     pub fn run(self) -> Result<()> {
+        if self.jsonl_explicit_null
+            && !matches!(self.format, OutputFormat::Jsonl | OutputFormat::JsonlExt)
+        {
+            bail!("--jsonl-explicit-null requires --format jsonl or jsonl-ext");
+        }
+
         let reader = McapReader::builder()
             .with_default_decoders()
             .with_parallel(self.parallel)
@@ -94,12 +100,12 @@ impl ConvertArgs {
             OutputFormat::Jsonl => Box::new(JsonlWriter::new(
                 self.output.as_deref(),
                 NonFiniteFloats::Null,
-                self.explicit_null,
+                self.jsonl_explicit_null,
             )?),
             OutputFormat::JsonlExt => Box::new(JsonlWriter::new(
                 self.output.as_deref(),
                 NonFiniteFloats::String,
-                self.explicit_null,
+                self.jsonl_explicit_null,
             )?),
             OutputFormat::Csv => Box::new(CsvWriter::new(self.output.as_deref())?),
             OutputFormat::Parquet => {
