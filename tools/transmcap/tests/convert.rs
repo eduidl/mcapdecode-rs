@@ -57,7 +57,7 @@ fn convert_jsonl_keeps_metadata_timestamps_by_default() {
 }
 
 #[test]
-fn convert_accepts_explicit_null_for_jsonl() {
+fn convert_accepts_jsonl_explicit_null() {
     let fixture = common::fixture();
     let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
         .args([
@@ -67,7 +67,7 @@ fn convert_accepts_explicit_null_for_jsonl() {
             "/demo/velocity",
             "--metadata-prefix",
             "",
-            "--explicit-null",
+            "--jsonl-explicit-null",
         ])
         .output()
         .unwrap();
@@ -77,6 +77,33 @@ fn convert_accepts_explicit_null_for_jsonl() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn convert_rejects_jsonl_explicit_null_for_non_jsonl_formats() {
+    for format in ["csv", "parquet"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
+            .args([
+                "convert",
+                "ignored.mcap",
+                "--topic",
+                "/test",
+                "--format",
+                format,
+                "--jsonl-explicit-null",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            !output.status.success(),
+            "format {format} unexpectedly succeeded"
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("--jsonl-explicit-null requires --format jsonl or jsonl-ext")
+        );
+    }
 }
 
 #[test]
