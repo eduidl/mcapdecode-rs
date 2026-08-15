@@ -13,7 +13,6 @@ readme = "README.md"
 mcapdecode-arrow = { workspace = true, optional = true }
 mcapdecode-core.workspace = true
 arrow = { workspace = true, optional = true }
-datafusion = { workspace = true, optional = true }
 mcap.workspace = true
 memmap2 = "0.9.10"
 rayon = "1.11.0"
@@ -26,7 +25,6 @@ mcapdecode-ros2msg = { workspace = true, optional = true }
 [features]
 default = ["protobuf", "ros2idl", "ros2msg"]
 arrow = ["dep:arrow", "dep:mcapdecode-arrow"]
-datafusion = ["arrow", "dep:datafusion"]
 protobuf = ["dep:mcapdecode-protobuf"]
 ros2idl = ["dep:mcapdecode-ros2idl"]
 ros2msg = ["dep:mcapdecode-ros2msg"]
@@ -34,7 +32,6 @@ ros2msg = ["dep:mcapdecode-ros2msg"]
 [dev-dependencies]
 criterion.workspace = true
 mcapbench.workspace = true
-tokio = { version = "1.53.1", features = ["rt-multi-thread"] }
 
 [[bench]]
 name = "decoder"

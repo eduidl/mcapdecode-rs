@@ -10,11 +10,7 @@ use std::{
 
 #[cfg(feature = "arrow")]
 use arrow::array::Int64Array;
-#[cfg(feature = "datafusion")]
-use arrow::compute::concat_batches;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
-#[cfg(feature = "datafusion")]
-use mcapdecode::datafusion::prelude::SessionContext;
 use mcapdecode::{
     McapReader, McapReaderError, PreparedTopic, ReadOptions, TimeRange, TopicDecodeStatus,
     TopicInfo,
@@ -281,29 +277,6 @@ impl TopicDecoder for TestJsonTopicDecoder {
     }
 }
 
-#[cfg(feature = "datafusion")]
-struct CountingJsonDecoder {
-    topic_decoder_builds: Arc<AtomicUsize>,
-}
-
-#[cfg(feature = "datafusion")]
-impl MessageDecoder for CountingJsonDecoder {
-    fn encoding_key(&self) -> EncodingKey {
-        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
-    }
-
-    fn build_topic_decoder(
-        &self,
-        _schema_name: &str,
-        _schema_data: &[u8],
-    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
-        self.topic_decoder_builds.fetch_add(1, Ordering::Relaxed);
-        Ok(Box::new(TestJsonTopicDecoder {
-            field_defs: vec![FieldDef::new("value", DataTypeDef::I64, true)].into(),
-        }))
-    }
-}
-
 /// Derives a payload field named `log_time`, which is what a metadata column
 /// is called under the default naming.
 #[cfg(feature = "arrow")]
@@ -407,7 +380,3 @@ mod core;
 #[cfg(feature = "arrow")]
 #[path = "reader/arrow.rs"]
 mod record_batches;
-
-#[cfg(feature = "datafusion")]
-#[path = "reader/datafusion.rs"]
-mod datafusion;

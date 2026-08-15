@@ -134,10 +134,9 @@ impl MetadataColumns {
 /// The Arrow schema of one topic's `RecordBatch`es: metadata columns, then body
 /// fields.
 ///
-/// Both halves live in one value so that the schema handed to a consumer (a
-/// DataFusion `MemTable`, a Parquet writer) is by construction the schema of the
-/// batches produced from it. Deriving the two separately lets them drift, and
-/// the mismatch only surfaces at run time.
+/// Both halves live in one value so that the schema handed to a consumer is by
+/// construction the schema of the batches produced from it. Deriving the two
+/// separately lets them drift, and the mismatch only surfaces at run time.
 #[derive(Debug, Clone)]
 pub struct MessageBatchSchema {
     schema: SchemaRef,

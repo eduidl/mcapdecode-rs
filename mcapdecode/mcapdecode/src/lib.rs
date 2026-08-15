@@ -1,7 +1,5 @@
 #[cfg(feature = "arrow")]
 mod arrow_ext;
-#[cfg(feature = "datafusion")]
-mod datafusion_ext;
 #[cfg(feature = "arrow")]
 pub use arrow_ext::RecordBatchOptions;
 #[cfg(feature = "arrow")]
@@ -16,8 +14,6 @@ mod reader;
 mod summary;
 mod types;
 
-#[cfg(feature = "datafusion")]
-pub use datafusion;
 pub use error::McapReaderError;
 #[cfg(feature = "arrow")]
 pub use mcapdecode_arrow as arrow;

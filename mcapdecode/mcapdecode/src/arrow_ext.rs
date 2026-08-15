@@ -46,8 +46,8 @@ impl McapReader {
     /// The Arrow schema that [`Self::for_each_record_batch_with_options`] emits
     /// for `topic` under `options`.
     ///
-    /// Callers that must state the schema up front (a DataFusion `MemTable`, a
-    /// Parquet writer) should take it from here rather than deriving their own,
+    /// Callers that must state the schema up front, such as a Parquet writer,
+    /// should take it from here rather than deriving their own,
     /// so the declared schema and the emitted batches cannot disagree.
     pub fn topic_batch_schema(
         &self,
@@ -97,8 +97,8 @@ impl PreparedTopic<'_> {
     /// Emit batches using a caller-provided schema derived from this topic.
     ///
     /// Keeping schema derivation and message traversal on the same prepared
-    /// topic guarantees that consumers which need the schema up front, such as
-    /// DataFusion's `MemTable`, receive batches built with that exact schema.
+    /// topic guarantees that consumers which need the schema up front receive
+    /// batches built with that exact schema.
     pub(crate) fn for_each_record_batch_with_schema(
         &self,
         batch_schema: &MessageBatchSchema,
