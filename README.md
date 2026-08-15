@@ -12,7 +12,6 @@ Rust workspace for decoding MCAP data into a normalized schema/value model, with
 | [`mcapdecode`](mcapdecode/mcapdecode) | Rust library for decoding MCAP into structured messages, with optional Arrow `RecordBatch` output | [Library usage and feature flags](mcapdecode/mcapdecode/README.md) |
 | [`transmcap`](tools/transmcap) | CLI for converting a topic to JSON Lines, CSV, or Parquet | [Usage and options](tools/transmcap/README.md) |
 | [`mcaptui`](tools/mcaptui) | Terminal UI for browsing topics, decoded messages, and schemas | [Usage and key bindings](tools/mcaptui/README.md) |
-| [`mcapq`](tools/mcapq) | Stdio MCP server for AI-assisted MCAP inspection | [Server setup and tools](tools/mcapq/README.md) |
 
 `mcapdecode` defaults to the schema/value API plus built-in decoders. Apache Arrow support is opt-in via the `arrow` feature. The `mcapdecode-*` crates are internal support crates used by the library.
 

@@ -48,6 +48,3 @@ features = [
 allow-branch = ["main"]
 shared-version = true
 tag-prefix = ""
-
-[profile.release.package.mcapq]
-strip = "symbols"
