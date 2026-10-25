@@ -5,7 +5,7 @@ use mcapdecode::{
     core::{
         DataTypeDef,
         DataTypeDef::{Bytes, I64, Map, String as StringType, Struct},
-        ElementDef, FieldDef, FieldDefs, Value,
+        ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef, Value,
     },
 };
 use mcaptui::format::{
@@ -151,6 +151,37 @@ fn schema_formatter_includes_metadata_and_fields() {
     assert!(rendered.contains("schema_encoding: ros2idl"));
     assert!(rendered.contains("stamp: int64"));
     assert!(rendered.contains("nested:"));
+}
+
+#[test]
+fn schema_formatter_uses_qualified_names_and_nullable_suffixes() {
+    let fields = vec![FieldDef::new(
+        "poses",
+        DataTypeDef::List(Box::new(ElementDef::new(
+            Struct(StructDef {
+                type_name: Some("example.Pose".into()),
+                fields: vec![
+                    FieldDef::new("x", DataTypeDef::F64, true),
+                    FieldDef::new(
+                        "mode",
+                        DataTypeDef::Enum(EnumDef {
+                            type_name: Some("example.Mode".into()),
+                            variants: vec![EnumVariant::new("OFF", 0)],
+                        }),
+                        false,
+                    ),
+                ]
+                .into(),
+            }),
+            true,
+        ))),
+        true,
+    )]
+    .into();
+    let rendered = format_schema_text(&sample_topic(), &fields);
+    assert!(rendered.ends_with(
+        "poses: example.Pose?[]?\n    x: float64?\n    mode: example.Mode\n        OFF = 0\n"
+    ));
 }
 
 #[test]

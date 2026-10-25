@@ -6,14 +6,14 @@
 //! | Resolved type          | Arrow `DataTypeDef`          |
 //! |------------------------|------------------------------|
 //! | Primitive              | corresponding scalar type    |
-//! | Struct                 | `Struct(FieldDefs)`          |
-//! | Enum                   | `Enum(variants)` (decoded as the variant name) |
+//! | Struct                 | `Struct(StructDef)`          |
+//! | Enum                   | `Enum(EnumDef)` (decoded as the variant name) |
 //! | `sequence<uint8/octet>` | `Bytes` / `BoundedBytes`    |
 //! | Other sequence         | `List` / `BoundedList`       |
 //! | BoundedString/WString  | bounded string variants      |
 //! | Fixed-length field     | `Array(element type, n)`     |
 
-use mcapdecode_core::{DataTypeDef, ElementDef, FieldDef, FieldDefs};
+use mcapdecode_core::{DataTypeDef, ElementDef, EnumDef, FieldDef, FieldDefs, StructDef};
 
 use crate::{
     ast::PrimitiveType,
@@ -59,13 +59,17 @@ fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) ->
                 .get(name)
                 .unwrap_or_else(|| panic!("Struct {:?} not found", name));
             let fields = resolved_struct_to_field_defs(schema, st);
-            DataTypeDef::Struct(fields)
+            DataTypeDef::Struct(StructDef {
+                type_name: Some(name.join("/")),
+                fields,
+            })
         }
         // An unknown enum stays decodable (`decode_cdr_to_value` falls back to the raw
         // number), so it must not be treated as harder than a missing struct.
-        ResolvedType::Enum(name) => {
-            DataTypeDef::Enum(schema.enums.get(name).cloned().unwrap_or_default())
-        }
+        ResolvedType::Enum(name) => DataTypeDef::Enum(EnumDef {
+            type_name: Some(name.join("/")),
+            variants: schema.enums.get(name).cloned().unwrap_or_default(),
+        }),
         ResolvedType::Sequence { elem, max_len }
             if matches!(
                 elem.as_ref(),

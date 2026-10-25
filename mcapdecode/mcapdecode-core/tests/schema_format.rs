@@ -1,6 +1,64 @@
 use mcapdecode_core::{
-    DataTypeDef, ElementDef, EnumVariant, FieldDef, FieldDefs, format_field_defs,
+    DataTypeDef, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef,
+    format_field_defs,
 };
+
+#[test]
+fn named_types_render_qualified_names_in_collections() -> Result<(), std::fmt::Error> {
+    let pose = DataTypeDef::Struct(StructDef {
+        type_name: Some("example.Pose".into()),
+        fields: vec![FieldDef::new(
+            "mode",
+            DataTypeDef::Enum(EnumDef {
+                type_name: Some("example.Mode".into()),
+                variants: vec![EnumVariant::new("OFF", 0)],
+            }),
+            false,
+        )]
+        .into(),
+    });
+    let fields = vec![
+        FieldDef::new("pose", pose.clone(), true),
+        FieldDef::new(
+            "poses",
+            DataTypeDef::BoundedList(
+                Box::new(ElementDef::new(
+                    DataTypeDef::Array(Box::new(ElementDef::new(pose.clone(), true)), 2),
+                    false,
+                )),
+                4,
+            ),
+            false,
+        ),
+        FieldDef::new(
+            "lookup",
+            DataTypeDef::Map {
+                key: Box::new(ElementDef::new(DataTypeDef::String, false)),
+                value: Box::new(ElementDef::new(
+                    DataTypeDef::List(Box::new(ElementDef::new(pose, false))),
+                    false,
+                )),
+            },
+            false,
+        ),
+    ];
+
+    assert_eq!(
+        format_field_defs(&fields)?,
+        "\
+pose: example.Pose?
+    mode: example.Mode
+        OFF = 0
+poses: example.Pose?[2][<=4]
+    mode: example.Mode
+        OFF = 0
+lookup: map<string, example.Pose[]>
+    mode: example.Mode
+        OFF = 0
+"
+    );
+    Ok(())
+}
 
 #[test]
 fn nested_struct_keeps_compact_type_labels_and_indentation() -> Result<(), std::fmt::Error> {
@@ -133,10 +191,7 @@ labels: map<string, int32?>
 fn enums_render_declared_wire_values() -> Result<(), std::fmt::Error> {
     let fields = vec![FieldDef::new(
         "color",
-        DataTypeDef::Enum(vec![
-            EnumVariant::new("UNKNOWN", 0),
-            EnumVariant::new("BLUE", 7),
-        ]),
+        DataTypeDef::Enum(vec![EnumVariant::new("UNKNOWN", 0), EnumVariant::new("BLUE", 7)].into()),
         false,
     )];
 

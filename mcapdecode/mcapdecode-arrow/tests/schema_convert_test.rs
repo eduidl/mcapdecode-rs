@@ -22,7 +22,7 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
         FieldDef::new("bounded_string", DataTypeDef::BoundedString(4), false),
         FieldDef::new(
             "enum",
-            DataTypeDef::Enum(vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)]),
+            DataTypeDef::Enum(vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)].into()),
             false,
         ),
         FieldDef::new("bounded_bytes", DataTypeDef::BoundedBytes(8), false),

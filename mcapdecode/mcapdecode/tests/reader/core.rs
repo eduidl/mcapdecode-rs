@@ -448,3 +448,49 @@ fn for_each_decoded_message_parallel_stops_after_callback_error() {
     assert!(matches!(err, McapReaderError::Callback(_)));
     assert_eq!(visited, vec![1, 2]);
 }
+
+#[test]
+#[cfg(all(feature = "ros2msg", feature = "ros2idl"))]
+fn topic_schema_exposes_named_ros_types_without_message_payloads() {
+    let schemas = [
+        (
+            "ros2msg",
+            "builtin_interfaces/Time stamp\nbuiltin_interfaces/Time[2] fixed\nbuiltin_interfaces/Time[<=3] bounded\nbuiltin_interfaces/Time[] stamps\nuint32 count\n",
+        ),
+        (
+            "ros2idl",
+            "IDL: example/msg/Root\nmodule example { module msg { enum Mode { OFF, ON }; struct Root { Mode mode; builtin_interfaces::msg::Time stamp; builtin_interfaces::msg::Time fixed[2]; sequence<builtin_interfaces::msg::Time, 3> bounded; sequence<builtin_interfaces::msg::Time> stamps; uint32 count; }; }; };",
+        ),
+    ];
+    for (encoding, schema) in schemas {
+        let fixture = TempFixture {
+            path: temp_fixture_path(encoding),
+        };
+        let mut writer = Writer::new(File::create(fixture.path()).unwrap()).unwrap();
+        let id = writer
+            .add_schema("example/msg/Root", encoding, schema.as_bytes())
+            .unwrap();
+        writer
+            .add_channel(id, "/types", "cdr", &BTreeMap::new())
+            .unwrap();
+        writer.finish().unwrap();
+        let reader = McapReader::builder().with_default_decoders().build();
+        let metadata = reader.topic_schema(fixture.path(), "/types").unwrap();
+        let displayed: Vec<_> = metadata
+            .field_defs
+            .iter()
+            .map(|field| field.element.to_string())
+            .collect();
+        let mut expected_display = vec![
+            "builtin_interfaces/msg/Time",
+            "builtin_interfaces/msg/Time[2]",
+            "builtin_interfaces/msg/Time[<=3]",
+            "builtin_interfaces/msg/Time[]",
+            "uint32",
+        ];
+        if encoding == "ros2idl" {
+            expected_display.insert(0, "example/msg/Mode");
+        }
+        assert_eq!(displayed, expected_display, "{encoding}");
+    }
+}

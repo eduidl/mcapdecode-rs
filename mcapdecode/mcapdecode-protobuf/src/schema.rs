@@ -1,6 +1,8 @@
 //! Convert a protobuf `FileDescriptorSet` into [`FieldDef`] schema.
 
-use mcapdecode_core::{DataTypeDef, DecoderError, ElementDef, EnumVariant, FieldDef, FieldDefs};
+use mcapdecode_core::{
+    DataTypeDef, DecoderError, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef,
+};
 use prost_reflect::{DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
 
 use crate::PresencePolicy;
@@ -83,15 +85,19 @@ fn kind_to_data_type_def(
         Kind::Bool => DataTypeDef::Bool,
         Kind::String => DataTypeDef::String,
         Kind::Bytes => DataTypeDef::Bytes,
-        Kind::Enum(enum_desc) => DataTypeDef::Enum(
-            enum_desc
+        Kind::Enum(enum_desc) => DataTypeDef::Enum(EnumDef {
+            type_name: Some(enum_desc.full_name().to_owned()),
+            variants: enum_desc
                 .values()
                 .map(|value| EnumVariant::new(value.name(), i64::from(value.number())))
                 .collect(),
-        ),
+        }),
         Kind::Message(msg_desc) => {
             let fields = message_fields_to_field_defs(&msg_desc, policy)?;
-            DataTypeDef::Struct(fields)
+            DataTypeDef::Struct(StructDef {
+                type_name: Some(msg_desc.full_name().to_owned()),
+                fields,
+            })
         }
     };
     Ok(dt)

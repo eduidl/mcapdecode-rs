@@ -1,6 +1,8 @@
 mod test_helpers;
 
-use mcapdecode_core::{DataTypeDef, DecoderError, ElementDef, EnumVariant, FieldDef};
+use mcapdecode_core::{
+    DataTypeDef, DecoderError, ElementDef, EnumDef, EnumVariant, FieldDef, StructDef,
+};
 use mcapdecode_protobuf::{PresencePolicy, message_fields_to_field_defs, parse_message_descriptor};
 use prost_types::{
     DescriptorProto,
@@ -108,13 +110,16 @@ fn nested_message_becomes_struct() {
     assert_eq!(field.name, "inner");
     assert_eq!(
         field.element.data_type,
-        DataTypeDef::Struct(vec![FieldDef::new("x", DataTypeDef::I32, false)].into())
+        DataTypeDef::Struct(StructDef {
+            type_name: Some("Inner".into()),
+            fields: vec![FieldDef::new("x", DataTypeDef::I32, false)].into()
+        })
     );
     assert!(field.element.nullable);
 }
 
 #[test]
-fn enum_field_preserves_values_and_displays_as_enum() {
+fn enum_field_preserves_values_and_displays_qualified_name() {
     let color_enum = simple_enum("Color", &[("RED", 0), ("GREEN", 7), ("BLUE", 42)]);
     let msg = DescriptorProto {
         name: Some("WithEnum".to_string()),
@@ -129,13 +134,16 @@ fn enum_field_preserves_values_and_displays_as_enum() {
     let data_type = &schema[0].element.data_type;
     assert_eq!(
         data_type,
-        &DataTypeDef::Enum(vec![
-            EnumVariant::new("RED", 0),
-            EnumVariant::new("GREEN", 7),
-            EnumVariant::new("BLUE", 42),
-        ])
+        &DataTypeDef::Enum(EnumDef {
+            type_name: Some("Color".into()),
+            variants: vec![
+                EnumVariant::new("RED", 0),
+                EnumVariant::new("GREEN", 7),
+                EnumVariant::new("BLUE", 42),
+            ]
+        })
     );
-    assert_eq!(data_type.to_string(), "enum");
+    assert_eq!(data_type.to_string(), "Color");
 }
 
 #[test]
