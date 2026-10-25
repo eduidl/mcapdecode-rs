@@ -52,7 +52,7 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             .map(|schema| display_empty_text(&schema))
             .unwrap_or_else(|| "-".to_string());
         let encoding = format!(
-            "{}/{}",
+            "{} / {}",
             display_empty_text(&row.info.message_encoding),
             display_empty_text(&row.info.schema_encoding)
         );
