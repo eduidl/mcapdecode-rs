@@ -149,7 +149,7 @@ fn schema_formatter_includes_metadata_and_fields() {
     assert!(rendered.contains("topic: /camera/image"));
     assert!(rendered.contains("schema_name: sensor_msgs/msg/Image"));
     assert!(rendered.contains("schema_encoding: ros2idl"));
-    assert!(rendered.contains("stamp: i64"));
+    assert!(rendered.contains("stamp: int64"));
     assert!(rendered.contains("nested:"));
 }
 

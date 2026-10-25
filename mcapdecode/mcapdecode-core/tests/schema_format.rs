@@ -25,7 +25,7 @@ fn nested_struct_keeps_compact_type_labels_and_indentation() -> Result<(), std::
     let text = format_field_defs(&fields)?;
     let expected = "\
 field_root: optional struct
-    field_a: optional f64
+    field_a: optional float64
     field_b: optional struct
         field_c: optional string
 ";
@@ -61,7 +61,7 @@ fn list_of_complex_item_is_rendered_as_block() -> Result<(), std::fmt::Error> {
     let expected = "\
 field_root: optional struct
     field_list: optional struct?[]
-        item_a: optional i32
+        item_a: optional int32
         item_b: optional string
 ";
     assert_eq!(text, expected);
@@ -89,8 +89,8 @@ fn non_optional_fields_do_not_get_optional_prefix() -> Result<(), std::fmt::Erro
     let text = format_field_defs(&fields)?;
     let expected = "\
 field_root: struct
-    field_a: f64
-    field_b: i32[]
+    field_a: float64
+    field_b: int32[]
 ";
     assert_eq!(text, expected);
     Ok(())
@@ -121,9 +121,9 @@ fn arrays_and_maps_render_complete_types_on_the_parent_line() -> Result<(), std:
 
     let text = format_field_defs(&fields)?;
     let expected = "\
-samples: f64[9]
-bounded_samples: i16[<=4]
-labels: map<string, i32?>
+samples: float64[9]
+bounded_samples: int16[<=4]
+labels: map<string, int32?>
 ";
     assert_eq!(text, expected);
     Ok(())
@@ -175,7 +175,7 @@ labels: map<string, struct>
     enabled: bool
 index: map<struct, struct>
     @key: struct
-        id: u32
+        id: uint32
     @value: struct
         enabled: bool
 ";
@@ -192,7 +192,10 @@ fn field_defs_display_matches_formatter() -> Result<(), std::fmt::Error> {
 
 #[test]
 fn element_display_prefixes_optional() {
-    assert_eq!(ElementDef::new(DataTypeDef::I32, false).to_string(), "i32");
+    assert_eq!(
+        ElementDef::new(DataTypeDef::I32, false).to_string(),
+        "int32"
+    );
     assert_eq!(
         ElementDef::new(DataTypeDef::String, true).to_string(),
         "optional string"
@@ -203,6 +206,25 @@ fn element_display_prefixes_optional() {
             false
         )
         .to_string(),
-        "u8[4]"
+        "uint8[4]"
     );
+}
+
+#[test]
+fn primitive_type_names_are_language_neutral() {
+    for (data_type, expected) in [
+        (DataTypeDef::I8, "int8"),
+        (DataTypeDef::I16, "int16"),
+        (DataTypeDef::I32, "int32"),
+        (DataTypeDef::I64, "int64"),
+        (DataTypeDef::U8, "uint8"),
+        (DataTypeDef::U16, "uint16"),
+        (DataTypeDef::U32, "uint32"),
+        (DataTypeDef::U64, "uint64"),
+        (DataTypeDef::F32, "float32"),
+        (DataTypeDef::F64, "float64"),
+    ] {
+        assert_eq!(data_type.type_name(), expected);
+        assert_eq!(data_type.to_string(), expected);
+    }
 }
