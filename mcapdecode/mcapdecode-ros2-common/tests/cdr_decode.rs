@@ -376,7 +376,7 @@ fn fails_on_big_endian_encapsulation() {
     assert!(format!("{err:#}").contains("unsupported CDR endianness"));
 }
 
-/// An unbounded `sequence<uint8>` decodes into bulk `Value::Bytes`.
+/// An unbounded `sequence<uint8>` decodes into bulk `Value::Uint8List`.
 #[test]
 fn decodes_unbounded_sequence() {
     let schema = make_schema(
@@ -400,14 +400,14 @@ fn decodes_unbounded_sequence() {
     let Value::Struct(fields) = value else {
         panic!("expected struct");
     };
-    let Value::Bytes(bytes) = &fields[0] else {
-        panic!("expected bytes");
+    let Value::Uint8List(bytes) = &fields[0] else {
+        panic!("expected uint8 list");
     };
     assert_eq!(bytes.as_ref(), &[10, 20, 30]);
 }
 
 #[test]
-fn decodes_octet_sequence_as_bytes_and_exposes_binary_schema() {
+fn decodes_octet_sequence_as_uint8_list_and_preserves_schema() {
     let schema = make_schema(
         vec![ResolvedField {
             name: "data".to_string(),
@@ -425,10 +425,10 @@ fn decodes_octet_sequence_as_bytes_and_exposes_binary_schema() {
     let Value::Struct(fields) = value else {
         panic!("expected struct");
     };
-    assert!(matches!(&fields[0], Value::Bytes(bytes) if bytes.as_ref() == [0xaa, 0x55]));
+    assert!(matches!(&fields[0], Value::Uint8List(bytes) if bytes.as_ref() == [0xaa, 0x55]));
 
     let field_defs = resolved_schema_to_field_defs(&schema);
-    assert_eq!(field_defs[0].element.data_type, DataTypeDef::Bytes);
+    assert_eq!(field_defs[0].element.data_type, DataTypeDef::Uint8List);
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn schema_preserves_collection_and_string_bounds() {
     let field_defs = resolved_schema_to_field_defs(&schema);
     assert_eq!(
         field_defs[0].element.data_type,
-        DataTypeDef::BoundedBytes(12)
+        DataTypeDef::BoundedUint8List(12)
     );
     assert_eq!(
         field_defs[1].element.data_type,
@@ -576,4 +576,55 @@ fn empty_root_struct_consumes_one_placeholder_byte() {
         panic!("expected root struct");
     };
     assert!(fields.is_empty());
+}
+
+#[test]
+fn packed_byte_sequences_preserve_bounds_and_validate_payloads() {
+    for primitive in [PrimitiveType::U8, PrimitiveType::Octet] {
+        for max_len in [None, Some(2)] {
+            let schema = make_schema(
+                vec![ResolvedField {
+                    name: "data".to_string(),
+                    ty: ResolvedType::Sequence {
+                        elem: Box::new(ResolvedType::Primitive(primitive.clone())),
+                        max_len,
+                    },
+                    fixed_len: None,
+                }],
+                HashMap::new(),
+            );
+            let expected = max_len.map_or(DataTypeDef::Uint8List, DataTypeDef::BoundedUint8List);
+            assert_eq!(
+                resolved_schema_to_field_defs(&schema)[0].element.data_type,
+                expected
+            );
+            for data in [vec![], vec![0, 255]] {
+                let mut payload = (data.len() as u32).to_le_bytes().to_vec();
+                payload.extend_from_slice(&data);
+                let value = decode_cdr_to_value(&schema, &cdr_with_payload(payload)).unwrap();
+                let Value::Struct(fields) = value else {
+                    panic!("expected struct")
+                };
+                assert!(
+                    matches!(&fields[0], Value::Uint8List(bytes) if bytes.as_ref() == data.as_slice())
+                );
+            }
+            let truncated = cdr_with_payload(vec![2, 0, 0, 0, 1]);
+            assert!(
+                decode_cdr_to_value(&schema, &truncated)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("EOF")
+            );
+            if max_len.is_some() {
+                let overflow = cdr_with_payload(vec![3, 0, 0, 0, 1, 2, 3]);
+                assert!(
+                    decode_cdr_to_value(&schema, &overflow)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("bound overflow")
+                );
+            }
+        }
+    }
 }

@@ -44,7 +44,10 @@ fn element_def_to_datatype(elem: &ElementDef) -> DataType {
         | DataTypeDef::BoundedString(_)
         | DataTypeDef::BoundedWString(_)
         | DataTypeDef::Enum(_) => DataType::Utf8,
-        DataTypeDef::Bytes | DataTypeDef::BoundedBytes(_) => DataType::Binary,
+        // Preserve bulk storage for byte sequences; logical bounds stay in the source schema.
+        DataTypeDef::Bytes | DataTypeDef::Uint8List | DataTypeDef::BoundedUint8List(_) => {
+            DataType::Binary
+        }
         DataTypeDef::Struct(definition) => {
             let arrow_fields: Vec<Field> = definition
                 .fields

@@ -7,12 +7,12 @@ use common::{bytes_schema, one_megabyte_cdr};
 use mcapdecode_core::Value;
 use mcapdecode_ros2_common::decode_cdr_to_value;
 
-/// Contract for bulk decoding `sequence<uint8>` as `Value::Bytes`.
+/// Contract for bulk decoding `sequence<uint8>` as `Value::Uint8List`.
 #[test]
-fn byte_sequence_is_bulk_bytes() {
+fn byte_sequence_is_bulk_uint8_list() {
     let value = decode_cdr_to_value(&bytes_schema(), &one_megabyte_cdr()).unwrap();
     let Value::Struct(fields) = value else {
         panic!("expected struct")
     };
-    assert!(matches!(fields[0], Value::Bytes(_)));
+    assert!(matches!(fields[0], Value::Uint8List(_)));
 }

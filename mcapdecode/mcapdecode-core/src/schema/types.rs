@@ -25,11 +25,13 @@ pub enum DataTypeDef {
     BoundedString(usize),
     BoundedWString(usize),
     Bytes,
-    BoundedBytes(usize),
     Enum(EnumDef),
     Struct(StructDef),
     List(Box<ElementDef>),
     BoundedList(Box<ElementDef>, usize),
+    /// Unsigned byte sequence stored in bulk, rather than as opaque bytes.
+    Uint8List,
+    BoundedUint8List(usize),
     Array(Box<ElementDef>, usize),
     Map {
         key: Box<ElementDef>,
@@ -44,6 +46,8 @@ impl DataTypeDef {
             DataTypeDef::Struct(_)
                 | DataTypeDef::List(_)
                 | DataTypeDef::BoundedList(_, _)
+                | DataTypeDef::Uint8List
+                | DataTypeDef::BoundedUint8List(_)
                 | DataTypeDef::Enum(_)
                 | DataTypeDef::Array(_, _)
                 | DataTypeDef::Map { .. }
@@ -70,11 +74,12 @@ impl DataTypeDef {
             DataTypeDef::BoundedString(_) => "string",
             DataTypeDef::BoundedWString(_) => "wstring",
             DataTypeDef::Bytes => "bytes",
-            DataTypeDef::BoundedBytes(_) => "bytes",
             DataTypeDef::Enum(_) => "enum",
             DataTypeDef::Struct(_) => "struct",
             DataTypeDef::List(_) => "list",
             DataTypeDef::BoundedList(_, _) => "list",
+            DataTypeDef::Uint8List => "list",
+            DataTypeDef::BoundedUint8List(_) => "list",
             DataTypeDef::Array(_, _) => "array",
             DataTypeDef::Map { .. } => "map",
         }
@@ -150,10 +155,11 @@ impl Display for DataTypeDef {
             DataTypeDef::BoundedList(element, size) => {
                 write!(f, "{}[<={size}]", element)
             }
+            DataTypeDef::Uint8List => f.write_str("uint8[]"),
+            DataTypeDef::BoundedUint8List(size) => write!(f, "uint8[<={size}]"),
             DataTypeDef::Array(element, size) => write!(f, "{}[{size}]", element),
             DataTypeDef::BoundedString(size) => write!(f, "string[<={size}]"),
             DataTypeDef::BoundedWString(size) => write!(f, "wstring[<={size}]"),
-            DataTypeDef::BoundedBytes(size) => write!(f, "bytes[<={size}]"),
             DataTypeDef::Map { key, value } => {
                 write!(f, "map<{}, {}>", key, value)
             }

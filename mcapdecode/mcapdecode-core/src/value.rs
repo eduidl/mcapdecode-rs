@@ -24,6 +24,8 @@ pub enum Value {
     Bytes(Arc<[u8]>),
     Struct(Vec<Value>),
     List(Vec<Value>),
+    /// Packed unsigned byte sequence, distinct from opaque binary data.
+    Uint8List(Arc<[u8]>),
     Array(Vec<Value>),
     Map(Vec<(Value, Value)>),
 }
@@ -129,9 +131,10 @@ impl Value {
         }
     }
 
+    /// Borrow opaque bytes or a packed unsigned byte sequence as a byte slice.
     pub fn try_bytes(&self) -> Result<Option<&[u8]>, ValueTypeError> {
         match self {
-            Value::Bytes(v) => Ok(Some(v.as_ref())),
+            Value::Bytes(v) | Value::Uint8List(v) => Ok(Some(v.as_ref())),
             Value::Null => Ok(None),
             _ => Err(self.type_mismatch("Bytes")),
         }
@@ -159,6 +162,7 @@ impl Value {
             Value::Bytes(_) => "Bytes",
             Value::Struct(_) => "Struct",
             Value::List(_) => "List",
+            Value::Uint8List(_) => "Uint8List",
             Value::Array(_) => "Array",
             Value::Map(_) => "Map",
         }

@@ -224,3 +224,23 @@ fn schema_formatter_uses_nullable_suffixes() {
     let rendered = format_schema_text(&sample_topic(), &fields);
     assert!(rendered.ends_with("count: uint32?\nsamples: float64?[]?\n"));
 }
+
+#[test]
+fn uint8_lists_show_their_schema_type_and_use_the_bytes_preview() {
+    for ty in [DataTypeDef::Uint8List, DataTypeDef::BoundedUint8List(8)] {
+        let schema: FieldDefs = vec![FieldDef::new("data", ty.clone(), false)].into();
+        let value = Value::Struct(vec![Value::Uint8List(Arc::from([0, 255]))]);
+        let bytes = Value::Struct(vec![Value::Bytes(Arc::from([0, 255]))]);
+        let rows = format_detail_rows(0, 0, &value, &schema);
+        let old_rows = format_detail_rows(0, 0, &bytes, &schema);
+        assert_eq!(
+            rows.iter().map(|r| &r.text).collect::<Vec<_>>(),
+            old_rows.iter().map(|r| &r.text).collect::<Vec<_>>()
+        );
+        assert!(
+            mcapdecode::core::format_field_defs(&schema)
+                .unwrap()
+                .contains(&ty.to_string())
+        );
+    }
+}

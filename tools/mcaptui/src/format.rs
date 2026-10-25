@@ -247,7 +247,7 @@ fn format_scalar(value: &Value) -> String {
         Value::F32(value) => value.to_string(),
         Value::F64(value) => value.to_string(),
         Value::String(value) => format!("{value:?}"),
-        Value::Bytes(value) => format_bytes(value, BYTES_DETAIL_LEN),
+        Value::Bytes(value) | Value::Uint8List(value) => format_bytes(value, BYTES_DETAIL_LEN),
         Value::Struct(_) | Value::List(_) | Value::Array(_) | Value::Map(_) => {
             "<compound>".to_string()
         }

@@ -25,7 +25,11 @@ fn field_defs_to_arrow_schema_converts_nested_types() {
             DataTypeDef::Enum(vec![EnumVariant::new("A", 0), EnumVariant::new("B", 1)].into()),
             false,
         ),
-        FieldDef::new("bounded_bytes", DataTypeDef::BoundedBytes(8), false),
+        FieldDef::new(
+            "bounded_uint8_list",
+            DataTypeDef::BoundedUint8List(8),
+            false,
+        ),
         FieldDef {
             name: "list".to_string(),
             element: ElementDef::new(
@@ -159,4 +163,35 @@ fn extended_string_and_collection_types_use_their_arrow_equivalents() {
         }
         other => panic!("expected list, got {other:?}"),
     }
+}
+
+#[test]
+fn only_uint8_list_types_become_binary() {
+    let fields = FieldDefs::from(vec![
+        FieldDef::new("uint8_list", DataTypeDef::Uint8List, false),
+        FieldDef::new(
+            "bounded_uint8_list",
+            DataTypeDef::BoundedUint8List(8),
+            false,
+        ),
+        FieldDef::new(
+            "list",
+            DataTypeDef::List(Box::new(ElementDef::new(DataTypeDef::U8, false))),
+            false,
+        ),
+        FieldDef::new(
+            "array",
+            DataTypeDef::Array(Box::new(ElementDef::new(DataTypeDef::U8, false)), 4),
+            false,
+        ),
+    ]);
+
+    let schema = field_defs_to_arrow_schema(&fields);
+    assert_eq!(schema.field(0).data_type(), &DataType::Binary);
+    assert_eq!(schema.field(1).data_type(), &DataType::Binary);
+    assert!(matches!(schema.field(2).data_type(), DataType::List(_)));
+    assert!(matches!(
+        schema.field(3).data_type(),
+        DataType::FixedSizeList(_, 4)
+    ));
 }

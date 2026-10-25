@@ -316,7 +316,6 @@ fn bounded_scalar_types_keep_their_bounds() {
     for (data_type, expected) in [
         (DataTypeDef::BoundedString(8), "string[<=8]"),
         (DataTypeDef::BoundedWString(8), "wstring[<=8]"),
-        (DataTypeDef::BoundedBytes(8), "bytes[<=8]"),
     ] {
         assert_eq!(
             ElementDef::new(data_type, true).to_string(),
