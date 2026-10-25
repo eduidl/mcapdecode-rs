@@ -101,30 +101,18 @@ impl EnumVariant {
 impl Display for DataTypeDef {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            DataTypeDef::List(element) => write!(f, "{}[]", NestedElement(element)),
+            DataTypeDef::List(element) => write!(f, "{}[]", element),
             DataTypeDef::BoundedList(element, size) => {
-                write!(f, "{}[<={size}]", NestedElement(element))
+                write!(f, "{}[<={size}]", element)
             }
-            DataTypeDef::Array(element, size) => write!(f, "{}[{size}]", NestedElement(element)),
+            DataTypeDef::Array(element, size) => write!(f, "{}[{size}]", element),
             DataTypeDef::BoundedString(size) => write!(f, "string[<={size}]"),
             DataTypeDef::BoundedWString(size) => write!(f, "wstring[<={size}]"),
             DataTypeDef::BoundedBytes(size) => write!(f, "bytes[<={size}]"),
             DataTypeDef::Map { key, value } => {
-                write!(f, "map<{}, {}>", NestedElement(key), NestedElement(value))
+                write!(f, "map<{}, {}>", key, value)
             }
             _ => f.write_str(self.type_name()),
-        }
-    }
-}
-
-struct NestedElement<'a>(&'a ElementDef);
-
-impl Display for NestedElement<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        if self.0.nullable {
-            write!(f, "{}?", self.0.data_type)
-        } else {
-            Display::fmt(&self.0.data_type, f)
         }
     }
 }
@@ -203,7 +191,7 @@ impl ElementDef {
 impl Display for ElementDef {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         if self.nullable {
-            write!(f, "optional {}", self.data_type)
+            write!(f, "{}?", self.data_type)
         } else {
             Display::fmt(&self.data_type, f)
         }

@@ -178,3 +178,18 @@ fn raw_schema_formatter_includes_mode_and_reason() {
     assert!(rendered.contains("reason: no decoder registered"));
     assert!(rendered.contains("payload: bytes"));
 }
+
+#[test]
+fn schema_formatter_uses_nullable_suffixes() {
+    let fields = vec![
+        FieldDef::new("count", DataTypeDef::U32, true),
+        FieldDef::new(
+            "samples",
+            DataTypeDef::List(Box::new(ElementDef::new(DataTypeDef::F64, true))),
+            true,
+        ),
+    ]
+    .into();
+    let rendered = format_schema_text(&sample_topic(), &fields);
+    assert!(rendered.ends_with("count: uint32?\nsamples: float64?[]?\n"));
+}
