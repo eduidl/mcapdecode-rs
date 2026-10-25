@@ -24,10 +24,10 @@ fn nested_struct_keeps_compact_type_labels_and_indentation() -> Result<(), std::
 
     let text = format_field_defs(&fields)?;
     let expected = "\
-field_root: optional struct
-    field_a: optional float64
-    field_b: optional struct
-        field_c: optional string
+field_root: struct?
+    field_a: float64?
+    field_b: struct?
+        field_c: string?
 ";
     assert_eq!(text, expected);
     Ok(())
@@ -59,17 +59,17 @@ fn list_of_complex_item_is_rendered_as_block() -> Result<(), std::fmt::Error> {
 
     let text = format_field_defs(&fields)?;
     let expected = "\
-field_root: optional struct
-    field_list: optional struct?[]
-        item_a: optional int32
-        item_b: optional string
+field_root: struct?
+    field_list: struct?[]?
+        item_a: int32?
+        item_b: string?
 ";
     assert_eq!(text, expected);
     Ok(())
 }
 
 #[test]
-fn non_optional_fields_do_not_get_optional_prefix() -> Result<(), std::fmt::Error> {
+fn non_nullable_fields_do_not_get_nullable_suffix() -> Result<(), std::fmt::Error> {
     let fields = vec![FieldDef::new(
         "field_root",
         DataTypeDef::Struct(
@@ -191,14 +191,14 @@ fn field_defs_display_matches_formatter() -> Result<(), std::fmt::Error> {
 }
 
 #[test]
-fn element_display_prefixes_optional() {
+fn element_display_suffixes_nullable() {
     assert_eq!(
         ElementDef::new(DataTypeDef::I32, false).to_string(),
         "int32"
     );
     assert_eq!(
         ElementDef::new(DataTypeDef::String, true).to_string(),
-        "optional string"
+        "string?"
     );
     assert_eq!(
         ElementDef::new(
@@ -226,5 +226,46 @@ fn primitive_type_names_are_language_neutral() {
     ] {
         assert_eq!(data_type.type_name(), expected);
         assert_eq!(data_type.to_string(), expected);
+    }
+}
+
+#[test]
+fn nullable_elements_and_collections_are_distinct() {
+    for (element_nullable, list_nullable, expected) in [
+        (false, false, "uint8[]"),
+        (true, false, "uint8?[]"),
+        (false, true, "uint8[]?"),
+        (true, true, "uint8?[]?"),
+    ] {
+        let element = ElementDef::new(
+            DataTypeDef::List(Box::new(ElementDef::new(DataTypeDef::U8, element_nullable))),
+            list_nullable,
+        );
+        assert_eq!(element.to_string(), expected);
+    }
+    let map = ElementDef::new(
+        DataTypeDef::Map {
+            key: Box::new(ElementDef::new(DataTypeDef::String, true)),
+            value: Box::new(ElementDef::new(
+                DataTypeDef::Array(Box::new(ElementDef::new(DataTypeDef::U8, true)), 2),
+                true,
+            )),
+        },
+        true,
+    );
+    assert_eq!(map.to_string(), "map<string?, uint8?[2]?>?");
+}
+
+#[test]
+fn bounded_scalar_types_keep_their_bounds() {
+    for (data_type, expected) in [
+        (DataTypeDef::BoundedString(8), "string[<=8]"),
+        (DataTypeDef::BoundedWString(8), "wstring[<=8]"),
+        (DataTypeDef::BoundedBytes(8), "bytes[<=8]"),
+    ] {
+        assert_eq!(
+            ElementDef::new(data_type, true).to_string(),
+            format!("{expected}?")
+        );
     }
 }
