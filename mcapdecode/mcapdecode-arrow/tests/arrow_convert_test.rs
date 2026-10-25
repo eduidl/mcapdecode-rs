@@ -444,3 +444,56 @@ fn scalar_type_mismatch_returns_error_in_try_api() {
     assert!(matches!(err, ArrowConvertError::ValueType(_)));
     assert_eq!(err.to_string(), "value type mismatch: expected I8, got I16");
 }
+
+#[test]
+fn packed_uint8_lists_convert_to_binary_including_nested_and_null_values() {
+    use arrow::array::BinaryArray;
+    use mcapdecode_core::{DataTypeDef, ElementDef, FieldDef, FieldDefs};
+
+    for ty in [DataTypeDef::Uint8List, DataTypeDef::BoundedUint8List(8)] {
+        let fields = FieldDefs::from(vec![
+            FieldDef::new("data", ty.clone(), true),
+            FieldDef::new(
+                "nested",
+                DataTypeDef::List(Box::new(ElementDef::new(ty, true))),
+                false,
+            ),
+        ]);
+        let schema =
+            MessageBatchSchema::from_field_defs(&fields, MetadataColumns::default()).unwrap();
+        let rows = [
+            make_row(
+                0,
+                0,
+                Value::Struct(vec![
+                    Value::Uint8List(Arc::from([0, 255])),
+                    Value::List(vec![Value::Uint8List(Arc::from([])), Value::Null]),
+                ]),
+            ),
+            make_row(1, 1, Value::Struct(vec![Value::Null, Value::List(vec![])])),
+        ];
+        let batch = schema.to_record_batch(&rows).unwrap();
+        let data = batch
+            .column_by_name("data")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        assert_eq!(data.value(0), &[0, 255]);
+        assert!(data.is_null(1));
+        let nested = batch
+            .column_by_name("nested")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+        let children = nested
+            .values()
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .unwrap();
+        assert!(children.value(0).is_empty());
+        assert!(!children.is_null(0));
+        assert!(children.is_null(1));
+    }
+}

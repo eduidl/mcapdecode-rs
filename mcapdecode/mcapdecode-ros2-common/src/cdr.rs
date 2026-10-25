@@ -179,7 +179,7 @@ impl<'a> Decoder<'a> {
                     elem.as_ref(),
                     ResolvedType::Primitive(PrimitiveType::U8 | PrimitiveType::Octet)
                 ) {
-                    return Ok(Value::Bytes(Arc::from(self.read_bytes(len, path)?)));
+                    return Ok(Value::Uint8List(Arc::from(self.read_bytes(len, path)?)));
                 }
                 let mut out = Vec::with_capacity(len);
                 for i in 0..len {

@@ -8,7 +8,7 @@
 //! | Primitive              | corresponding scalar type    |
 //! | Struct                 | `Struct(StructDef)`          |
 //! | Enum                   | `Enum(EnumDef)` (decoded as the variant name) |
-//! | `sequence<uint8/octet>` | `Bytes` / `BoundedBytes`    |
+//! | `sequence<uint8/octet>` | `Uint8List` / `BoundedUint8List`    |
 //! | Other sequence         | `List` / `BoundedList`       |
 //! | BoundedString/WString  | bounded string variants      |
 //! | Fixed-length field     | `Array(element type, n)`     |
@@ -76,7 +76,7 @@ fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) ->
                 ResolvedType::Primitive(PrimitiveType::U8 | PrimitiveType::Octet)
             ) =>
         {
-            max_len.map_or(DataTypeDef::Bytes, DataTypeDef::BoundedBytes)
+            max_len.map_or(DataTypeDef::Uint8List, DataTypeDef::BoundedUint8List)
         }
         ResolvedType::Sequence { elem, max_len } => {
             let element = Box::new(ElementDef::new(

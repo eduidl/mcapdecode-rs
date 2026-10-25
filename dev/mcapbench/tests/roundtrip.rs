@@ -42,13 +42,18 @@ fn decode(case: PayloadCase, encoding: Encoding) -> Value {
 
 /// Compare a decoded value against the sample it was generated from.
 ///
-/// Byte sequences decode as `Bytes`; fixed-size arrays arrive as `Array` in CDR but as
-/// `List` in protobuf, so both array spellings are accepted.
-fn matches(value: &Value, expected: &Sample) -> bool {
+/// Byte sequences must decode as `Uint8List` in CDR and `Bytes` in protobuf. Fixed-size
+/// arrays arrive as `Array` in CDR but as `List` in protobuf, so both are accepted.
+fn matches(value: &Value, expected: &Sample, encoding: Encoding) -> bool {
     match (value, expected) {
         (Value::U64(actual), Sample::U64(want)) => actual == want,
         (Value::String(actual), Sample::Str(want)) => actual.as_ref() == want.as_str(),
-        (Value::Bytes(actual), Sample::Bytes(want)) => actual.as_ref() == want.as_slice(),
+        (Value::Uint8List(actual), Sample::Bytes(want)) if encoding != Encoding::Protobuf => {
+            actual.as_ref() == want.as_slice()
+        }
+        (Value::Bytes(actual), Sample::Bytes(want)) if encoding == Encoding::Protobuf => {
+            actual.as_ref() == want.as_slice()
+        }
         (Value::Array(items) | Value::List(items), Sample::F64List(want)) => {
             items.len() == want.len()
                 && items
@@ -61,7 +66,7 @@ fn matches(value: &Value, expected: &Sample) -> bool {
                 && fields
                     .iter()
                     .zip(want)
-                    .all(|(field, expected)| matches(field, expected))
+                    .all(|(field, expected)| matches(field, expected, encoding))
         }
         _ => false,
     }
@@ -73,7 +78,7 @@ fn every_generated_combination_decodes_back_to_its_sample() {
         let value = decode(case, encoding);
         let expected = sample(case);
         assert!(
-            matches(&value, &expected),
+            matches(&value, &expected, encoding),
             "{case:?}/{encoding:?}: decoded value does not match the generated sample"
         );
     }
