@@ -143,9 +143,12 @@ fn decodes_enum_numeric_value_to_variant_name() {
     let data_type = &resolved_schema_to_field_defs(&schema)[0].element.data_type;
     assert_eq!(
         data_type,
-        &DataTypeDef::Enum(vec![EnumVariant::new("OK", 3), EnumVariant::new("WARN", 7)])
+        &DataTypeDef::Enum(mcapdecode_core::EnumDef {
+            type_name: Some("ex/msg/State".into()),
+            variants: vec![EnumVariant::new("OK", 3), EnumVariant::new("WARN", 7)]
+        })
     );
-    assert_eq!(data_type.to_string(), "enum");
+    assert_eq!(data_type.to_string(), "ex/msg/State");
 }
 
 /// A negative enumerator value is serialized as its 32-bit two's complement.

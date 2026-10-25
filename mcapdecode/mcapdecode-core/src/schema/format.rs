@@ -20,29 +20,20 @@ pub fn format_field_defs(fields: impl AsRef<[FieldDef]>) -> std::result::Result<
 
 fn format_field(field: &FieldDef, indent: usize, out: &mut String) -> Result {
     let pad = " ".repeat(indent);
-    writeln!(
-        out,
-        "{pad}{}: {}",
-        field.name,
-        format_element_type(&field.element)
-    )?;
+    writeln!(out, "{pad}{}: {}", field.name, field.element)?;
     format_data_type_body(&field.element.data_type, indent + 4, out)
-}
-
-fn format_element_type(element: &ElementDef) -> String {
-    element.to_string()
 }
 
 fn format_data_type_body(data_type: &DataTypeDef, indent: usize, out: &mut String) -> Result {
     match data_type {
-        DataTypeDef::Struct(fields) => {
-            for child in fields.iter() {
+        DataTypeDef::Struct(definition) => {
+            for child in definition.fields.iter() {
                 format_field(child, indent, out)?;
             }
         }
-        DataTypeDef::Enum(variants) => {
+        DataTypeDef::Enum(definition) => {
             let pad = " ".repeat(indent);
-            for variant in variants {
+            for variant in &definition.variants {
                 writeln!(out, "{pad}{} = {}", variant.name, variant.value)?;
             }
         }
@@ -89,7 +80,7 @@ fn format_labeled_body(
     out: &mut String,
 ) -> Result {
     let pad = " ".repeat(indent);
-    writeln!(out, "{pad}{label}: {}", format_element_type(element))?;
+    writeln!(out, "{pad}{label}: {}", element)?;
     format_data_type_body(&element.data_type, indent + 4, out)
 }
 

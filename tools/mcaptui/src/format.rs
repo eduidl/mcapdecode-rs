@@ -133,7 +133,7 @@ fn push_value_lines(
                 field_path.map(ToOwned::to_owned),
             ));
             let schema_fields = match data_type {
-                Some(DataTypeDef::Struct(schema_fields)) => Some(schema_fields),
+                Some(DataTypeDef::Struct(definition)) => Some(&definition.fields),
                 _ => None,
             };
             for (index, field_value) in fields.iter().enumerate() {

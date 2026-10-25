@@ -26,8 +26,8 @@ pub enum DataTypeDef {
     BoundedWString(usize),
     Bytes,
     BoundedBytes(usize),
-    Enum(Vec<EnumVariant>),
-    Struct(FieldDefs),
+    Enum(EnumDef),
+    Struct(StructDef),
     List(Box<ElementDef>),
     BoundedList(Box<ElementDef>, usize),
     Array(Box<ElementDef>, usize),
@@ -50,6 +50,7 @@ impl DataTypeDef {
         )
     }
 
+    /// Category name, independent of qualified names, bounds, and nullability.
     pub fn type_name(&self) -> &'static str {
         match self {
             DataTypeDef::Null => "null",
@@ -80,6 +81,44 @@ impl DataTypeDef {
     }
 }
 
+/// A struct definition with an optional qualified name from the source schema.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StructDef {
+    pub type_name: Option<String>,
+    pub fields: FieldDefs,
+}
+
+impl From<FieldDefs> for StructDef {
+    fn from(fields: FieldDefs) -> Self {
+        Self {
+            type_name: None,
+            fields,
+        }
+    }
+}
+
+impl From<Vec<FieldDef>> for StructDef {
+    fn from(fields: Vec<FieldDef>) -> Self {
+        FieldDefs::new(fields).into()
+    }
+}
+
+/// An enum definition with an optional qualified name from the source schema.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EnumDef {
+    pub type_name: Option<String>,
+    pub variants: Vec<EnumVariant>,
+}
+
+impl From<Vec<EnumVariant>> for EnumDef {
+    fn from(variants: Vec<EnumVariant>) -> Self {
+        Self {
+            type_name: None,
+            variants,
+        }
+    }
+}
+
 /// A named numeric value in an enum definition.
 ///
 /// The numeric value is preserved from the source schema.
@@ -101,6 +140,12 @@ impl EnumVariant {
 impl Display for DataTypeDef {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
+            DataTypeDef::Struct(definition) => {
+                f.write_str(definition.type_name.as_deref().unwrap_or("struct"))
+            }
+            DataTypeDef::Enum(definition) => {
+                f.write_str(definition.type_name.as_deref().unwrap_or("enum"))
+            }
             DataTypeDef::List(element) => write!(f, "{}[]", element),
             DataTypeDef::BoundedList(element, size) => {
                 write!(f, "{}[<={size}]", element)
