@@ -20,7 +20,10 @@ fn schema_writes_the_topic_schema_to_stdout() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!String::from_utf8(output.stdout).unwrap().trim().is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "speed_mps: float64\ngear: string\n\n"
+    );
 }
 
 #[test]
@@ -44,7 +47,10 @@ fn schema_writes_the_topic_schema_to_a_file() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!fs::read_to_string(&path).unwrap().trim().is_empty());
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "speed_mps: float64\ngear: string\n\n"
+    );
     fs::remove_file(path).unwrap();
 }
 
