@@ -114,6 +114,9 @@ Use `for_each_topic_decoded_message_with_options` for per-topic filtering, offse
 and limit. With `arrow` enabled, `for_each_topic_record_batch_with_options` uses
 the same traversal and adds Arrow batch conversion.
 
+Decoded-message and Arrow reads require a summary with chunk indexes. Chunks
+without message indexes are scanned to find the requested topics.
+
 ## Related Crates in This Workspace
 
 - `mcapdecode-core`: schema/value model and shared errors

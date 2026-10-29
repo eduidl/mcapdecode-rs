@@ -88,10 +88,16 @@ fn write_chunked_fixture(name: &str, payloads: &[&[u8]]) -> TempFixture {
 }
 
 fn multi_topic_fixture() -> TempFixture {
+    multi_topic_fixture_with_indexes(true)
+}
+
+fn multi_topic_fixture_with_indexes(indexes: bool) -> TempFixture {
     let path = temp_fixture_path("multi-topic");
     let mut writer = Writer::with_options(
         File::create(&path).unwrap(),
-        WriteOptions::new().chunk_size(Some(128)),
+        WriteOptions::new()
+            .chunk_size(Some(128))
+            .emit_message_indexes(indexes),
     )
     .unwrap();
     let schema = writer

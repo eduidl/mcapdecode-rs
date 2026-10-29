@@ -601,3 +601,78 @@ fn repeated_single_topic_is_read_once() {
         .unwrap();
     assert_eq!(topics, ["/first"]);
 }
+
+#[test]
+fn decoded_reads_scan_chunks_without_message_indexes() {
+    let fixture = multi_topic_fixture_with_indexes(false);
+    for parallel in [false, true] {
+        let reader = McapReader::builder()
+            .with_decoder(Box::new(TestJsonDecoder))
+            .with_parallel(parallel)
+            .build();
+        let mut times = Vec::new();
+        reader
+            .for_each_decoded_message(fixture.path(), "/first", |message| {
+                times.push(message.log_time);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(times, (0..1024).collect::<Vec<_>>());
+
+        for options in [
+            ReadOptions::default(),
+            ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(3),
+                    end: Some(9),
+                }),
+                ..Default::default()
+            },
+            ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(3),
+                    end: Some(9),
+                }),
+                offset: 1,
+                limit: Some(2),
+                ..Default::default()
+            },
+        ] {
+            let mut actual = BTreeMap::<String, Vec<(u64, i64)>>::new();
+            reader
+                .for_each_topic_decoded_message_with_options(
+                    fixture.path(),
+                    &["/first", "/second"],
+                    &options,
+                    |topic, message| {
+                        let Value::Struct(fields) = message.value else {
+                            panic!("expected struct")
+                        };
+                        let Value::I64(value) = fields[0] else {
+                            panic!("expected i64")
+                        };
+                        actual
+                            .entry(topic.into())
+                            .or_default()
+                            .push((message.log_time, value));
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            let range = match (options.time_range, options.limit) {
+                (None, _) => 0..1024,
+                (_, None) => 3..9,
+                _ => 4..6,
+            };
+            for (topic, offset) in [("/first", 0), ("/second", 100)] {
+                assert_eq!(
+                    actual[topic],
+                    range
+                        .clone()
+                        .map(|i| (i as u64, i + offset))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+}
