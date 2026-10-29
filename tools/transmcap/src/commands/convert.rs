@@ -1,20 +1,12 @@
 use std::{path::PathBuf, str::FromStr};
 
-use anyhow::{Result, bail};
-use arrow::record_batch::RecordBatch;
+use anyhow::Result;
 use clap::Args;
-use indicatif::{ProgressBar, ProgressStyle};
-use mcapdecode::{
-    McapReader, MetadataColumns, MetadataTimestampFormat, NonFiniteFloats, RecordBatchOptions,
-    arrow::{
-        ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, StructPolicy, flatten_record_batch,
-        project_record_batch,
-    },
-};
+use mcapdecode::arrow::{ArrayPolicy, ListPolicy, MapPolicy};
 
 use crate::{
+    commands::batch::{TopicSettings, TopicSpec, run_conversion},
     format::OutputFormat,
-    writer::{CsvWriter, JsonlWriter, ParquetWriter, RecordBatchWriter},
 };
 
 #[derive(Args)]
@@ -58,7 +50,7 @@ pub struct ConvertArgs {
     /// Prefix for the log_time and publish_time metadata columns.
     /// Keeps them apart from payload fields of the same name. Dots are not
     /// allowed because field paths and flattened columns use them as separators.
-    #[arg(long, default_value = "@", value_parser = parse_metadata_prefix)]
+    #[arg(long, default_value = "@")]
     metadata_prefix: String,
 
     /// Emit log_time and publish_time as Unix epoch nanoseconds (`int64`).
@@ -76,127 +68,22 @@ pub struct ConvertArgs {
 
 impl ConvertArgs {
     pub fn run(self) -> Result<()> {
-        if self.jsonl_explicit_null
-            && !matches!(self.format, OutputFormat::Jsonl | OutputFormat::JsonlExt)
-        {
-            bail!("--jsonl-explicit-null requires --format jsonl or jsonl-ext");
-        }
-
-        let reader = McapReader::builder()
-            .with_default_decoders()
-            .with_parallel(self.parallel)
-            .build();
-        let flatten_policy = self.flatten_policy()?;
-
-        let count = reader.message_count(&self.input, &self.topic)?;
-        let pb = ProgressBar::new(count);
-        pb.set_style(
-            ProgressStyle::with_template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({per_sec}, ETA: {eta})",
-            )?
-            .progress_chars("=>-"),
-        );
-
-        let mut writer: Box<dyn RecordBatchWriter> = match self.format {
-            OutputFormat::Jsonl => Box::new(JsonlWriter::new(
-                self.output.as_deref(),
-                NonFiniteFloats::Null,
-                self.jsonl_explicit_null,
-            )?),
-            OutputFormat::JsonlExt => Box::new(JsonlWriter::new(
-                self.output.as_deref(),
-                NonFiniteFloats::String,
-                self.jsonl_explicit_null,
-            )?),
-            OutputFormat::Csv => Box::new(CsvWriter::new(self.output.as_deref())?),
-            OutputFormat::Parquet => {
-                let path = self
-                    .output
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("Parquet output requires -o <file>"))?;
-                Box::new(ParquetWriter::new(path)?)
-            }
-        };
-        let mut dropped_warned = false;
-
-        let metadata = MetadataColumns::with_prefix(&self.metadata_prefix);
-        let batch_options = RecordBatchOptions {
-            metadata: if self.time_ns {
-                metadata.with_timestamp_format(MetadataTimestampFormat::UnixNanoseconds)
-            } else {
-                metadata
+        let spec = TopicSpec::new(
+            self.topic,
+            self.output,
+            TopicSettings {
+                format: self.format,
+                fields: self.fields,
+                list_policy: self.list_policy,
+                list_flatten_size: self.list_flatten_size,
+                array_policy: self.array_policy,
+                map_policy: self.map_policy,
+                metadata_prefix: self.metadata_prefix,
+                time_ns: self.time_ns,
+                jsonl_explicit_null: self.jsonl_explicit_null,
             },
-            ..RecordBatchOptions::default()
-        };
-
-        let mut write_batch = |batch: RecordBatch| -> Result<()> {
-            let projected = if let Some(fields) = &self.fields {
-                project_record_batch(&batch, fields)?
-            } else {
-                batch
-            };
-            let (flat_batch, dropped_columns) =
-                flatten_record_batch(&projected, None, &flatten_policy)?;
-            if !dropped_warned && !dropped_columns.is_empty() {
-                dropped_warned = true;
-                eprintln!(
-                    "Warning: output policy skipped columns: {}",
-                    dropped_columns.join(", ")
-                );
-            }
-            let n = flat_batch.num_rows() as u64;
-            writer.write_batch(flat_batch)?;
-            pb.inc(n);
-            Ok(())
-        };
-
-        reader.for_each_record_batch_with_options(
-            &self.input,
-            &self.topic,
-            &batch_options,
-            |batch| write_batch(batch).map_err(Into::into),
         )?;
-
-        // No batches are emitted for an empty topic, but Parquet still needs its schema.
-        if count == 0 && matches!(self.format, OutputFormat::Parquet) {
-            let schema = reader.topic_batch_schema(&self.input, &self.topic, &batch_options)?;
-            write_batch(RecordBatch::new_empty(schema.schema().clone()))?;
-        }
-
-        writer.finish()?;
-        // Reported here rather than inside the writer so that benchmarking a parquet
-        // write does not do terminal I/O on every measured iteration.
-        if let (OutputFormat::Parquet, Some(path)) = (self.format, &self.output) {
-            eprintln!("Written to {}", path.display());
-        }
-        pb.finish_with_message("done");
-        Ok(())
-    }
-
-    fn flatten_policy(&self) -> Result<FlattenPolicy> {
-        let mut policy = self.format.default_policy();
-
-        if let Some(v) = self.list_policy {
-            policy.list = v;
-        }
-        if let Some(v) = self.list_flatten_size {
-            if policy.list != ListPolicy::FlattenFixed {
-                bail!("--list-flatten-size requires --list-policy flatten-fixed");
-            }
-            policy.list_flatten_fixed_size = v;
-        }
-        if let Some(v) = self.array_policy {
-            policy.array = v;
-        }
-        if let Some(v) = self.map_policy {
-            policy.map = v;
-        }
-        policy.struct_ = match self.format {
-            OutputFormat::Jsonl | OutputFormat::JsonlExt => StructPolicy::Keep,
-            OutputFormat::Csv | OutputFormat::Parquet => StructPolicy::Flatten,
-        };
-
-        Ok(policy)
+        run_conversion(&self.input, self.parallel, vec![spec], None)
     }
 }
 
@@ -206,13 +93,6 @@ fn parse_list_policy(raw: &str) -> Result<ListPolicy, String> {
 
 fn parse_array_policy(raw: &str) -> Result<ArrayPolicy, String> {
     ArrayPolicy::from_str(raw)
-}
-
-fn parse_metadata_prefix(raw: &str) -> Result<String, String> {
-    if raw.contains('.') {
-        return Err("metadata prefix must not contain '.' because field paths and flattened columns use it as a separator".to_string());
-    }
-    Ok(raw.to_string())
 }
 
 fn parse_map_policy(raw: &str) -> Result<MapPolicy, String> {

@@ -19,6 +19,7 @@ transmcap <command> <input.mcap> [options]
 Commands:
 
 - `convert`: convert MCAP messages to `jsonl/jsonl-ext/csv/parquet`
+- `batch`: convert multiple topics using per-topic JSON settings
 - `schema`: print inferred field schema for a topic
 
 ## Supported Schema Encodings
@@ -109,6 +110,34 @@ parquet output requires `-o/--output`:
 ```bash
 transmcap convert sample.mcap --format parquet --topic /imu/data -o imu.parquet
 ```
+
+### Per-topic configuration
+
+Use `batch` to set different output formats, fields, and policies for
+each topic while decoding shared chunks once:
+
+```json
+{
+  "defaults": { "format": "parquet", "time_ns": true },
+  "topics": [
+    { "topic": "/pose", "output": "pose.parquet", "fields": ["x", "y"] },
+    { "topic": "/status", "output": "status.csv", "format": "csv" }
+  ]
+}
+```
+
+```bash
+transmcap batch sample.mcap --config topics.json --parallel
+```
+
+Each topic requires `topic` and `output`. Output paths are relative to the
+working directory, and their parent directories must exist. `defaults` is
+optional; topic settings override it. Available
+settings are `format`, `fields` (an array of field paths), `list_policy`,
+`list_flatten_size`, `array_policy`, `map_policy`, `metadata_prefix`, `time_ns`,
+and `jsonl_explicit_null`. Their values and defaults match the `convert` options.
+Topic names and output path strings must be unique. Existing outputs are
+overwritten; paths are not checked for aliases such as symbolic links.
 
 ### Custom flatten policy
 

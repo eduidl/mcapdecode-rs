@@ -2904,6 +2904,7 @@ dependencies = [
  "mcapbench",
  "mcapdecode",
  "parquet",
+ "serde",
  "serde_json",
 ]
 
