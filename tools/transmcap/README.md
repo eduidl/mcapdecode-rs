@@ -128,6 +128,8 @@ transmcap schema sample.mcap --topic /imu/data
 
 - `--topic` is required for both commands.
 - `parquet` requires `-o/--output`.
+- A topic with a schema and no messages produces a valid zero-row Parquet file,
+  with field selection and flattening policies applied. A missing schema remains an error.
 - `convert` runs sequentially by default; use `-p/--parallel` to enable parallel chunk decompression and decoding.
 - Column name collisions during flattening return an error.
 - `jsonl` preserves Arrow's existing output behavior. Use `jsonl-ext` when
