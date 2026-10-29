@@ -565,3 +565,34 @@ fn repeated_single_topic_emits_one_batch() {
         .unwrap();
     assert_eq!(topics, ["/first"]);
 }
+
+#[test]
+fn record_batch_reads_scan_chunks_without_message_indexes() {
+    let fixture = multi_topic_fixture_with_indexes(false);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+    let mut actual = BTreeMap::<String, Vec<i64>>::new();
+    reader
+        .for_each_topic_record_batch_with_options(
+            fixture.path(),
+            &["/first", "/second"],
+            &batch_options(256),
+            |topic, batch| {
+                let index = batch.schema().index_of("value").unwrap();
+                let values = batch
+                    .column(index)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                actual
+                    .entry(topic.into())
+                    .or_default()
+                    .extend(values.values());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(actual["/first"], (0..1024).collect::<Vec<_>>());
+    assert_eq!(actual["/second"], (100..1124).collect::<Vec<_>>());
+}

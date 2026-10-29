@@ -39,9 +39,9 @@ impl MessageFilter {
     /// Rejected chunks are never decompressed, so this is the read's cheapest
     /// filter and the only one that saves I/O.
     fn accepts_chunk(self, chunk_index: &mcap::records::ChunkIndex) -> bool {
-        chunk_index
-            .message_index_offsets
-            .contains_key(&self.channel_id)
+        let offsets = &chunk_index.message_index_offsets;
+        // An empty index cannot rule out a channel.
+        (offsets.is_empty() || offsets.contains_key(&self.channel_id))
             && self
                 .time_range
                 .is_none_or(|range| range.overlaps_chunk(chunk_index))
@@ -69,10 +69,8 @@ impl McapReader {
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        // TODO(P2a): When a limit is set, use per-channel MessageIndex entries to
-        // identify the minimal set of chunks that can satisfy it, then decode that
-        // bounded set in parallel. Message indexes are optional in MCAP, so files
-        // without them must retain this sequential, immediate-stop fallback.
+        // TODO(P2a): Use message indexes to bound the chunks needed for a limit
+        // and decode that bounded set in parallel.
         let parallel = options.parallel.unwrap_or(self.parallel);
         if parallel && options.limit.is_none() {
             self.for_each_decoded_message_parallel(mmap, summary, context, options, callback)
@@ -356,10 +354,8 @@ impl McapReader {
             .chunk_indexes
             .iter()
             .filter(|chunk| {
-                chunk
-                    .message_index_offsets
-                    .keys()
-                    .any(|id| channels.contains_key(id))
+                let offsets = &chunk.message_index_offsets;
+                (offsets.is_empty() || offsets.keys().any(|id| channels.contains_key(id)))
                     && options
                         .time_range
                         .is_none_or(|range| range.overlaps_chunk(chunk))
