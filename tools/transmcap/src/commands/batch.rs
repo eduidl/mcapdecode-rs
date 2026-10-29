@@ -266,23 +266,8 @@ pub(super) fn run_conversion(
             bail!("duplicate topic: {}", spec.name);
         }
         if let Some(output) = &spec.output {
-            let absolute = std::path::absolute(output)?;
-            let resolved = if absolute.exists() {
-                absolute.canonicalize()?
-            } else {
-                absolute
-                    .parent()
-                    .context("output has no parent")?
-                    .canonicalize()?
-                    .join(absolute.file_name().context("output has no filename")?)
-            };
-            if !outputs.insert(resolved.clone()) {
+            if !outputs.insert(output.as_os_str().to_owned()) {
                 bail!("duplicate output: {}", output.display());
-            }
-            if input.canonicalize()? == resolved
-                || config_path.is_some_and(|p| p.canonicalize().is_ok_and(|p| p == resolved))
-            {
-                bail!("output must not overwrite input or config");
             }
         } else if matches!(spec.format, OutputFormat::Parquet) {
             bail!("Parquet output requires -o <file>");

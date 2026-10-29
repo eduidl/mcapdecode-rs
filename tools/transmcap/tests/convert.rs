@@ -605,7 +605,6 @@ fn batch_rejects_invalid_settings_before_writing() {
         serde_json::json!({"topics":[first, {"topic":"/first", "output":"ignored"}]}).to_string(),
         serde_json::json!({"topics":[first, {"topic":"/second", "output":output}]}).to_string(),
         serde_json::json!({"topics":[first, {"topic":"/missing", "output":"ignored"}]}).to_string(),
-        serde_json::json!({"topics":[first, {"topic":"/second", "output":input}]}).to_string(),
         serde_json::json!({"topics":[first, {"topic":"/second", "output":"ignored", "unknown":true}]}).to_string(),
         serde_json::json!({"topics":[first, {"topic":"/second", "output":"ignored", "list_flatten_size":2}]}).to_string(),
     ] {
@@ -617,6 +616,37 @@ fn batch_rejects_invalid_settings_before_writing() {
     }
     fs::remove_file(input).unwrap();
     fs::remove_file(config).unwrap();
+}
+
+#[test]
+fn batch_rejects_identical_output_paths_before_overwriting() {
+    let input = common::temporary_output_path("mcap");
+    let config = common::temporary_output_path("json");
+    let output = common::temporary_output_path("jsonl");
+    write_multi_topic_mcap(&input);
+    fs::write(&output, "existing output").unwrap();
+    fs::write(
+        &config,
+        serde_json::json!({"topics": [
+            {"topic": "/first", "output": output},
+            {"topic": "/second", "output": output}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_transmcap"))
+        .arg("batch")
+        .arg(&input)
+        .arg("--config")
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("duplicate output"));
+    assert_eq!(fs::read_to_string(&output).unwrap(), "existing output");
+    for path in [&input, &config, &output] {
+        fs::remove_file(path).unwrap();
+    }
 }
 
 #[test]

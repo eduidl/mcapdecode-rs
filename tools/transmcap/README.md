@@ -136,7 +136,8 @@ optional; topic settings override it. Available
 settings are `format`, `fields` (an array of field paths), `list_policy`,
 `list_flatten_size`, `array_policy`, `map_policy`, `metadata_prefix`, `time_ns`,
 and `jsonl_explicit_null`. Their values and defaults match the `convert` options.
-Topic names and output paths must be unique.
+Topic names and output path strings must be unique. Existing outputs are
+overwritten; paths are not checked for aliases such as symbolic links.
 
 ### Custom flatten policy
 
