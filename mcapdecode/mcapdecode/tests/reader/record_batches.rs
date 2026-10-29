@@ -1,6 +1,118 @@
+use arrow::array::Int64Array;
+use mcapdecode::{MetadataColumns, RecordBatchOptions};
+use memmap2::Mmap;
+
 use super::*;
 
-#[cfg(feature = "arrow")]
+fn chunk_index_count(path: &Path) -> usize {
+    let file = File::open(path).unwrap();
+    let mmap = unsafe { Mmap::map(&file) }.unwrap();
+    let summary = mcap::Summary::read(&mmap).unwrap().unwrap();
+    summary.chunk_indexes.len()
+}
+
+fn batch_options(batch_size: usize) -> RecordBatchOptions {
+    RecordBatchOptions {
+        batch_size,
+        ..RecordBatchOptions::default()
+    }
+}
+
+fn collect_i64_values(
+    reader: &McapReader,
+    path: &Path,
+    topic: &str,
+    options: &RecordBatchOptions,
+) -> Vec<i64> {
+    let mut values = Vec::new();
+    reader
+        .for_each_record_batch_with_options(path, topic, options, |batch| {
+            let value_idx = batch
+                .schema()
+                .index_of("value")
+                .expect("missing 'value' column");
+            let values_col = batch
+                .column(value_idx)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .expect("expected Int64Array for 'value' column");
+
+            for i in 0..values_col.len() {
+                values.push(values_col.value(i));
+            }
+            Ok(())
+        })
+        .unwrap();
+    values
+}
+
+fn collect_batch_rows(
+    reader: &McapReader,
+    path: &Path,
+    topic: &str,
+    options: &RecordBatchOptions,
+) -> Vec<usize> {
+    let mut batch_rows = Vec::new();
+    reader
+        .for_each_record_batch_with_options(path, topic, options, |batch| {
+            batch_rows.push(batch.num_rows());
+            Ok(())
+        })
+        .unwrap();
+    batch_rows
+}
+
+/// Derives a payload field named `log_time`, which is what a metadata column
+/// is called under the default naming.
+struct CollidingJsonDecoder;
+
+impl MessageDecoder for CollidingJsonDecoder {
+    fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
+    }
+
+    fn build_topic_decoder(
+        &self,
+        _schema_name: &str,
+        _schema_data: &[u8],
+    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
+        Ok(Box::new(TestJsonTopicDecoder {
+            field_defs: vec![FieldDef::new("log_time", DataTypeDef::I64, true)].into(),
+        }))
+    }
+}
+
+/// Declares an integer field but produces a string to exercise Arrow conversion
+/// failures at the public reader boundary.
+struct MismatchedJsonDecoder;
+
+impl MessageDecoder for MismatchedJsonDecoder {
+    fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
+    }
+
+    fn build_topic_decoder(
+        &self,
+        _schema_name: &str,
+        _schema_data: &[u8],
+    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
+        Ok(Box::new(MismatchedJsonTopicDecoder))
+    }
+}
+
+struct MismatchedJsonTopicDecoder;
+
+impl TopicDecoder for MismatchedJsonTopicDecoder {
+    fn decode(&self, _message_data: &[u8]) -> Result<Value, DecoderError> {
+        Ok(Value::Struct(vec![Value::string("not an integer")]))
+    }
+
+    fn field_defs(&self) -> &FieldDefs {
+        static FIELDS: std::sync::OnceLock<FieldDefs> = std::sync::OnceLock::new();
+        FIELDS.get_or_init(|| vec![FieldDef::new("value", DataTypeDef::I64, true)].into())
+    }
+}
+
 #[test]
 fn for_each_record_batch_without_decoder_returns_error() {
     let reader = McapReader::new();
@@ -12,7 +124,6 @@ fn for_each_record_batch_without_decoder_returns_error() {
     assert!(matches!(err, McapReaderError::NoDecoder { .. }));
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_errors_when_decoder_is_missing_contains_message() {
     let reader = McapReader::builder().build();
@@ -26,7 +137,6 @@ fn for_each_record_batch_errors_when_decoder_is_missing_contains_message() {
     assert!(err.to_string().contains("no decoder registered"));
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_unknown_topic_returns_error() {
     let mut reader = McapReader::new();
@@ -40,7 +150,6 @@ fn for_each_record_batch_unknown_topic_returns_error() {
     assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_errors_when_schema_is_missing() {
     let mut reader = McapReader::new();
@@ -51,7 +160,6 @@ fn for_each_record_batch_errors_when_schema_is_missing() {
     assert!(matches!(err, McapReaderError::SchemaNotAvailable));
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_propagates_callback_error() {
     let mut reader = McapReader::new();
@@ -73,7 +181,6 @@ fn for_each_record_batch_propagates_callback_error() {
     assert_eq!(inner.to_string(), "callback failed");
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_reports_arrow_conversion_errors_separately() {
     let fixture = write_chunked_fixture("arrow-conversion-error", &[br#"{"value":1}"#]);
@@ -88,7 +195,6 @@ fn for_each_record_batch_reports_arrow_conversion_errors_separately() {
     assert!(matches!(err, McapReaderError::ArrowConvert(_)));
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_emits_batches_by_batch_size() {
     let reader = McapReader::builder()
@@ -105,7 +211,6 @@ fn for_each_record_batch_emits_batches_by_batch_size() {
     assert_eq!(batch_rows, vec![1, 1]);
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_treats_zero_batch_size_as_one() {
     let reader = McapReader::builder()
@@ -122,7 +227,6 @@ fn for_each_record_batch_treats_zero_batch_size_as_one() {
     assert_eq!(batch_rows, vec![1, 1]);
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_defaults_to_a_single_batch() {
     let reader = McapReader::builder()
@@ -140,7 +244,6 @@ fn for_each_record_batch_defaults_to_a_single_batch() {
     assert_eq!(batch_rows, vec![2]);
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_flushes_final_partial_batch() {
     let reader = McapReader::builder()
@@ -157,7 +260,6 @@ fn for_each_record_batch_flushes_final_partial_batch() {
     assert_eq!(batch_rows, vec![2]);
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_propagates_callback_error_with_builder_decoder() {
     let reader = McapReader::builder()
@@ -176,7 +278,6 @@ fn for_each_record_batch_propagates_callback_error_with_builder_decoder() {
     assert!(err.to_string().contains("callback failed"));
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn register_shared_decoder_decodes_messages() {
     let mut reader = McapReader::new();
@@ -191,7 +292,6 @@ fn register_shared_decoder_decodes_messages() {
     assert_eq!(values, vec![1, 2]);
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
     let fixture = write_chunked_fixture(
@@ -226,7 +326,6 @@ fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
     );
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixture() {
     let fixture = write_chunked_fixture(
@@ -250,7 +349,6 @@ fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixtur
     ));
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
     // Consumers that must declare a schema up front take it from
@@ -303,7 +401,6 @@ fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
     }
 }
 
-#[cfg(feature = "arrow")]
 #[test]
 fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
     let fixture = write_chunked_fixture("batch-schema-collision", &[br#"{"value":1}"#]);
