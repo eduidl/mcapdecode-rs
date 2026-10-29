@@ -8,21 +8,15 @@ use std::{
     },
 };
 
-#[cfg(feature = "arrow")]
-use arrow::array::Int64Array;
 use mcap::{WriteOptions, Writer, records::MessageHeader};
 use mcapdecode::{
     McapReader, McapReaderError, PreparedTopic, ReadOptions, TimeRange, TopicDecodeStatus,
     TopicInfo,
 };
-#[cfg(feature = "arrow")]
-use mcapdecode::{MetadataColumns, RecordBatchOptions};
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,
 };
-#[cfg(feature = "arrow")]
-use memmap2::Mmap;
 
 static TEMP_FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -134,68 +128,6 @@ fn write_duplicate_topic_fixture(name: &str) -> TempFixture {
     TempFixture { path }
 }
 
-#[cfg(feature = "arrow")]
-fn chunk_index_count(path: &Path) -> usize {
-    let file = File::open(path).unwrap();
-    let mmap = unsafe { Mmap::map(&file) }.unwrap();
-    let summary = mcap::Summary::read(&mmap).unwrap().unwrap();
-    summary.chunk_indexes.len()
-}
-
-#[cfg(feature = "arrow")]
-fn batch_options(batch_size: usize) -> RecordBatchOptions {
-    RecordBatchOptions {
-        batch_size,
-        ..RecordBatchOptions::default()
-    }
-}
-
-#[cfg(feature = "arrow")]
-fn collect_i64_values(
-    reader: &McapReader,
-    path: &Path,
-    topic: &str,
-    options: &RecordBatchOptions,
-) -> Vec<i64> {
-    let mut values = Vec::new();
-    reader
-        .for_each_record_batch_with_options(path, topic, options, |batch| {
-            let value_idx = batch
-                .schema()
-                .index_of("value")
-                .expect("missing 'value' column");
-            let values_col = batch
-                .column(value_idx)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .expect("expected Int64Array for 'value' column");
-
-            for i in 0..values_col.len() {
-                values.push(values_col.value(i));
-            }
-            Ok(())
-        })
-        .unwrap();
-    values
-}
-
-#[cfg(feature = "arrow")]
-fn collect_batch_rows(
-    reader: &McapReader,
-    path: &Path,
-    topic: &str,
-    options: &RecordBatchOptions,
-) -> Vec<usize> {
-    let mut batch_rows = Vec::new();
-    reader
-        .for_each_record_batch_with_options(path, topic, options, |batch| {
-            batch_rows.push(batch.num_rows());
-            Ok(())
-        })
-        .unwrap();
-    batch_rows
-}
-
 fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
     let mut values = Vec::new();
     reader
@@ -277,63 +209,6 @@ impl TopicDecoder for TestJsonTopicDecoder {
     }
 }
 
-/// Derives a payload field named `log_time`, which is what a metadata column
-/// is called under the default naming.
-#[cfg(feature = "arrow")]
-struct CollidingJsonDecoder;
-
-#[cfg(feature = "arrow")]
-impl MessageDecoder for CollidingJsonDecoder {
-    fn encoding_key(&self) -> EncodingKey {
-        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
-    }
-
-    fn build_topic_decoder(
-        &self,
-        _schema_name: &str,
-        _schema_data: &[u8],
-    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
-        Ok(Box::new(TestJsonTopicDecoder {
-            field_defs: vec![FieldDef::new("log_time", DataTypeDef::I64, true)].into(),
-        }))
-    }
-}
-
-/// Declares an integer field but produces a string to exercise Arrow conversion
-/// failures at the public reader boundary.
-#[cfg(feature = "arrow")]
-struct MismatchedJsonDecoder;
-
-#[cfg(feature = "arrow")]
-impl MessageDecoder for MismatchedJsonDecoder {
-    fn encoding_key(&self) -> EncodingKey {
-        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
-    }
-
-    fn build_topic_decoder(
-        &self,
-        _schema_name: &str,
-        _schema_data: &[u8],
-    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
-        Ok(Box::new(MismatchedJsonTopicDecoder))
-    }
-}
-
-#[cfg(feature = "arrow")]
-struct MismatchedJsonTopicDecoder;
-
-#[cfg(feature = "arrow")]
-impl TopicDecoder for MismatchedJsonTopicDecoder {
-    fn decode(&self, _message_data: &[u8]) -> Result<Value, DecoderError> {
-        Ok(Value::Struct(vec![Value::string("not an integer")]))
-    }
-
-    fn field_defs(&self) -> &FieldDefs {
-        static FIELDS: std::sync::OnceLock<FieldDefs> = std::sync::OnceLock::new();
-        FIELDS.get_or_init(|| vec![FieldDef::new("value", DataTypeDef::I64, true)].into())
-    }
-}
-
 struct CountingTestJsonDecoder(Arc<AtomicUsize>);
 
 impl MessageDecoder for CountingTestJsonDecoder {
@@ -371,12 +246,8 @@ impl TopicDecoder for CountingTestJsonTopicDecoder {
     }
 }
 
-#[path = "reader/read_options.rs"]
+mod core;
 mod read_options;
 
-#[path = "reader/core.rs"]
-mod core;
-
 #[cfg(feature = "arrow")]
-#[path = "reader/arrow.rs"]
 mod record_batches;
