@@ -87,6 +87,45 @@ fn write_chunked_fixture(name: &str, payloads: &[&[u8]]) -> TempFixture {
     TempFixture { path }
 }
 
+fn multi_topic_fixture() -> TempFixture {
+    let path = temp_fixture_path("multi-topic");
+    let mut writer = Writer::with_options(
+        File::create(&path).unwrap(),
+        WriteOptions::new().chunk_size(Some(128)),
+    )
+    .unwrap();
+    let schema = writer
+        .add_schema("test.Msg", "jsonschema", br#"{"type":"object"}"#)
+        .unwrap();
+    let channels: Vec<_> = ["/first", "/second", "/empty"]
+        .iter()
+        .map(|topic| {
+            writer
+                .add_channel(schema, topic, "json", &BTreeMap::new())
+                .unwrap()
+        })
+        .collect();
+    // Enough interleaved chunks to exercise backpressure when a callback fails.
+    for i in 0..1024 {
+        for (topic_index, &channel_id) in channels[..2].iter().enumerate() {
+            let data = format!("{{\"value\":{}}}", i + topic_index * 100);
+            writer
+                .write_to_known_channel(
+                    &MessageHeader {
+                        channel_id,
+                        sequence: i as u32,
+                        log_time: i as u64,
+                        publish_time: i as u64,
+                    },
+                    data.as_bytes(),
+                )
+                .unwrap();
+        }
+    }
+    writer.finish().unwrap();
+    TempFixture { path }
+}
+
 fn write_duplicate_topic_fixture(name: &str) -> TempFixture {
     let path = temp_fixture_path(name);
     let file = File::create(&path).unwrap();

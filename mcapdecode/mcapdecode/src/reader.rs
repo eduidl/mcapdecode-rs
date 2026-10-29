@@ -175,10 +175,10 @@ impl McapReader {
         path: &Path,
         topic: &str,
         options: &ReadOptions,
-        callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
-        self.with_prepared_topic(path, topic, |prepared| {
-            prepared.for_each_decoded_message_with_options(options, callback)
+        self.for_each_topic_decoded_message_with_options(path, &[topic], options, |_, message| {
+            callback(message)
         })
     }
 
