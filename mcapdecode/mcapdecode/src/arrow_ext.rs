@@ -4,7 +4,7 @@ use arrow::record_batch::RecordBatch;
 use mcapdecode_arrow::{MessageBatchSchema, MetadataColumns};
 use mcapdecode_core::DecodedMessage;
 
-use crate::{McapReader, McapReaderError, PreparedTopic, ReadOptions};
+use crate::{McapReader, McapReaderError, ReadOptions};
 
 /// Options for Arrow RecordBatch reads.
 ///
@@ -85,51 +85,74 @@ impl McapReader {
         options: &RecordBatchOptions,
         mut callback: impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
-        self.with_prepared_topic(path, topic, |prepared| {
-            // Built once, before the read, so every batch shares one schema.
-            let batch_schema = prepared.batch_schema(options)?;
-            prepared.for_each_record_batch_with_schema(&batch_schema, options, &mut callback)
+        self.for_each_topic_record_batch_with_options(path, &[topic], options, |_, batch| {
+            callback(batch)
+        })
+    }
+
+    /// Read selected topics as Arrow batches, sharing chunk decompression.
+    /// Rows remain in file order within each topic; empty topics emit no batches.
+    /// Filtering, offset and limit apply independently to each topic.
+    /// Duplicate topics are read once.
+    pub fn for_each_topic_record_batch_with_options(
+        &self,
+        path: &Path,
+        topics: &[&str],
+        options: &RecordBatchOptions,
+        mut callback: impl FnMut(
+            &str,
+            RecordBatch,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        if topics.is_empty() {
+            return Ok(());
+        }
+        self.with_topic_contexts(path, topics, |mmap, summary, topics, contexts| {
+            let schemas: Vec<_> = contexts
+                .iter()
+                .map(|context| batch_schema_for_context(context, options))
+                .collect::<Result<_, _>>()?;
+            let batch_size = options.effective_batch_size();
+            let mut rows: Vec<_> = topics
+                .iter()
+                .map(|_| Vec::with_capacity(batch_size))
+                .collect();
+            self.for_each_topic_decoded_message_impl(
+                mmap,
+                summary,
+                contexts,
+                &options.read_options,
+                &mut |i, message| {
+                    rows[i].push(message);
+                    if rows[i].len() >= batch_size {
+                        flush_batch(&schemas[i], &mut rows[i], &mut |batch| {
+                            callback(topics[i], batch)
+                        })?;
+                    }
+                    Ok(())
+                },
+            )?;
+            for (i, row_buffer) in rows.iter_mut().enumerate() {
+                flush_batch(&schemas[i], row_buffer, &mut |batch| {
+                    callback(topics[i], batch)
+                })?;
+            }
+            Ok(())
         })
     }
 }
 
-impl PreparedTopic<'_> {
-    /// Emit batches using a caller-provided schema derived from this topic.
-    ///
-    /// Keeping schema derivation and message traversal on the same prepared
-    /// topic guarantees that consumers which need the schema up front receive
-    /// batches built with that exact schema.
-    pub(crate) fn for_each_record_batch_with_schema(
-        &self,
-        batch_schema: &MessageBatchSchema,
-        options: &RecordBatchOptions,
-        callback: &mut impl FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        let batch_size = options.effective_batch_size();
-        let mut rows = Vec::with_capacity(batch_size);
-        self.for_each_decoded_message_with_options_internal(
-            &options.read_options,
-            &mut |decoded| {
-                push_decoded_message(batch_size, batch_schema, &mut rows, decoded, callback)
-            },
-        )?;
-        flush_batch(batch_schema, &mut rows, callback)
-    }
-}
-
-/// The single place the emitted Arrow schema is derived, so
-/// [`McapReader::topic_batch_schema`] and the batches cannot disagree.
-pub(crate) fn batch_schema_for(
-    prepared: &PreparedTopic<'_>,
+pub(crate) fn batch_schema_for_context(
+    context: &crate::decode::TopicDecodeContext,
     options: &RecordBatchOptions,
 ) -> Result<MessageBatchSchema, McapReaderError> {
-    if prepared.field_defs().is_empty() {
+    if context.field_defs.is_empty() {
         return Err(McapReaderError::EmptyDerivedSchema {
-            schema_name: prepared.schema_name().to_string(),
+            schema_name: context.schema_name.clone(),
         });
     }
     Ok(MessageBatchSchema::from_field_defs(
-        prepared.field_defs(),
+        &context.field_defs,
         options.metadata.clone(),
     )?)
 }
@@ -149,21 +172,4 @@ where
     let batch = batch_schema.to_record_batch(rows.as_slice())?;
     rows.clear();
     callback(batch).map_err(McapReaderError::Callback)
-}
-
-fn push_decoded_message<F>(
-    batch_size: usize,
-    batch_schema: &MessageBatchSchema,
-    rows: &mut Vec<DecodedMessage>,
-    decoded: DecodedMessage,
-    callback: &mut F,
-) -> Result<(), McapReaderError>
-where
-    F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-{
-    rows.push(decoded);
-    if rows.len() >= batch_size {
-        flush_batch(batch_schema, rows, callback)?;
-    }
-    Ok(())
 }

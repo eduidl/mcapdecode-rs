@@ -494,3 +494,110 @@ fn topic_schema_exposes_named_ros_types_without_message_payloads() {
         assert_eq!(displayed, expected_display, "{encoding}");
     }
 }
+
+#[test]
+fn multi_topic_decoded_reads_work_without_arrow() {
+    let fixture = multi_topic_fixture();
+    for parallel in [false, true] {
+        let reader = McapReader::builder()
+            .with_decoder(Box::new(TestJsonDecoder))
+            .with_parallel(parallel)
+            .build();
+        for options in [
+            ReadOptions::default(),
+            ReadOptions {
+                offset: 2,
+                limit: Some(5),
+                ..ReadOptions::default()
+            },
+            ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(3),
+                    end: Some(9),
+                }),
+                ..ReadOptions::default()
+            },
+        ] {
+            let mut actual = BTreeMap::<String, Vec<(u64, u64, i64)>>::new();
+            reader
+                .for_each_topic_decoded_message_with_options(
+                    fixture.path(),
+                    &["/first", "/second", "/first", "/empty", "/second"],
+                    &options,
+                    |topic, message| {
+                        let Value::Struct(fields) = message.value else {
+                            panic!("expected struct")
+                        };
+                        let Value::I64(value) = fields[0] else {
+                            panic!("expected i64")
+                        };
+                        actual.entry(topic.into()).or_default().push((
+                            message.log_time,
+                            message.publish_time,
+                            value,
+                        ));
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            for topic in ["/first", "/second", "/empty"] {
+                let mut expected = Vec::new();
+                reader
+                    .for_each_decoded_message_with_options(
+                        fixture.path(),
+                        topic,
+                        &options,
+                        |message| {
+                            let Value::Struct(fields) = message.value else {
+                                panic!("expected struct")
+                            };
+                            let Value::I64(value) = fields[0] else {
+                                panic!("expected i64")
+                            };
+                            expected.push((message.log_time, message.publish_time, value));
+                            Ok(())
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(actual.get(topic).cloned().unwrap_or_default(), expected);
+            }
+        }
+        let mut calls = 0;
+        let error = reader
+            .for_each_topic_decoded_message(fixture.path(), &["/first", "/second"], |_, _| {
+                calls += 1;
+                Err("stop reading".into())
+            })
+            .unwrap_err();
+        assert_eq!(calls, 1);
+        let McapReaderError::Callback(inner) = error else {
+            panic!("wrong error kind")
+        };
+        assert!(inner.downcast_ref::<McapReaderError>().is_none());
+    }
+}
+
+#[test]
+fn repeated_single_topic_is_read_once() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+    let options = ReadOptions {
+        limit: Some(1),
+        ..Default::default()
+    };
+    let mut topics = Vec::new();
+    reader
+        .for_each_topic_decoded_message_with_options(
+            fixture.path(),
+            &["/first", "/first"],
+            &options,
+            |topic, _| {
+                topics.push(topic.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(topics, ["/first"]);
+}

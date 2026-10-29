@@ -43,7 +43,7 @@ impl PreparedTopic<'_> {
         &self,
         options: &RecordBatchOptions,
     ) -> Result<MessageBatchSchema, McapReaderError> {
-        crate::arrow_ext::batch_schema_for(self, options)
+        crate::arrow_ext::batch_schema_for_context(&self.context, options)
     }
 
     /// Read decoded messages subject to `options` and emit them one-by-one to
@@ -53,22 +53,12 @@ impl PreparedTopic<'_> {
         options: &ReadOptions,
         mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
-        self.for_each_decoded_message_with_options_internal(options, &mut |decoded| {
-            callback(decoded).map_err(McapReaderError::Callback)
-        })
-    }
-
-    pub(crate) fn for_each_decoded_message_with_options_internal(
-        &self,
-        options: &ReadOptions,
-        callback: &mut impl FnMut(DecodedMessage) -> Result<(), McapReaderError>,
-    ) -> Result<(), McapReaderError> {
         self.reader.for_each_decoded_message_impl(
             &self.mmap,
             &self.summary,
             &self.context,
             options,
-            callback,
+            &mut |decoded| callback(decoded).map_err(McapReaderError::Callback),
         )
     }
 }

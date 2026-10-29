@@ -94,6 +94,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Multiple Topics
+
+Read multiple topics in one pass, sharing chunk reads and decompression. The
+callback receives the topic name, and repeated topic names are read only once:
+
+```rust
+reader.for_each_topic_decoded_message(
+    Path::new("sample.mcap"),
+    &["/localization/pose", "/localization/status"],
+    |topic, message| {
+        println!("{topic}: {}", message.publish_time);
+        Ok(())
+    },
+)?;
+```
+
+Use `for_each_topic_decoded_message_with_options` for per-topic filtering, offset,
+and limit. With `arrow` enabled, `for_each_topic_record_batch_with_options` uses
+the same traversal and adds Arrow batch conversion.
+
 ## Related Crates in This Workspace
 
 - `mcapdecode-core`: schema/value model and shared errors

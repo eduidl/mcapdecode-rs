@@ -429,3 +429,139 @@ fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
     assert_eq!(schema.schema().field(0).name(), "_log_time");
     assert_eq!(schema.schema().field(2).name(), "log_time");
 }
+
+#[test]
+fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
+    let fixture = multi_topic_fixture();
+    for parallel in [false, true] {
+        let reader = McapReader::builder()
+            .with_decoder(Box::new(TestJsonDecoder))
+            .with_parallel(parallel)
+            .build();
+        for read_options in [
+            ReadOptions::default(),
+            ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(3),
+                    end: Some(12),
+                }),
+                ..ReadOptions::default()
+            },
+            ReadOptions {
+                offset: 3,
+                limit: Some(5),
+                ..ReadOptions::default()
+            },
+            ReadOptions {
+                limit: Some(0),
+                ..ReadOptions::default()
+            },
+        ] {
+            let options = RecordBatchOptions {
+                batch_size: 3,
+                read_options,
+                ..RecordBatchOptions::default()
+            };
+            let mut actual = BTreeMap::<String, Vec<i64>>::new();
+            reader
+                .for_each_topic_record_batch_with_options(
+                    fixture.path(),
+                    &["/first", "/second", "/first", "/empty", "/second"],
+                    &options,
+                    |topic, batch| {
+                        let index = batch.schema().index_of("value").unwrap();
+                        let array = batch
+                            .column(index)
+                            .as_any()
+                            .downcast_ref::<Int64Array>()
+                            .unwrap();
+                        assert!(batch.num_rows() <= 3);
+                        actual
+                            .entry(topic.into())
+                            .or_default()
+                            .extend(array.values());
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            for topic in ["/first", "/second", "/empty"] {
+                assert_eq!(
+                    actual.get(topic).cloned().unwrap_or_default(),
+                    collect_i64_values(&reader, fixture.path(), topic, &options)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+    let options = batch_options(1);
+    {
+        let mut called = false;
+        let err = reader
+            .for_each_topic_record_batch_with_options(
+                fixture.path(),
+                &["/first", "/unknown"],
+                &options,
+                |_, _| {
+                    called = true;
+                    Ok(())
+                },
+            )
+            .unwrap_err();
+        assert!(!called);
+        assert!(matches!(err, McapReaderError::TopicNotFound));
+    }
+    let mut calls = 0;
+    let err = reader
+        .for_each_topic_record_batch_with_options(
+            fixture.path(),
+            &["/first", "/second"],
+            &options,
+            |_, _| {
+                calls += 1;
+                Err("stop writing".into())
+            },
+        )
+        .unwrap_err();
+    assert_eq!(calls, 1);
+    let McapReaderError::Callback(inner) = err else {
+        panic!("wrong error kind")
+    };
+    assert!(inner.downcast_ref::<McapReaderError>().is_none());
+    assert_eq!(inner.to_string(), "stop writing");
+}
+
+#[test]
+fn repeated_single_topic_emits_one_batch() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+    let options = RecordBatchOptions {
+        read_options: ReadOptions {
+            limit: Some(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut topics = Vec::new();
+    reader
+        .for_each_topic_record_batch_with_options(
+            fixture.path(),
+            &["/first", "/first"],
+            &options,
+            |topic, batch| {
+                assert_eq!(batch.num_rows(), 1);
+                topics.push(topic.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(topics, ["/first"]);
+}
