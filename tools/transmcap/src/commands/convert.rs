@@ -1,6 +1,7 @@
 use std::{path::PathBuf, str::FromStr};
 
 use anyhow::{Result, bail};
+use arrow::record_batch::RecordBatch;
 use clap::Args;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcapdecode::{
@@ -128,31 +129,39 @@ impl ConvertArgs {
             ..RecordBatchOptions::default()
         };
 
+        let mut write_batch = |batch: RecordBatch| -> Result<()> {
+            let projected = if let Some(fields) = &self.fields {
+                project_record_batch(&batch, fields)?
+            } else {
+                batch
+            };
+            let (flat_batch, dropped_columns) =
+                flatten_record_batch(&projected, None, &flatten_policy)?;
+            if !dropped_warned && !dropped_columns.is_empty() {
+                dropped_warned = true;
+                eprintln!(
+                    "Warning: output policy skipped columns: {}",
+                    dropped_columns.join(", ")
+                );
+            }
+            let n = flat_batch.num_rows() as u64;
+            writer.write_batch(flat_batch)?;
+            pb.inc(n);
+            Ok(())
+        };
+
         reader.for_each_record_batch_with_options(
             &self.input,
             &self.topic,
             &batch_options,
-            |batch| {
-                let projected = if let Some(fields) = &self.fields {
-                    project_record_batch(&batch, fields)?
-                } else {
-                    batch
-                };
-                let (flat_batch, dropped_columns) =
-                    flatten_record_batch(&projected, None, &flatten_policy)?;
-                if !dropped_warned && !dropped_columns.is_empty() {
-                    dropped_warned = true;
-                    eprintln!(
-                        "Warning: output policy skipped columns: {}",
-                        dropped_columns.join(", ")
-                    );
-                }
-                let n = flat_batch.num_rows() as u64;
-                writer.write_batch(flat_batch)?;
-                pb.inc(n);
-                Ok(())
-            },
+            |batch| write_batch(batch).map_err(Into::into),
         )?;
+
+        // No batches are emitted for an empty topic, but Parquet still needs its schema.
+        if count == 0 && matches!(self.format, OutputFormat::Parquet) {
+            let schema = reader.topic_batch_schema(&self.input, &self.topic, &batch_options)?;
+            write_batch(RecordBatch::new_empty(schema.schema().clone()))?;
+        }
 
         writer.finish()?;
         // Reported here rather than inside the writer so that benchmarking a parquet

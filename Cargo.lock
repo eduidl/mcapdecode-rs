@@ -2900,6 +2900,7 @@ dependencies = [
  "clap",
  "criterion",
  "indicatif",
+ "mcap",
  "mcapbench",
  "mcapdecode",
  "parquet",

@@ -1,5 +1,6 @@
-use std::{fs, process::Command};
+use std::{collections::BTreeMap, fs, path::Path, process::Command};
 
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde_json::Value;
 
 mod common;
@@ -247,6 +248,113 @@ fn convert_parquet_writes_a_nonempty_file() {
     );
     assert!(fs::metadata(&path).unwrap().len() > 0);
     fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn convert_parquet_writes_an_empty_file_with_the_selected_schema() {
+    let input = common::temporary_output_path("mcap");
+    write_empty_mcap(&input, true);
+
+    for (options, expected_columns) in [
+        (
+            vec![],
+            vec![
+                "@log_time",
+                "@publish_time",
+                "velocity.x",
+                "velocity.y",
+                "velocity.z",
+            ],
+        ),
+        (
+            vec![
+                "--metadata-prefix",
+                "mcap_",
+                "--time-ns",
+                "--fields",
+                "mcap_log_time,velocity.x",
+                "--parallel",
+            ],
+            vec!["mcap_log_time", "velocity.x"],
+        ),
+    ] {
+        let path = common::temporary_output_path("parquet");
+        let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
+            .arg("convert")
+            .arg(&input)
+            .args(["--topic", "/empty", "--format", "parquet", "--output"])
+            .arg(&path)
+            .args(&options)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let builder =
+            ParquetRecordBatchReaderBuilder::try_new(fs::File::open(&path).unwrap()).unwrap();
+        assert_eq!(builder.metadata().file_metadata().num_rows(), 0);
+        let columns: Vec<_> = builder
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect();
+        assert_eq!(columns, expected_columns);
+        if options.contains(&"--time-ns") {
+            assert_eq!(
+                builder.schema().field(0).data_type(),
+                &arrow::datatypes::DataType::Int64
+            );
+        }
+        assert_eq!(builder.build().unwrap().count(), 0);
+        fs::remove_file(path).unwrap();
+    }
+
+    fs::remove_file(input).unwrap();
+}
+
+#[test]
+fn convert_parquet_rejects_an_empty_topic_without_a_schema() {
+    let input = common::temporary_output_path("mcap");
+    let path = common::temporary_output_path("parquet");
+    write_empty_mcap(&input, false);
+    let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
+        .arg("convert")
+        .arg(&input)
+        .args(["--topic", "/empty", "--format", "parquet", "--output"])
+        .arg(&path)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("schema not available"));
+    assert!(!path.exists());
+    fs::remove_file(input).unwrap();
+}
+
+fn write_empty_mcap(path: &Path, with_schema: bool) {
+    let mut writer = mcap::Writer::new(fs::File::create(path).unwrap()).unwrap();
+    let schema_id = if with_schema {
+        writer
+            .add_schema(
+                "test_msgs/msg/Velocity",
+                "ros2msg",
+                b"geometry_msgs/Vector3 velocity\n\
+              ================================================================================\n\
+              MSG: geometry_msgs/Vector3\n\
+              float64 x\nfloat64 y\nfloat64 z\n",
+            )
+            .unwrap()
+    } else {
+        0
+    };
+    writer
+        .add_channel(schema_id, "/empty", "cdr", &BTreeMap::new())
+        .unwrap();
+    writer.finish().unwrap();
 }
 
 #[test]
