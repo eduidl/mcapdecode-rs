@@ -359,11 +359,11 @@ impl App {
     fn open_selected_topic(&mut self) -> AppUpdate {
         if let Some(row) = self.selected_topic() {
             if let Some(reason) = row.message_list_block_reason() {
-                self.set_status(format!("Cannot open '{}': {reason}", row.topic()));
+                self.set_status(format!("Cannot open '{}': {reason}", row.label()));
                 return AppUpdate::changed();
             }
 
-            self.start_loading(row.topic().to_string(), row.info.message_count);
+            self.start_loading(row.label(), row.info.message_count);
             return AppUpdate::changed_with_request(AppRequest::StartTopicLoad);
         }
 

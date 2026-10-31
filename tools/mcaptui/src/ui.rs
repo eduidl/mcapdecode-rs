@@ -65,7 +65,7 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         };
 
         Row::new(vec![
-            Cell::from(row.info.topic.clone()),
+            Cell::from(row.label()),
             Cell::from(count),
             Cell::from(schema),
             Cell::from(encoding),

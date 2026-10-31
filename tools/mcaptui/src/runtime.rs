@@ -68,11 +68,23 @@ fn run(cli: Cli) -> Result<()> {
     let topics = reader
         .list_topics(&cli.input)
         .with_context(|| format!("failed to read topics from {}", cli.input.display()))?;
-    let mut app = App::new(topics);
+    let channels = reader
+        .list_channels(&cli.input)
+        .with_context(|| format!("failed to read channels from {}", cli.input.display()))?;
+    let mut app = App::with_channels(topics, &channels);
     let mut loader = None;
     let mut schema_cache = SchemaCache::default();
 
     if let Some(topic) = &cli.topic {
+        if app
+            .topic_rows()
+            .iter()
+            .filter(|row| row.topic() == topic)
+            .count()
+            > 1
+        {
+            bail!("topic '{topic}' has multiple channels; open one from the topic list");
+        }
         let Some(update) = app.select_topic_by_name(topic) else {
             bail!("topic '{topic}' not found");
         };
@@ -326,11 +338,8 @@ fn start_topic_loader(
 ) -> Result<()> {
     loader::cancel_loader(loader);
 
-    let topic = app
-        .selected_topic()
-        .map(|row| row.info.clone())
-        .context("no topic selected")?;
-    *loader = Some(TopicLoader::spawn(input.to_path_buf(), topic, parallel));
+    let row = app.selected_topic().context("no topic selected")?.clone();
+    *loader = Some(TopicLoader::spawn(input.to_path_buf(), row, parallel));
     Ok(())
 }
 

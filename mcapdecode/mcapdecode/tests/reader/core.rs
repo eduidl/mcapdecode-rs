@@ -1,5 +1,181 @@
 use super::*;
 
+fn split_reader(parallel: bool) -> McapReader {
+    McapReader::builder()
+        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_parallel(parallel)
+        .build()
+}
+
+fn split_channel_ids(reader: &McapReader, path: &Path) -> Vec<u16> {
+    reader
+        .list_channels(path)
+        .unwrap()
+        .into_iter()
+        .map(|channel| channel.id)
+        .collect()
+}
+
+#[test]
+fn list_channels_reports_each_channel_in_id_order() {
+    let reader = McapReader::new();
+    let fixture = write_split_topic_fixture("list-channels");
+
+    let channels = reader.list_channels(fixture.path()).unwrap();
+
+    assert!(channels.is_sorted_by_key(|channel| channel.id));
+    assert_eq!(
+        channels
+            .iter()
+            .map(|channel| channel.message_count)
+            .collect::<Vec<_>>(),
+        [Some(2), Some(2), Some(0)]
+    );
+    assert!(channels.iter().all(|channel| channel.topic == "/split"));
+    assert_eq!(channels[0].schema_name.as_deref(), Some("test.Msg"));
+    assert_eq!(channels[0].schema_encoding, "jsonschema");
+    assert_eq!(channels[0].message_encoding, "json");
+    assert_eq!(channels[0].metadata["source"], "left");
+    assert!(channels[1].metadata.is_empty());
+}
+
+#[test]
+fn list_channels_no_summary_returns_error() {
+    let reader = McapReader::new();
+    assert!(matches!(
+        reader.list_channels(&fixture_path("no_summary.mcap")),
+        Err(McapReaderError::SummaryNotAvailable)
+    ));
+}
+
+#[test]
+fn decoded_read_by_channel_id_returns_only_that_channel() {
+    let fixture = write_split_topic_fixture("decoded-by-channel");
+    for parallel in [false, true] {
+        let reader = split_reader(parallel);
+        let mut per_channel = Vec::new();
+        for id in split_channel_ids(&reader, fixture.path()) {
+            let mut log_times = Vec::new();
+            reader
+                .for_each_decoded_message_by_channel_id(fixture.path(), id, |message| {
+                    log_times.push(message.log_time);
+                    Ok(())
+                })
+                .unwrap();
+            per_channel.push(log_times);
+        }
+
+        assert_eq!(
+            per_channel,
+            [vec![1, 3], vec![2, 4], vec![]],
+            "parallel={parallel}"
+        );
+    }
+}
+
+#[test]
+fn decoded_read_by_channel_id_applies_options() {
+    let fixture = write_split_topic_fixture("decoded-by-channel-options");
+    let reader = split_reader(false);
+    let id = split_channel_ids(&reader, fixture.path())[1];
+    let mut log_times = Vec::new();
+
+    reader
+        .for_each_decoded_message_by_channel_id_with_options(
+            fixture.path(),
+            id,
+            &ReadOptions {
+                offset: 1,
+                limit: Some(1),
+                ..ReadOptions::default()
+            },
+            |message| {
+                log_times.push(message.log_time);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+    assert_eq!(log_times, [4]);
+}
+
+#[test]
+fn raw_read_by_channel_id_returns_only_that_channel() {
+    let reader = McapReader::new();
+    let fixture = write_split_topic_fixture("raw-by-channel");
+    let mut per_channel = Vec::new();
+    for id in split_channel_ids(&reader, fixture.path()) {
+        let mut log_times = Vec::new();
+        reader
+            .for_each_raw_message_by_channel_id(fixture.path(), id, |message| {
+                log_times.push(message.log_time);
+                Ok(())
+            })
+            .unwrap();
+        per_channel.push(log_times);
+    }
+
+    assert_eq!(per_channel, [vec![1, 3], vec![2, 4], vec![]]);
+}
+
+#[test]
+fn field_defs_by_channel_id_uses_that_channels_schema() {
+    let fixture = write_split_topic_fixture("field-defs-by-channel");
+    let reader = split_reader(true);
+    let names: Vec<_> = split_channel_ids(&reader, fixture.path())
+        .into_iter()
+        .map(|id| {
+            let field_defs = reader.field_defs_by_channel_id(fixture.path(), id).unwrap();
+            field_defs[0].name.clone()
+        })
+        .collect();
+
+    assert_eq!(names, ["first", "second", "empty"]);
+}
+
+#[test]
+fn channel_id_reads_report_unknown_channel() {
+    let fixture = write_split_topic_fixture("unknown-channel");
+    let reader = split_reader(true);
+    let unknown = u16::MAX;
+
+    assert!(matches!(
+        reader.field_defs_by_channel_id(fixture.path(), unknown),
+        Err(McapReaderError::ChannelNotFound)
+    ));
+    assert!(matches!(
+        reader.for_each_decoded_message_by_channel_id(fixture.path(), unknown, |_| Ok(())),
+        Err(McapReaderError::ChannelNotFound)
+    ));
+    assert!(matches!(
+        reader.for_each_raw_message_by_channel_id(fixture.path(), unknown, |_| Ok(())),
+        Err(McapReaderError::ChannelNotFound)
+    ));
+}
+
+#[test]
+fn topic_reads_reject_a_topic_with_multiple_channels() {
+    let fixture = write_split_topic_fixture("topic-multiple-channels");
+    let reader = split_reader(true);
+
+    assert!(matches!(
+        reader.topic_field_defs(fixture.path(), "/split"),
+        Err(McapReaderError::MultipleChannels)
+    ));
+    assert!(matches!(
+        reader.for_each_decoded_message(fixture.path(), "/split", |_| Ok(())),
+        Err(McapReaderError::MultipleChannels)
+    ));
+    assert!(matches!(
+        reader.for_each_raw_message(fixture.path(), "/split", |_| Ok(())),
+        Err(McapReaderError::MultipleChannels)
+    ));
+    assert!(matches!(
+        reader.message_count(fixture.path(), "/split"),
+        Err(McapReaderError::MultipleChannels)
+    ));
+}
+
 #[test]
 fn message_count_with_summary() {
     let reader = McapReader::new();

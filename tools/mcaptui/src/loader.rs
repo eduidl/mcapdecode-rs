@@ -12,12 +12,12 @@ use std::{
 
 use anyhow::Result;
 use mcapdecode::{
-    McapReader, McapReaderError, RawMessage, TopicInfo,
+    McapReader, McapReaderError, RawMessage,
     core::{DataTypeDef, DecodedMessage, DecoderError, FieldDef, FieldDefs, Value},
 };
 
 use crate::{
-    app::{App, LoadedMessage},
+    app::{App, LoadedMessage, TopicRow},
     format,
 };
 
@@ -46,11 +46,11 @@ enum LoaderEvent {
 }
 
 impl TopicLoader {
-    pub(crate) fn spawn(input: PathBuf, topic: TopicInfo, parallel: bool) -> Self {
+    pub(crate) fn spawn(input: PathBuf, row: TopicRow, parallel: bool) -> Self {
         let (sender, receiver) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_thread = Arc::clone(&cancel);
-        let topic_name = topic.topic.clone();
+        let label = row.label();
 
         let join_handle = thread::spawn(move || {
             let reader = McapReader::builder()
@@ -58,30 +58,34 @@ impl TopicLoader {
                 .with_parallel(parallel)
                 .build();
 
-            let load_result = match reader.topic_field_defs(&input, &topic_name) {
+            let field_defs = match row.channel_id {
+                Some(channel_id) => reader.field_defs_by_channel_id(&input, channel_id),
+                None => reader.topic_field_defs(&input, row.topic()),
+            };
+            let load_result = match field_defs {
                 Ok(field_defs) => load_decoded_topic(
                     &reader,
                     &input,
-                    &topic_name,
+                    &row,
                     field_defs,
                     &sender,
                     &cancel_for_thread,
                 ),
                 Err(error) if supports_raw_fallback(&error) => {
-                    load_raw_topic(&reader, &input, &topic_name, &sender, &cancel_for_thread)
+                    load_raw_topic(&reader, &input, &row, &sender, &cancel_for_thread)
                 }
                 Err(error) => Err(anyhow::Error::new(error)
-                    .context(format!("failed to load schema for topic '{}'", topic_name))),
+                    .context(format!("failed to load schema for topic '{label}'"))),
             };
 
             match load_result {
                 Ok(()) => {
-                    let _ = sender.send(LoaderEvent::Finished { topic: topic_name });
+                    let _ = sender.send(LoaderEvent::Finished { topic: label });
                 }
                 Err(error) if error.to_string() == CANCELLED_ERROR => {}
                 Err(error) => {
                     let _ = sender.send(LoaderEvent::Failed {
-                        topic: topic_name,
+                        topic: label,
                         error: error.to_string(),
                     });
                 }
@@ -178,7 +182,7 @@ fn to_loaded_message(index: usize, message: DecodedMessage) -> LoadedMessage {
 fn load_decoded_topic(
     reader: &McapReader,
     input: &Path,
-    topic_name: &str,
+    row: &TopicRow,
     field_defs: FieldDefs,
     sender: &mpsc::Sender<LoaderEvent>,
     cancel: &AtomicBool,
@@ -190,7 +194,7 @@ fn load_decoded_topic(
     let mut pending = Vec::new();
     let mut last_flush = Instant::now();
     let mut next_index = 0usize;
-    let load_result = reader.for_each_decoded_message(input, topic_name, |message| {
+    let on_message = |message| {
         if cancel.load(Ordering::Relaxed) {
             return Err(CANCELLED_ERROR.into());
         }
@@ -201,7 +205,13 @@ fn load_decoded_topic(
         flush_pending_messages(sender, &mut pending, &mut last_flush)?;
 
         Ok(())
-    });
+    };
+    let load_result = match row.channel_id {
+        Some(channel_id) => {
+            reader.for_each_decoded_message_by_channel_id(input, channel_id, on_message)
+        }
+        None => reader.for_each_decoded_message(input, row.topic(), on_message),
+    };
 
     if !pending.is_empty() {
         let _ = sender.send(LoaderEvent::Messages(pending));
@@ -213,7 +223,7 @@ fn load_decoded_topic(
 fn load_raw_topic(
     reader: &McapReader,
     input: &Path,
-    topic_name: &str,
+    row: &TopicRow,
     sender: &mpsc::Sender<LoaderEvent>,
     cancel: &AtomicBool,
 ) -> Result<()> {
@@ -227,7 +237,7 @@ fn load_raw_topic(
     let mut pending = Vec::new();
     let mut last_flush = Instant::now();
     let mut next_index = 0usize;
-    let load_result = reader.for_each_raw_message(input, topic_name, |message| {
+    let on_message = |message| {
         if cancel.load(Ordering::Relaxed) {
             return Err(CANCELLED_ERROR.into());
         }
@@ -238,7 +248,13 @@ fn load_raw_topic(
         flush_pending_messages(sender, &mut pending, &mut last_flush)?;
 
         Ok(())
-    });
+    };
+    let load_result = match row.channel_id {
+        Some(channel_id) => {
+            reader.for_each_raw_message_by_channel_id(input, channel_id, on_message)
+        }
+        None => reader.for_each_raw_message(input, row.topic(), on_message),
+    };
 
     if !pending.is_empty() {
         let _ = sender.send(LoaderEvent::Messages(pending));

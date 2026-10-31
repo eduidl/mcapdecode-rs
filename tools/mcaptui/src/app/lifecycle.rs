@@ -2,10 +2,30 @@ use super::*;
 
 impl App {
     pub fn new(topics: Vec<TopicInfo>) -> Self {
-        let topic_rows = topics
-            .into_iter()
-            .map(TopicRow::from_info)
-            .collect::<Vec<_>>();
+        Self::from_rows(topics.into_iter().map(TopicRow::from_info).collect())
+    }
+
+    /// List one row per topic, except that a topic with several channels gets
+    /// one row per channel.
+    pub fn with_channels(topics: Vec<TopicInfo>, channels: &[ChannelInfo]) -> Self {
+        let mut rows = Vec::with_capacity(topics.len());
+        for topic in topics {
+            if topic.channel_count > 1 {
+                rows.extend(
+                    channels
+                        .iter()
+                        .filter(|channel| channel.topic == topic.topic)
+                        .cloned()
+                        .map(TopicRow::from_channel),
+                );
+            } else {
+                rows.push(TopicRow::from_info(topic));
+            }
+        }
+        Self::from_rows(rows)
+    }
+
+    fn from_rows(topic_rows: Vec<TopicRow>) -> Self {
         let mut app = Self {
             session: SessionState {
                 screen: Screen::Topics,

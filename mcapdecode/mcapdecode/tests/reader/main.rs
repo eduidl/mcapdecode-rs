@@ -173,6 +173,57 @@ fn write_duplicate_topic_fixture(name: &str) -> TempFixture {
     TempFixture { path }
 }
 
+/// `/split` spans three channels with different schemas: `first` and `second`
+/// hold values 1..=4 interleaved in file order, and `empty` has no messages.
+fn write_split_topic_fixture(name: &str) -> TempFixture {
+    let path = temp_fixture_path(name);
+    let mut writer = Writer::with_options(
+        File::create(&path).unwrap(),
+        WriteOptions::new().compression(None).chunk_size(Some(1)),
+    )
+    .unwrap();
+    let metadata = BTreeMap::from([(String::from("source"), String::from("left"))]);
+    let channels: Vec<_> = ["first", "second", "empty"]
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let schema = writer
+                .add_schema("test.Msg", "jsonschema", field.as_bytes())
+                .unwrap();
+            let metadata = if index == 0 {
+                metadata.clone()
+            } else {
+                BTreeMap::new()
+            };
+            writer
+                .add_channel(schema, "/split", "json", &metadata)
+                .unwrap()
+        })
+        .collect();
+
+    for (channel_id, value) in [
+        (channels[0], 1_i64),
+        (channels[1], 2),
+        (channels[0], 3),
+        (channels[1], 4),
+    ] {
+        writer
+            .write_to_known_channel(
+                &MessageHeader {
+                    channel_id,
+                    sequence: 0,
+                    log_time: value as u64,
+                    publish_time: value as u64,
+                },
+                format!(r#"{{"value":{value}}}"#).as_bytes(),
+            )
+            .unwrap();
+    }
+
+    writer.finish().unwrap();
+    TempFixture { path }
+}
+
 fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
     let mut values = Vec::new();
     reader
@@ -251,6 +302,26 @@ impl TopicDecoder for TestJsonTopicDecoder {
 
     fn field_defs(&self) -> &FieldDefs {
         &self.field_defs
+    }
+}
+
+/// Names the single field after the schema bytes, so channels are told apart.
+struct SchemaNamedFieldDecoder;
+
+impl MessageDecoder for SchemaNamedFieldDecoder {
+    fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
+    }
+
+    fn build_topic_decoder(
+        &self,
+        _schema_name: &str,
+        schema_data: &[u8],
+    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
+        let field = std::str::from_utf8(schema_data).unwrap();
+        Ok(Box::new(TestJsonTopicDecoder {
+            field_defs: vec![FieldDef::new(field, DataTypeDef::I64, true)].into(),
+        }))
     }
 }
 

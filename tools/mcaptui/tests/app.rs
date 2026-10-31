@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind};
-use mcapdecode::{TopicInfo, core::Value};
+use mcapdecode::{ChannelInfo, TopicInfo, core::Value};
 use mcaptui::app::{App, AppRequest, AppUpdate, DetailRow, LoadedMessage, MessageFocus, Screen};
 use ratatui::layout::Rect;
 
@@ -57,6 +57,41 @@ fn message_with_rows(index: usize, rows: Vec<(&str, Option<&str>)>) -> LoadedMes
         detail_rows: Some(detail_rows),
         detail_text: Some(detail_text),
     }
+}
+
+fn channel(id: u16, name: &str, message_count: u64) -> ChannelInfo {
+    ChannelInfo {
+        id,
+        topic: name.to_string(),
+        message_count: Some(message_count),
+        schema_name: Some("test.Msg".to_string()),
+        schema_encoding: "jsonschema".to_string(),
+        message_encoding: "json".to_string(),
+        metadata: Default::default(),
+    }
+}
+
+#[test]
+fn topics_with_several_channels_get_one_row_per_channel() {
+    let channels = [
+        channel(1, "/ok", 3),
+        channel(11, "/tf-static", 0),
+        channel(22, "/tf-static", 1),
+    ];
+    let app = App::with_channels(vec![topic("/ok", 1), topic("/tf-static", 2)], &channels);
+    let rows = app.topic_rows();
+
+    assert_eq!(
+        rows.iter().map(|row| row.label()).collect::<Vec<_>>(),
+        ["/ok", "/tf-static #11", "/tf-static #22"]
+    );
+    assert_eq!(
+        rows.iter().map(|row| row.channel_id).collect::<Vec<_>>(),
+        [None, Some(11), Some(22)]
+    );
+    assert!(rows.iter().all(|row| row.is_supported()));
+    assert_eq!(rows[1].message_list_block_reason(), Some("no messages"));
+    assert_eq!(rows[2].message_list_block_reason(), None);
 }
 
 #[test]

@@ -29,6 +29,10 @@ pub enum McapReaderError {
     #[error("topic not found")]
     TopicNotFound,
 
+    /// The requested channel id was not found in the MCAP file.
+    #[error("channel not found")]
+    ChannelNotFound,
+
     /// No [`MessageDecoder`](mcapdecode_core::MessageDecoder) was registered for
     /// the encoding pair found on a channel.
     #[error(
