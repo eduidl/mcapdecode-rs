@@ -107,7 +107,7 @@ impl McapReader {
         if topics.is_empty() {
             return Ok(());
         }
-        self.with_topic_contexts(path, topics, |mmap, summary, topics, contexts| {
+        self.with_topic_contexts(path, topics, |file, topics, contexts| {
             let schemas: Vec<_> = contexts
                 .iter()
                 .map(|context| batch_schema_for_context(context, options))
@@ -118,8 +118,7 @@ impl McapReader {
                 .map(|_| Vec::with_capacity(batch_size))
                 .collect();
             self.for_each_topic_decoded_message_impl(
-                mmap,
-                summary,
+                file,
                 contexts,
                 &options.read_options,
                 &mut |i, message| {
