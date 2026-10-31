@@ -1,9 +1,11 @@
 //! A prepared topic handed to decoder-backed output adapters.
 
 use mcapdecode_core::{DecodedMessage, FieldDefs};
-use memmap2::Mmap;
 
-use crate::{McapReader, ReadOptions, decode::TopicDecodeContext, error::McapReaderError};
+use crate::{
+    McapReader, ReadOptions, decode::TopicDecodeContext, error::McapReaderError,
+    mcap_file::McapFile,
+};
 #[cfg(feature = "arrow")]
 use crate::{MessageBatchSchema, RecordBatchOptions};
 
@@ -15,8 +17,7 @@ use crate::{MessageBatchSchema, RecordBatchOptions};
 /// file or rereading the summary.
 pub struct PreparedTopic<'reader> {
     pub(crate) reader: &'reader McapReader,
-    pub(crate) mmap: Mmap,
-    pub(crate) summary: mcap::read::Summary,
+    pub(crate) file: McapFile,
     pub(crate) context: TopicDecodeContext,
     pub(crate) topic: String,
 }
@@ -54,8 +55,7 @@ impl PreparedTopic<'_> {
         mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
         self.reader.for_each_decoded_message_impl(
-            &self.mmap,
-            &self.summary,
+            &self.file,
             &self.context,
             options,
             &mut |decoded| callback(decoded).map_err(McapReaderError::Callback),

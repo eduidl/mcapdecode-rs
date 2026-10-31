@@ -12,10 +12,9 @@ use std::{
 };
 
 use mcapdecode_core::{DecodedMessage, FieldDefs, TopicDecoder};
-use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::{McapReader, ReadOptions, TimeRange, error::McapReaderError};
+use crate::{McapReader, ReadOptions, TimeRange, error::McapReaderError, mcap_file::McapFile};
 
 /// Chunk- and message-level predicates shared by the sequential and parallel
 /// read paths.
@@ -60,8 +59,7 @@ impl MessageFilter {
 impl McapReader {
     pub(crate) fn for_each_decoded_message_impl<F>(
         &self,
-        mmap: &Mmap,
-        summary: &mcap::read::Summary,
+        file: &McapFile,
         context: &TopicDecodeContext,
         options: &ReadOptions,
         callback: &mut F,
@@ -73,16 +71,15 @@ impl McapReader {
         // and decode that bounded set in parallel.
         let parallel = options.parallel.unwrap_or(self.parallel);
         if parallel && options.limit.is_none() {
-            self.for_each_decoded_message_parallel(mmap, summary, context, options, callback)
+            self.for_each_decoded_message_parallel(file, context, options, callback)
         } else {
-            self.for_each_decoded_message_sequential(mmap, summary, context, options, callback)
+            self.for_each_decoded_message_sequential(file, context, options, callback)
         }
     }
 
     fn for_each_decoded_message_parallel<F>(
         &self,
-        mmap: &Mmap,
-        summary: &mcap::read::Summary,
+        file: &McapFile,
         context: &TopicDecodeContext,
         options: &ReadOptions,
         callback: &mut F,
@@ -91,7 +88,7 @@ impl McapReader {
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
         let filter = MessageFilter::new(context, options);
-        let chunk_indexes: Vec<_> = Self::matching_chunk_indexes(summary, filter).collect();
+        let chunk_indexes: Vec<_> = Self::matching_chunk_indexes(&file.summary, filter).collect();
         let chunk_count = chunk_indexes.len();
         let cancelled = Arc::new(AtomicBool::new(false));
         let (sender, receiver) = mpsc::channel();
@@ -103,8 +100,7 @@ impl McapReader {
                     worker_sender,
                     |sender, (position, chunk_index)| {
                         let result = self.decode_chunk_messages(
-                            mmap,
-                            summary,
+                            file,
                             context,
                             chunk_index,
                             options,
@@ -169,8 +165,7 @@ impl McapReader {
 
     fn decode_chunk_messages(
         &self,
-        mmap: &Mmap,
-        summary: &mcap::read::Summary,
+        file: &McapFile,
         context: &TopicDecodeContext,
         chunk_index: &mcap::records::ChunkIndex,
         options: &ReadOptions,
@@ -182,7 +177,7 @@ impl McapReader {
 
         let filter = MessageFilter::new(context, options);
         let mut decoded_messages = Vec::new();
-        for msg_result in summary.stream_chunk(mmap, chunk_index)? {
+        for msg_result in file.summary.stream_chunk(&file.mmap, chunk_index)? {
             if cancelled.load(Ordering::Relaxed) {
                 return Ok(decoded_messages);
             }
@@ -199,8 +194,7 @@ impl McapReader {
 
     fn for_each_decoded_message_sequential<F>(
         &self,
-        mmap: &Mmap,
-        summary: &mcap::read::Summary,
+        file: &McapFile,
         context: &TopicDecodeContext,
         options: &ReadOptions,
         callback: &mut F,
@@ -214,8 +208,8 @@ impl McapReader {
         let filter = MessageFilter::new(context, options);
         let mut skipped = 0usize;
         let mut emitted = 0usize;
-        for chunk_index in Self::matching_chunk_indexes(summary, filter) {
-            for message in summary.stream_chunk(mmap, chunk_index)? {
+        for chunk_index in Self::matching_chunk_indexes(&file.summary, filter) {
+            for message in file.summary.stream_chunk(&file.mmap, chunk_index)? {
                 let message = message?;
                 if !filter.accepts_message(&message) {
                     continue;
@@ -288,14 +282,10 @@ impl McapReader {
         if topics.is_empty() {
             return Ok(());
         }
-        self.with_topic_contexts(path, topics, |mmap, summary, topics, contexts| {
-            self.for_each_topic_decoded_message_impl(
-                mmap,
-                summary,
-                contexts,
-                options,
-                &mut |i, message| callback(topics[i], message).map_err(McapReaderError::Callback),
-            )
+        self.with_topic_contexts(path, topics, |file, topics, contexts| {
+            self.for_each_topic_decoded_message_impl(file, contexts, options, &mut |i, message| {
+                callback(topics[i], message).map_err(McapReaderError::Callback)
+            })
         })
     }
 
@@ -303,15 +293,9 @@ impl McapReader {
         &self,
         path: &Path,
         topics: &[&str],
-        callback: impl FnOnce(
-            &Mmap,
-            &mcap::read::Summary,
-            &[&str],
-            &[TopicDecodeContext],
-        ) -> Result<T, McapReaderError>,
+        callback: impl FnOnce(&McapFile, &[&str], &[TopicDecodeContext]) -> Result<T, McapReaderError>,
     ) -> Result<T, McapReaderError> {
-        let mmap = self.mmap_file(path)?;
-        let summary = self.read_summary(&mmap)?;
+        let file = McapFile::open(path)?;
         let mut seen = HashSet::new();
         let topics: Vec<_> = topics
             .iter()
@@ -320,28 +304,23 @@ impl McapReader {
             .collect();
         let contexts: Vec<_> = topics
             .iter()
-            .map(|topic| self.resolve_topic_decode_context(&summary, topic))
+            .map(|topic| self.resolve_topic_decode_context(&file.summary, topic))
             .collect::<Result<_, _>>()?;
-        callback(&mmap, &summary, &topics, &contexts)
+        callback(&file, &topics, &contexts)
     }
 
     pub(crate) fn for_each_topic_decoded_message_impl(
         &self,
-        mmap: &Mmap,
-        summary: &mcap::read::Summary,
+        file: &McapFile,
         contexts: &[TopicDecodeContext],
         options: &ReadOptions,
         callback: &mut impl FnMut(usize, DecodedMessage) -> Result<(), McapReaderError>,
     ) -> Result<(), McapReaderError> {
         if options.limit.is_some() || options.offset != 0 || contexts.len() == 1 {
             for (i, context) in contexts.iter().enumerate() {
-                self.for_each_decoded_message_impl(
-                    mmap,
-                    summary,
-                    context,
-                    options,
-                    &mut |message| callback(i, message),
-                )?;
+                self.for_each_decoded_message_impl(file, context, options, &mut |message| {
+                    callback(i, message)
+                })?;
             }
             return Ok(());
         }
@@ -350,7 +329,8 @@ impl McapReader {
             .enumerate()
             .map(|(i, context)| (context.channel_id, i))
             .collect();
-        let chunks: Vec<_> = summary
+        let chunks: Vec<_> = file
+            .summary
             .chunk_indexes
             .iter()
             .filter(|chunk| {
@@ -366,7 +346,7 @@ impl McapReader {
             usize,
             DecodedMessage,
         ) -> Result<(), McapReaderError>| {
-            for message in summary.stream_chunk(mmap, chunk)? {
+            for message in file.summary.stream_chunk(&file.mmap, chunk)? {
                 let message = message?;
                 let Some(&i) = channels.get(&message.channel.id) else {
                     continue;

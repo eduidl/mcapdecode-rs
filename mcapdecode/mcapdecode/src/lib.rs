@@ -9,6 +9,7 @@ pub use mcapdecode_arrow::{
 };
 mod decode;
 mod error;
+mod mcap_file;
 mod prepared_topic;
 mod reader;
 mod summary;
