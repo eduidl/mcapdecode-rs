@@ -20,4 +20,6 @@ pub use mcapdecode_arrow as arrow;
 pub use mcapdecode_core as core;
 pub use prepared_topic::PreparedTopic;
 pub use reader::{McapReader, McapReaderBuilder};
-pub use types::{RawMessage, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo, TopicSchema};
+pub use types::{
+    ChannelInfo, RawMessage, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo, TopicSchema,
+};

@@ -1,8 +1,22 @@
 //! Value types describing topics, messages, and read options.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use mcapdecode_core::FieldDefs;
+
+/// Metadata about one channel discovered from the MCAP summary section.
+///
+/// A topic can span several channels, each with its own schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelInfo {
+    pub id: u16,
+    pub topic: String,
+    pub message_count: Option<u64>,
+    pub schema_name: Option<String>,
+    pub schema_encoding: String,
+    pub message_encoding: String,
+    pub metadata: BTreeMap<String, String>,
+}
 
 /// Metadata about a topic discovered from the MCAP summary section.
 #[derive(Debug, Clone, PartialEq, Eq)]

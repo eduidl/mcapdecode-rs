@@ -1,5 +1,5 @@
 use mcapdecode::{
-    TopicInfo,
+    ChannelInfo, TopicInfo,
     core::{FieldDefs, Value},
 };
 use ratatui::layout::Rect;
@@ -32,6 +32,8 @@ pub enum MessageFocus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TopicRow {
     pub info: TopicInfo,
+    /// Set when the topic spans several channels and this row shows one of them.
+    pub channel_id: Option<u16>,
     pub unsupported_reason: Option<String>,
 }
 
@@ -41,7 +43,31 @@ impl TopicRow {
             (info.channel_count > 1).then(|| "duplicate topic is not supported".to_string());
         Self {
             info,
+            channel_id: None,
             unsupported_reason,
+        }
+    }
+
+    pub fn from_channel(channel: ChannelInfo) -> Self {
+        Self {
+            info: TopicInfo {
+                topic: channel.topic,
+                message_count: channel.message_count,
+                schema_name: channel.schema_name,
+                schema_encoding: channel.schema_encoding,
+                message_encoding: channel.message_encoding,
+                channel_count: 1,
+            },
+            channel_id: Some(channel.id),
+            unsupported_reason: None,
+        }
+    }
+
+    /// The name shown to the user, which tells the channels of a topic apart.
+    pub fn label(&self) -> String {
+        match self.channel_id {
+            Some(id) => format!("{} #{id}", self.info.topic),
+            None => self.info.topic.clone(),
         }
     }
 
