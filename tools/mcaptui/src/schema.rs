@@ -42,7 +42,7 @@ pub(crate) fn load_schema_view(
         Some(schema_name) => format!("Schema: {label} ({schema_name})"),
         None => format!("Schema: {label}"),
     };
-    let text = if topic.schema_encoding == "jsonschema" {
+    let text = if topic.schema_encoding == "jsonschema" && topic.message_encoding == "json" {
         format::format_unsupported_schema_text(topic)
     } else {
         let field_defs = match row.channel_id {
@@ -111,6 +111,30 @@ mod tests {
 
         assert!(view.text.contains("JSON Schema is not supported"));
         assert!(!view.text.contains("json: string"));
+    }
+
+    #[test]
+    fn jsonschema_with_other_message_encodings_goes_to_the_reader() {
+        let row = app::TopicRow::from_info(TopicInfo {
+            topic: "/imu".to_string(),
+            message_count: Some(1),
+            schema_name: Some("schema-a".to_string()),
+            schema_encoding: "jsonschema".to_string(),
+            message_encoding: "cbor".to_string(),
+            channel_count: 1,
+        });
+        let mut cache = SchemaCache::default();
+
+        // The reader fails on the missing file, so the unsupported text was not used.
+        assert!(
+            load_schema_view(
+                &McapReader::new(),
+                Path::new("/nonexistent.mcap"),
+                &mut cache,
+                &row,
+            )
+            .is_err()
+        );
     }
 
     #[test]
