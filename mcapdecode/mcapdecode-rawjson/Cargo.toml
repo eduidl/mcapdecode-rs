@@ -1,0 +1,13 @@
+[package]
+name = "mcapdecode-rawjson"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+readme = "README.md"
+description = "Pass-through decoder for mcapdecode JSON payloads."
+
+[dependencies]
+mcapdecode-core.workspace = true

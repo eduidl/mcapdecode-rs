@@ -7,6 +7,8 @@ use mcapdecode_core::{
 };
 #[cfg(feature = "protobuf")]
 use mcapdecode_protobuf::ProtobufDecoder;
+#[cfg(feature = "rawjson")]
+use mcapdecode_rawjson::RawJsonDecoder;
 #[cfg(feature = "ros2idl")]
 use mcapdecode_ros2idl::Ros2IdlDecoder;
 #[cfg(feature = "ros2msg")]
@@ -343,9 +345,11 @@ impl McapReaderBuilder {
         self
     }
 
-    /// Register all built-in decoders (Protobuf).
+    /// Register all built-in decoders enabled by cargo features.
     pub fn with_default_decoders(self) -> Self {
         let s = self;
+        #[cfg(feature = "rawjson")]
+        let s = s.with_decoder(Box::new(RawJsonDecoder::new()));
         #[cfg(feature = "protobuf")]
         let s = s.with_decoder(Box::new(ProtobufDecoder::new()));
         #[cfg(feature = "ros2idl")]

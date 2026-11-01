@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-description = "MCAP decoding library with optional Arrow integration, protobuf, and ROS 2 decoders."
+description = "MCAP decoding library with optional Arrow integration, protobuf, ROS 2, and raw JSON decoders."
 readme = "README.md"
 
 [dependencies]
@@ -18,6 +18,7 @@ memmap2 = "0.9.10"
 rayon = "1.11.0"
 thiserror.workspace = true
 
+mcapdecode-rawjson = { workspace = true, optional = true }
 mcapdecode-protobuf = { workspace = true, optional = true }
 mcapdecode-ros2idl = { workspace = true, optional = true }
 mcapdecode-ros2msg = { workspace = true, optional = true }
@@ -26,6 +27,7 @@ mcapdecode-ros2msg = { workspace = true, optional = true }
 default = ["protobuf", "ros2idl", "ros2msg"]
 arrow = ["dep:arrow", "dep:mcapdecode-arrow"]
 protobuf = ["dep:mcapdecode-protobuf"]
+rawjson = ["dep:mcapdecode-rawjson"]
 ros2idl = ["dep:mcapdecode-ros2idl"]
 ros2msg = ["dep:mcapdecode-ros2msg"]
 

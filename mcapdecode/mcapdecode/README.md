@@ -29,6 +29,8 @@ Default features:
 - `ros2msg`
 - `ros2idl`
 
+Optional decoder features: `rawjson`
+
 Disable defaults to trim dependencies:
 
 ```toml
@@ -50,6 +52,9 @@ Encoding pairs supported by built-in decoders:
 | `protobuf` | `protobuf` | `protobuf` |
 | `ros2msg` | `cdr` | `ros2msg` |
 | `ros2idl` | `cdr` | `ros2idl` |
+| `jsonschema` | `json` | `rawjson` |
+
+The `rawjson` feature does not parse messages or read the schema. Each message is exposed as a single `json: string` column.
 
 ## Arrow Usage
 
@@ -124,6 +129,7 @@ without message indexes are scanned to find the requested topics.
 - `mcapdecode-protobuf`: protobuf decoder
 - `mcapdecode-ros2msg`: ROS 2 `.msg` decoder
 - `mcapdecode-ros2idl`: ROS 2 IDL decoder
+- `mcapdecode-rawjson`: raw JSON pass-through decoder
 
 ## CLI
 
