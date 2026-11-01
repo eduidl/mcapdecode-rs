@@ -9,8 +9,8 @@ use mcapdecode::{
     },
 };
 use mcaptui::format::{
-    format_detail_rows, format_raw_detail_rows, format_raw_schema_text, format_schema_text,
-    format_timestamp,
+    format_detail_rows, format_json_detail_rows, format_raw_detail_rows, format_raw_schema_text,
+    format_schema_text, format_timestamp,
 };
 
 fn sample_schema() -> FieldDefs {
@@ -243,4 +243,52 @@ fn uint8_lists_show_their_schema_type_and_use_the_bytes_preview() {
                 .contains(&ty.to_string())
         );
     }
+}
+
+#[test]
+fn json_detail_rows_are_pretty_printed_in_message_key_order() {
+    let value = Value::Struct(vec![Value::string(r#"{"z": 1.5, "a": [true]}"#)]);
+
+    let rows = format_json_detail_rows(10, 20, &value).unwrap();
+    let lines: Vec<_> = rows.iter().map(|row| row.text.as_str()).collect();
+
+    assert_eq!(
+        lines,
+        [
+            "@log_time: 10",
+            "@publish_time: 20",
+            "payload:",
+            "  {",
+            "    \"z\": 1.5,",
+            "    \"a\": [",
+            "      true",
+            "    ]",
+            "  }",
+        ]
+    );
+}
+
+#[test]
+fn json_detail_rows_leave_other_values_to_the_default_format() {
+    for value in [
+        Value::Struct(vec![Value::string("{broken")]),
+        Value::Struct(vec![Value::I64(1)]),
+        Value::Struct(vec![Value::string("{}"), Value::string("{}")]),
+        Value::string("{}"),
+    ] {
+        assert!(format_json_detail_rows(0, 0, &value).is_none(), "{value:?}");
+    }
+}
+
+#[test]
+fn json_detail_rows_keep_float_values_exact() {
+    let value = Value::Struct(vec![Value::string(r#"{"wy": -0.0009321063815277333}"#)]);
+
+    let rows = format_json_detail_rows(0, 0, &value).unwrap();
+
+    assert!(
+        rows.iter()
+            .any(|row| row.text.contains("-0.0009321063815277333")),
+        "{rows:?}"
+    );
 }

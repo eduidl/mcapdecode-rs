@@ -63,6 +63,38 @@ pub fn format_detail_rows(
     rows
 }
 
+/// Detail rows that pretty-print the text held by a `jsonschema` topic's single
+/// string column. Returns `None` when the value is not valid JSON text, so that
+/// the caller can show it as it is.
+pub fn format_json_detail_rows(
+    log_time: u64,
+    publish_time: u64,
+    value: &Value,
+) -> Option<Vec<DetailRow>> {
+    let Value::Struct(fields) = value else {
+        return None;
+    };
+    let [Value::String(text)] = fields.as_slice() else {
+        return None;
+    };
+    let json: serde_json::Value = serde_json::from_str(text).ok()?;
+    let pretty = serde_json::to_string_pretty(&json).ok()?;
+
+    let mut rows = vec![
+        DetailRow::new(format!("@log_time: {log_time}"), None),
+        DetailRow::new(format!("@publish_time: {publish_time}"), None),
+        DetailRow::new("payload:", None),
+    ];
+    // Line numbers keep the scroll position while stepping through messages.
+    rows.extend(
+        pretty
+            .lines()
+            .enumerate()
+            .map(|(index, line)| DetailRow::new(format!("  {line}"), Some(index.to_string()))),
+    );
+    Some(rows)
+}
+
 pub fn format_schema_text(topic: &TopicInfo, field_defs: &FieldDefs) -> String {
     let schema_name = topic.schema_name.as_deref().unwrap_or("-");
     format!(
@@ -76,6 +108,16 @@ pub fn format_raw_schema_text(topic: &TopicInfo, reason: &str) -> String {
     format!(
         "topic: {}\nschema_name: {}\nschema_encoding: {}\nmessage_encoding: {}\n\nraw payload mode\nreason: {}\n\npayload: bytes",
         topic.topic, schema_name, topic.schema_encoding, topic.message_encoding, reason
+    )
+}
+
+/// Text for `jsonschema` topics, whose decoder never reads the schema, so its
+/// `json: string` field says nothing about the message structure.
+pub fn format_unsupported_schema_text(topic: &TopicInfo) -> String {
+    let schema_name = topic.schema_name.as_deref().unwrap_or("-");
+    format!(
+        "topic: {}\nschema_name: {}\nschema_encoding: {}\nmessage_encoding: {}\n\nJSON Schema is not supported\nmessages are shown as unparsed JSON text",
+        topic.topic, schema_name, topic.schema_encoding, topic.message_encoding
     )
 }
 

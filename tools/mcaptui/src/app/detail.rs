@@ -59,15 +59,29 @@ impl App {
 
     fn materialize_selected_message(&mut self) -> Option<&LoadedMessage> {
         let selected_index = self.messages.selected;
+        let is_json = self
+            .selected_topic()
+            .is_some_and(|row| row.info.schema_encoding == "jsonschema");
         let message = self.messages.items.get_mut(selected_index)?;
         if message.detail_rows.is_none() {
             let field_defs = self.messages.field_defs.as_ref()?;
-            let detail_rows = format::format_detail_rows(
-                message.log_time,
-                message.publish_time,
-                &message.value,
-                field_defs,
-            );
+            let json_rows = is_json
+                .then(|| {
+                    format::format_json_detail_rows(
+                        message.log_time,
+                        message.publish_time,
+                        &message.value,
+                    )
+                })
+                .flatten();
+            let detail_rows = json_rows.unwrap_or_else(|| {
+                format::format_detail_rows(
+                    message.log_time,
+                    message.publish_time,
+                    &message.value,
+                    field_defs,
+                )
+            });
             let detail_text = detail_rows
                 .iter()
                 .map(|row| row.text.as_str())
