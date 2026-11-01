@@ -1733,6 +1733,7 @@ dependencies = [
  "crossterm",
  "mcapdecode",
  "ratatui",
+ "serde_json",
  "unicode-width",
 ]
 

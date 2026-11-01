@@ -42,18 +42,22 @@ pub(crate) fn load_schema_view(
         Some(schema_name) => format!("Schema: {label} ({schema_name})"),
         None => format!("Schema: {label}"),
     };
-    let field_defs = match row.channel_id {
-        Some(channel_id) => reader.field_defs_by_channel_id(input, channel_id),
-        None => reader.topic_field_defs(input, &topic.topic),
-    };
-    let text = match field_defs {
-        Ok(field_defs) => format::format_schema_text(topic, &field_defs),
-        Err(error) if supports_raw_schema_view(&error) => {
-            format::format_raw_schema_text(topic, &error.to_string())
-        }
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to load schema for topic '{label}'"));
+    let text = if topic.schema_encoding == "jsonschema" {
+        format::format_unsupported_schema_text(topic)
+    } else {
+        let field_defs = match row.channel_id {
+            Some(channel_id) => reader.field_defs_by_channel_id(input, channel_id),
+            None => reader.topic_field_defs(input, &topic.topic),
+        };
+        match field_defs {
+            Ok(field_defs) => format::format_schema_text(topic, &field_defs),
+            Err(error) if supports_raw_schema_view(&error) => {
+                format::format_raw_schema_text(topic, &error.to_string())
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to load schema for topic '{label}'"));
+            }
         }
     };
     let schema_view = app::SchemaView {
@@ -84,6 +88,30 @@ mod tests {
     use mcapdecode::{ChannelInfo, TopicInfo};
 
     use super::*;
+
+    #[test]
+    fn jsonschema_topics_report_the_schema_as_unsupported() {
+        let row = app::TopicRow::from_info(TopicInfo {
+            topic: "/imu".to_string(),
+            message_count: Some(1),
+            schema_name: Some("schema-a".to_string()),
+            schema_encoding: "jsonschema".to_string(),
+            message_encoding: "json".to_string(),
+            channel_count: 1,
+        });
+        let mut cache = SchemaCache::default();
+
+        let view = load_schema_view(
+            &McapReader::new(),
+            Path::new("/nonexistent.mcap"),
+            &mut cache,
+            &row,
+        )
+        .unwrap();
+
+        assert!(view.text.contains("JSON Schema is not supported"));
+        assert!(!view.text.contains("json: string"));
+    }
 
     #[test]
     fn rows_with_the_same_label_do_not_share_a_cached_schema() {
