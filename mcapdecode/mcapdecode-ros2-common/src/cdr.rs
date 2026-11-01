@@ -1,6 +1,6 @@
 //! CDR decoding to the Arrow-independent Value type.
 
-use std::{fmt::Write, sync::Arc};
+use std::{fmt, sync::Arc};
 
 use bytes::Buf;
 use mcapdecode_core::{DecoderError, Value};
@@ -15,9 +15,45 @@ pub fn decode_cdr_to_value(schema: &ResolvedSchema, data: &[u8]) -> Result<Value
     let mut d = Decoder::new(data);
     d.read_encapsulation()
         .map_err(|detail| DecoderError::MessageDecode(detail.into()))?;
-    let mut path = schema.root.join(".");
+    let mut path = FieldPath::new(&schema.root);
     d.decode_struct(schema, &schema.root, &mut path)
         .map_err(|detail| DecoderError::MessageDecode(detail.into()))
+}
+
+/// The location being decoded, rendered only when an error reports it.
+///
+/// Decoding updates this for every field of every message, so it must not format
+/// anything until then.
+struct FieldPath<'s> {
+    root: &'s [String],
+    segments: Vec<PathSegment<'s>>,
+}
+
+enum PathSegment<'s> {
+    Field(&'s str),
+    Index(usize),
+}
+
+impl<'s> FieldPath<'s> {
+    fn new(root: &'s [String]) -> Self {
+        Self {
+            root,
+            segments: Vec::new(),
+        }
+    }
+}
+
+impl fmt::Display for FieldPath<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.root.join("."))?;
+        for segment in &self.segments {
+            match segment {
+                PathSegment::Field(name) => write!(f, ".{name}")?,
+                PathSegment::Index(index) => write!(f, "[{index}]")?,
+            }
+        }
+        Ok(())
+    }
 }
 
 fn primitive_align_size(p: &PrimitiveType) -> usize {
@@ -62,11 +98,11 @@ impl<'a> Decoder<'a> {
         self.initial_len - self.buf.remaining()
     }
 
-    fn decode_struct(
+    fn decode_struct<'s>(
         &mut self,
-        schema: &ResolvedSchema,
+        schema: &'s ResolvedSchema,
         struct_name: &[String],
-        path: &mut String,
+        path: &mut FieldPath<'s>,
     ) -> Result<Value, Ros2Error> {
         let s = schema
             .structs
@@ -88,29 +124,27 @@ impl<'a> Decoder<'a> {
             })?;
         }
         for field in &s.fields {
-            let path_len = path.len();
-            write!(path, ".{}", field.name).expect("writing to a String cannot fail");
+            path.segments.push(PathSegment::Field(&field.name));
             let v = self.decode_field(schema, field, path);
-            path.truncate(path_len);
+            path.segments.pop();
             let v = v?;
             fields.push(v);
         }
         Ok(Value::Struct(fields))
     }
 
-    fn decode_field(
+    fn decode_field<'s>(
         &mut self,
-        schema: &ResolvedSchema,
-        field: &ResolvedField,
-        path: &mut String,
+        schema: &'s ResolvedSchema,
+        field: &'s ResolvedField,
+        path: &mut FieldPath<'s>,
     ) -> Result<Value, Ros2Error> {
         if let Some(n) = field.fixed_len {
             let mut arr = Vec::with_capacity(n);
             for i in 0..n {
-                let path_len = path.len();
-                write!(path, "[{i}]").expect("writing to a String cannot fail");
+                path.segments.push(PathSegment::Index(i));
                 let v = self.decode_type(schema, &field.ty, path);
-                path.truncate(path_len);
+                path.segments.pop();
                 arr.push(v?);
             }
             return Ok(Value::Array(arr));
@@ -118,11 +152,11 @@ impl<'a> Decoder<'a> {
         self.decode_type(schema, &field.ty, path)
     }
 
-    fn decode_type(
+    fn decode_type<'s>(
         &mut self,
-        schema: &ResolvedSchema,
-        ty: &ResolvedType,
-        path: &mut String,
+        schema: &'s ResolvedSchema,
+        ty: &'s ResolvedType,
+        path: &mut FieldPath<'s>,
     ) -> Result<Value, Ros2Error> {
         match ty {
             ResolvedType::Primitive(p) => self.decode_primitive(p, path),
@@ -183,10 +217,9 @@ impl<'a> Decoder<'a> {
                 }
                 let mut out = Vec::with_capacity(len);
                 for i in 0..len {
-                    let path_len = path.len();
-                    write!(path, "[{i}]").expect("writing to a String cannot fail");
+                    path.segments.push(PathSegment::Index(i));
                     let v = self.decode_type(schema, elem, path);
-                    path.truncate(path_len);
+                    path.segments.pop();
                     out.push(v?);
                 }
                 Ok(Value::List(out))
@@ -194,7 +227,11 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    fn decode_primitive(&mut self, p: &PrimitiveType, path: &str) -> Result<Value, Ros2Error> {
+    fn decode_primitive(
+        &mut self,
+        p: &PrimitiveType,
+        path: &FieldPath<'_>,
+    ) -> Result<Value, Ros2Error> {
         self.align(primitive_align_size(p))?;
         let eof_err = || Ros2Error(format!("unexpected EOF at {path}"));
 
@@ -219,7 +256,7 @@ impl<'a> Decoder<'a> {
         })
     }
 
-    fn decode_string(&mut self, path: &str) -> Result<String, Ros2Error> {
+    fn decode_string(&mut self, path: &FieldPath<'_>) -> Result<String, Ros2Error> {
         self.align(4)?;
         let len =
             self.buf
@@ -246,7 +283,7 @@ impl<'a> Decoder<'a> {
         Ok(())
     }
 
-    fn read_bytes(&mut self, n: usize, path: &str) -> Result<&'a [u8], Ros2Error> {
+    fn read_bytes(&mut self, n: usize, path: &FieldPath<'_>) -> Result<&'a [u8], Ros2Error> {
         if self.buf.remaining() < n {
             return Err(format!("unexpected EOF at {path}").into());
         }
