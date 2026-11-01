@@ -852,3 +852,45 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
         }
     }
 }
+
+#[test]
+#[cfg(feature = "rawjson")]
+fn default_decoders_expose_json_topics_unparsed() {
+    let fixture = TempFixture {
+        path: temp_fixture_path("json"),
+    };
+    let mut writer = Writer::new(File::create(fixture.path()).unwrap()).unwrap();
+    let schema = writer.add_schema("test.Msg", "jsonschema", b"").unwrap();
+    let channel = writer
+        .add_channel(schema, "/json", "json", &BTreeMap::new())
+        .unwrap();
+    writer
+        .write_to_known_channel(
+            &MessageHeader {
+                channel_id: channel,
+                sequence: 0,
+                log_time: 1,
+                publish_time: 1,
+            },
+            br#"{"x": 7}"#,
+        )
+        .unwrap();
+    writer.finish().unwrap();
+
+    let reader = McapReader::builder().with_default_decoders().build();
+    let metadata = reader.topic_schema(fixture.path(), "/json").unwrap();
+    assert_eq!(metadata.field_defs[0].name, "json");
+    assert_eq!(
+        metadata.field_defs[0].element.data_type,
+        DataTypeDef::String
+    );
+
+    let mut decoded = Vec::new();
+    reader
+        .for_each_decoded_message(fixture.path(), "/json", |message| {
+            decoded.push(format!("{:?}", message.value));
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(decoded, [r#"Struct([String("{\"x\": 7}")])"#]);
+}

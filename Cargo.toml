@@ -16,6 +16,7 @@ mcapbench = { path = "dev/mcapbench" }
 mcapdecode = { path = "mcapdecode/mcapdecode", version = "=0.9.0" }
 mcapdecode-arrow = { path = "mcapdecode/mcapdecode-arrow", version = "=0.9.0" }
 mcapdecode-core = { path = "mcapdecode/mcapdecode-core", version = "=0.9.0" }
+mcapdecode-rawjson = { path = "mcapdecode/mcapdecode-rawjson", version = "=0.9.0" }
 mcapdecode-protobuf = { path = "mcapdecode/mcapdecode-protobuf", version = "=0.9.0" }
 mcapdecode-ros2-common = { path = "mcapdecode/mcapdecode-ros2-common", version = "=0.9.0" }
 mcapdecode-ros2idl = { path = "mcapdecode/mcapdecode-ros2idl", version = "=0.9.0" }
