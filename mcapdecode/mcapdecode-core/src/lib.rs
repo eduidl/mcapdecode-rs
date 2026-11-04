@@ -10,9 +10,10 @@ mod message_encoding;
 mod schema;
 mod schema_encoding;
 mod value;
+mod value_index;
 
 pub use decoder::{EncodingKey, MessageDecoder, TopicDecoder};
-pub use error::{DecoderError, ValueTypeError};
+pub use error::{DecoderError, ValueAccessError, ValueTypeError};
 pub use message::DecodedMessage;
 pub use message_encoding::MessageEncoding;
 pub use schema::{
@@ -21,3 +22,4 @@ pub use schema::{
 };
 pub use schema_encoding::SchemaEncoding;
 pub use value::Value;
+pub use value_index::{MapKey, ValueIndex};
