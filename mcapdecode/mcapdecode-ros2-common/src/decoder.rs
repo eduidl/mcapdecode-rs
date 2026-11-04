@@ -28,5 +28,5 @@ pub fn build_cdr_topic_decoder(
     resolve_schema: ResolveSchemaFn,
 ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
     let resolved = resolve_for_cdr(schema_name, schema_data, resolve_schema)?;
-    Ok(Box::new(Ros2CdrTopicDecoder::new(resolved)))
+    Ok(Box::new(Ros2CdrTopicDecoder::try_new(resolved)?))
 }

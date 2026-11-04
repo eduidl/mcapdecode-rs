@@ -226,3 +226,38 @@ fn legacy_policy_fields_are_not_nullable() {
     assert_eq!(schema.len(), 1);
     assert!(!schema[0].element.nullable);
 }
+
+#[test]
+fn recursive_message_is_a_schema_error() {
+    let node = DescriptorProto {
+        name: Some("Node".to_string()),
+        field: vec![message_field("child", 1, ".Node", Label::Optional)],
+        ..Default::default()
+    };
+    let fds = build_fds("recursive.proto", vec![node]);
+    let err = derive_schema("Node", &fds, PresencePolicy::PresenceAware).unwrap_err();
+    assert!(
+        matches!(err, DecoderError::SchemaDerivation(ref m) if m.contains("recursive message type: Node")),
+        "{err}"
+    );
+}
+
+#[test]
+fn sibling_fields_of_one_message_type_are_not_recursion() {
+    let inner = DescriptorProto {
+        name: Some("Inner".to_string()),
+        field: vec![scalar_field("x", 1, Type::Int32)],
+        ..Default::default()
+    };
+    let outer = DescriptorProto {
+        name: Some("Outer".to_string()),
+        field: vec![
+            message_field("a", 1, ".Inner", Label::Optional),
+            message_field("b", 2, ".Inner", Label::Optional),
+        ],
+        ..Default::default()
+    };
+    let fds = build_fds("siblings.proto", vec![inner, outer]);
+    let schema = derive_schema("Outer", &fds, PresencePolicy::PresenceAware).unwrap();
+    assert_eq!(schema.len(), 2);
+}

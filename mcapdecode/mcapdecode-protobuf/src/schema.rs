@@ -1,5 +1,7 @@
 //! Convert a protobuf `FileDescriptorSet` into [`FieldDef`] schema.
 
+use std::collections::HashSet;
+
 use mcapdecode_core::{
     DataTypeDef, DecoderError, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef,
 };
@@ -22,21 +24,43 @@ pub fn parse_message_descriptor(
 }
 
 /// Derive [`FieldDefs`] from an already-resolved [`MessageDescriptor`].
+///
+/// Returns [`DecoderError::SchemaDerivation`] for a message type that contains
+/// itself (such as `google.protobuf.Value`), since a schema tree cannot
+/// represent it.
 pub fn message_fields_to_field_defs(
     desc: &MessageDescriptor,
     policy: PresencePolicy,
 ) -> Result<FieldDefs, DecoderError> {
-    desc.fields()
-        .map(|f| field_descriptor_to_field_def(&f, policy))
-        .collect::<Result<Vec<_>, _>>()
-        .map(Into::into)
+    message_fields(desc, policy, &mut HashSet::new())
+}
+
+/// `visiting` holds the message types on the current path, to detect recursion.
+fn message_fields(
+    desc: &MessageDescriptor,
+    policy: PresencePolicy,
+    visiting: &mut HashSet<String>,
+) -> Result<FieldDefs, DecoderError> {
+    if !visiting.insert(desc.full_name().to_owned()) {
+        return Err(DecoderError::SchemaDerivation(format!(
+            "recursive message type: {}",
+            desc.full_name()
+        )));
+    }
+    let fields = desc
+        .fields()
+        .map(|f| field_descriptor_to_field_def(&f, policy, visiting))
+        .collect::<Result<Vec<_>, _>>()?;
+    visiting.remove(desc.full_name());
+    Ok(fields.into())
 }
 
 fn field_descriptor_to_field_def(
     fd: &FieldDescriptor,
     policy: PresencePolicy,
+    visiting: &mut HashSet<String>,
 ) -> Result<FieldDef, DecoderError> {
-    let inner_dt = kind_to_data_type_def(fd, policy)?;
+    let inner_dt = kind_to_data_type_def(fd, policy, visiting)?;
 
     let dt = if fd.is_list() {
         DataTypeDef::List(Box::new(ElementDef::new(inner_dt, false)))
@@ -54,8 +78,8 @@ fn field_descriptor_to_field_def(
         let value_field = entry_desc.get_field_by_name("value").ok_or_else(|| {
             DecoderError::SchemaDerivation(format!("map entry `{}` missing value field", fd.name()))
         })?;
-        let key_dt = kind_to_data_type_def(&key_field, policy)?;
-        let val_dt = kind_to_data_type_def(&value_field, policy)?;
+        let key_dt = kind_to_data_type_def(&key_field, policy, visiting)?;
+        let val_dt = kind_to_data_type_def(&value_field, policy, visiting)?;
         DataTypeDef::Map {
             key: Box::new(ElementDef::new(key_dt, false)),
             value: Box::new(ElementDef::new(val_dt, false)),
@@ -74,6 +98,7 @@ fn field_descriptor_to_field_def(
 fn kind_to_data_type_def(
     fd: &FieldDescriptor,
     policy: PresencePolicy,
+    visiting: &mut HashSet<String>,
 ) -> Result<DataTypeDef, DecoderError> {
     let dt = match fd.kind() {
         Kind::Double => DataTypeDef::F64,
@@ -93,7 +118,7 @@ fn kind_to_data_type_def(
                 .collect(),
         }),
         Kind::Message(msg_desc) => {
-            let fields = message_fields_to_field_defs(&msg_desc, policy)?;
+            let fields = message_fields(&msg_desc, policy, visiting)?;
             DataTypeDef::Struct(StructDef {
                 type_name: Some(msg_desc.full_name().to_owned()),
                 fields,
