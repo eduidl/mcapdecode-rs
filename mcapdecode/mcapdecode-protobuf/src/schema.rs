@@ -1,13 +1,13 @@
 //! Convert a protobuf `FileDescriptorSet` into [`FieldDef`] schema.
 
-use mcapdecode_core::{
-    DataTypeDef, DecoderError, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef,
-};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 
+use mcapdecode_core::{
+    DataTypeDef, DecoderError, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef,
+};
 use prost_reflect::{DescriptorPool, FieldDescriptor, Kind, MessageDescriptor};
 
 use crate::PresencePolicy;
