@@ -91,29 +91,35 @@ fn arrow_value_rows_to_record_batch_mixed_types() {
         make_row(
             1_u64,
             10_u64,
-            Value::Struct(vec![
-                Value::I32(42),
-                Value::List(vec![Value::I32(1), Value::I32(2)]),
-                Value::Array(vec![Value::F32(1.0), Value::F32(2.0), Value::F32(3.0)]),
-                Value::Array(vec![Value::F64(10.0), Value::F64(20.0)]),
-                Value::Map(vec![
-                    (Value::string("k1"), Value::I32(11)),
-                    (Value::string("k2"), Value::I32(22)),
-                ]),
-                Value::Struct(vec![Value::I32(7), Value::string("ok")]),
-            ]),
+            Value::Struct(
+                vec![
+                    Value::I32(42),
+                    Value::List(vec![Value::I32(1), Value::I32(2)]),
+                    Value::Array(vec![Value::F32(1.0), Value::F32(2.0), Value::F32(3.0)]),
+                    Value::Array(vec![Value::F64(10.0), Value::F64(20.0)]),
+                    Value::Map(vec![
+                        (Value::string("k1"), Value::I32(11)),
+                        (Value::string("k2"), Value::I32(22)),
+                    ]),
+                    Value::Struct(vec![Value::I32(7), Value::string("ok")].into()),
+                ]
+                .into(),
+            ),
         ),
         make_row(
             2_u64,
             20_u64,
-            Value::Struct(vec![
-                Value::Null,
-                Value::Null,
-                Value::Null,
-                Value::Null,
-                Value::Map(vec![]),
-                Value::Struct(vec![Value::Null, Value::string("row2")]),
-            ]),
+            Value::Struct(
+                vec![
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Null,
+                    Value::Map(vec![]),
+                    Value::Struct(vec![Value::Null, Value::string("row2")].into()),
+                ]
+                .into(),
+            ),
         ),
         make_row(3_u64, 30_u64, Value::Null),
     ];
@@ -265,7 +271,11 @@ fn unsupported_arrow_type_panics() {
         true,
     )]));
 
-    let rows = vec![make_row(1_u64, 2_u64, Value::Struct(vec![Value::Null]))];
+    let rows = vec![make_row(
+        1_u64,
+        2_u64,
+        Value::Struct(vec![Value::Null].into()),
+    )];
     to_batch(&schema, &rows);
 }
 
@@ -273,7 +283,7 @@ fn unsupported_arrow_type_panics() {
 #[should_panic(expected = "log_time exceeds i64::MAX")]
 fn out_of_range_log_time_panics_with_the_column_name() {
     let schema = Arc::new(Schema::empty());
-    let rows = vec![make_row(u64::MAX, 1, Value::Struct(vec![]))];
+    let rows = vec![make_row(u64::MAX, 1, Value::Struct(vec![].into()))];
 
     to_batch(&schema, &rows);
 }
@@ -282,7 +292,7 @@ fn out_of_range_log_time_panics_with_the_column_name() {
 #[should_panic(expected = "publish_time exceeds i64::MAX")]
 fn out_of_range_publish_time_panics_with_the_column_name() {
     let schema = Arc::new(Schema::empty());
-    let rows = vec![make_row(1, u64::MAX, Value::Struct(vec![]))];
+    let rows = vec![make_row(1, u64::MAX, Value::Struct(vec![].into()))];
 
     to_batch(&schema, &rows);
 }
@@ -316,7 +326,7 @@ fn fixed_size_list_length_mismatch_panics() {
     let rows = vec![make_row(
         1_u64,
         2_u64,
-        Value::Struct(vec![Value::Array(vec![Value::F32(1.0), Value::F32(2.0)])]),
+        Value::Struct(vec![Value::Array(vec![Value::F32(1.0), Value::F32(2.0)])].into()),
     )];
     to_batch(&schema, &rows);
 }
@@ -332,7 +342,7 @@ fn fixed_size_list_length_mismatch_returns_error_in_try_api() {
     let rows = vec![make_row(
         1_u64,
         2_u64,
-        Value::Struct(vec![Value::Array(vec![Value::F32(1.0), Value::F32(2.0)])]),
+        Value::Struct(vec![Value::Array(vec![Value::F32(1.0), Value::F32(2.0)])].into()),
     )];
 
     let err = try_to_batch(&schema, &rows).unwrap_err();
@@ -351,7 +361,11 @@ fn fixed_size_list_non_array_returns_error_in_try_api() {
         true,
     )]));
 
-    let rows = vec![make_row(1_u64, 2_u64, Value::Struct(vec![Value::I32(99)]))];
+    let rows = vec![make_row(
+        1_u64,
+        2_u64,
+        Value::Struct(vec![Value::I32(99)].into()),
+    )];
 
     let err = try_to_batch(&schema, &rows).unwrap_err();
     assert!(matches!(err, ArrowConvertError::ValueType(_)));
@@ -371,7 +385,7 @@ fn list_item_nullability_is_preserved() {
     let rows = vec![make_row(
         1_u64,
         2_u64,
-        Value::Struct(vec![Value::List(vec![Value::I32(1), Value::I32(2)])]),
+        Value::Struct(vec![Value::List(vec![Value::I32(1), Value::I32(2)])].into()),
     )];
 
     let batch = to_batch(&schema, &rows);
@@ -406,7 +420,7 @@ fn map_value_nullability_is_preserved() {
     let rows = vec![make_row(
         1_u64,
         2_u64,
-        Value::Struct(vec![Value::Map(vec![(Value::string("k"), Value::I32(1))])]),
+        Value::Struct(vec![Value::Map(vec![(Value::string("k"), Value::I32(1))])].into()),
     )];
 
     let batch = to_batch(&schema, &rows);
@@ -438,7 +452,11 @@ fn scalar_type_mismatch_returns_error_in_try_api() {
         DataType::Int8,
         true,
     )]));
-    let rows = vec![make_row(1_u64, 2_u64, Value::Struct(vec![Value::I16(10)]))];
+    let rows = vec![make_row(
+        1_u64,
+        2_u64,
+        Value::Struct(vec![Value::I16(10)].into()),
+    )];
 
     let err = try_to_batch(&schema, &rows).unwrap_err();
     assert!(matches!(err, ArrowConvertError::ValueType(_)));
@@ -465,12 +483,19 @@ fn packed_uint8_lists_convert_to_binary_including_nested_and_null_values() {
             make_row(
                 0,
                 0,
-                Value::Struct(vec![
-                    Value::Uint8List(Arc::from([0, 255])),
-                    Value::List(vec![Value::Uint8List(Arc::from([])), Value::Null]),
-                ]),
+                Value::Struct(
+                    vec![
+                        Value::Uint8List(Arc::from([0, 255])),
+                        Value::List(vec![Value::Uint8List(Arc::from([])), Value::Null]),
+                    ]
+                    .into(),
+                ),
             ),
-            make_row(1, 1, Value::Struct(vec![Value::Null, Value::List(vec![])])),
+            make_row(
+                1,
+                1,
+                Value::Struct(vec![Value::Null, Value::List(vec![])].into()),
+            ),
         ];
         let batch = schema.to_record_batch(&rows).unwrap();
         let data = batch

@@ -1,7 +1,4 @@
-use mcapdecode::{
-    ChannelInfo, TopicInfo,
-    core::{FieldDefs, Value},
-};
+use mcapdecode::{ChannelInfo, TopicInfo, core::Value};
 use ratatui::layout::Rect;
 
 mod detail;
@@ -241,7 +238,6 @@ struct MessageState {
     items: Vec<LoadedMessage>,
     selected: usize,
     page_step: usize,
-    field_defs: Option<FieldDefs>,
     loading: LoadingState,
 }
 

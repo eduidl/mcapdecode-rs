@@ -8,7 +8,7 @@ use std::{str, sync::Arc};
 
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
-    SchemaEncoding, TopicDecoder, Value,
+    SchemaEncoding, StructDef, TopicDecoder, Value,
 };
 
 /// Name of the column holding the unparsed message text.
@@ -35,23 +35,29 @@ impl MessageDecoder for RawJsonDecoder {
         _schema_name: &str,
         _schema_data: &[u8],
     ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
-        let field_defs = vec![FieldDef::new(COLUMN_NAME, DataTypeDef::String, false)].into();
-        Ok(Box::new(RawJsonTopicDecoder { field_defs }))
+        let field_defs: FieldDefs =
+            vec![FieldDef::new(COLUMN_NAME, DataTypeDef::String, false)].into();
+        Ok(Box::new(RawJsonTopicDecoder {
+            schema: Arc::new(StructDef::from(field_defs)),
+        }))
     }
 }
 
 struct RawJsonTopicDecoder {
-    field_defs: FieldDefs,
+    schema: Arc<StructDef>,
 }
 
 impl TopicDecoder for RawJsonTopicDecoder {
     fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError> {
         let text =
             str::from_utf8(message_data).map_err(|e| DecoderError::MessageDecode(Box::new(e)))?;
-        Ok(Value::Struct(vec![Value::String(Arc::from(text))]))
+        Ok(Value::structure(
+            Arc::clone(&self.schema),
+            vec![Value::String(Arc::from(text))],
+        ))
     }
 
     fn field_defs(&self) -> &FieldDefs {
-        &self.field_defs
+        &self.schema.fields
     }
 }

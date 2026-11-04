@@ -41,7 +41,6 @@ impl App {
                 items: Vec::new(),
                 selected: 0,
                 page_step: DEFAULT_PAGE_STEP,
-                field_defs: None,
                 loading: LoadingState::default(),
             },
             detail: ScrollPane::new(DETAIL_HORIZONTAL_STEP),
@@ -165,7 +164,6 @@ impl App {
         self.messages.loading.label = Some(label.into());
         self.messages.loading.total = total;
         self.messages.loading.progress = 0;
-        self.messages.field_defs = None;
         self.session.status = "Loading messages...".to_string();
     }
 
@@ -187,10 +185,6 @@ impl App {
             self.detail.scroll = 0;
         }
         self.update_loading(self.messages.items.len());
-    }
-
-    pub fn set_message_field_defs(&mut self, field_defs: FieldDefs) {
-        self.messages.field_defs = Some(field_defs);
     }
 
     pub fn finish_loading(&mut self, topic: &str) {
@@ -253,7 +247,6 @@ impl App {
         self.detail.reset();
         self.messages.loading.label = None;
         self.messages.loading.total = None;
-        self.messages.field_defs = None;
     }
 
     pub fn toggle_focus(&mut self) {

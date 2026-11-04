@@ -21,5 +21,5 @@ pub use schema::{
     format_field_defs,
 };
 pub use schema_encoding::SchemaEncoding;
-pub use value::Value;
+pub use value::{StructValue, Value};
 pub use value_index::{MapKey, ValueIndex};

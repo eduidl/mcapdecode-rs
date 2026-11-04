@@ -10,7 +10,7 @@
 //!   └─ parse_schema_bundle       – split sections at `====` separators
 //!       └─ parse_idl_section     – recursive IDL parser → ParsedSection
 //!           └─ resolve_schema    – type-name resolution → ResolvedSchema
-//!               └─ decode_cdr_to_value  – CDR bytes → Value
+//!               └─ Ros2CdrTopicDecoder  – CDR bytes → Value
 //! ```
 
 mod idl_lexer;
