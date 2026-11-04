@@ -13,33 +13,60 @@
 //! | BoundedString/WString  | bounded string variants      |
 //! | Fixed-length field     | `Array(element type, n)`     |
 
+use std::collections::HashSet;
+
 use mcapdecode_core::{DataTypeDef, ElementDef, EnumDef, FieldDef, FieldDefs, StructDef};
 
 use crate::{
     ast::PrimitiveType,
-    type_resolver::{ResolvedField, ResolvedSchema, ResolvedStruct, ResolvedType},
+    type_resolver::{ResolvedField, ResolvedSchema, ResolvedType},
 };
 
 /// Convert the root struct of `schema` to [`FieldDefs`] for Arrow schema derivation.
+///
+/// # Panics
+///
+/// Panics if `schema` references a struct it does not define, or if a struct
+/// contains itself. Schemas produced by the type resolver never do the former.
 pub fn resolved_schema_to_field_defs(schema: &ResolvedSchema) -> FieldDefs {
-    let root_struct = schema
+    try_resolved_schema_to_field_defs(schema).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// Fallible variant of [`resolved_schema_to_field_defs`].
+pub(crate) fn try_resolved_schema_to_field_defs(
+    schema: &ResolvedSchema,
+) -> Result<FieldDefs, String> {
+    resolved_struct_to_field_defs(schema, &schema.root, &mut HashSet::new())
+}
+
+/// `visiting` holds the structs on the current path, to detect recursion.
+fn resolved_struct_to_field_defs<'s>(
+    schema: &'s ResolvedSchema,
+    name: &'s [String],
+    visiting: &mut HashSet<&'s [String]>,
+) -> Result<FieldDefs, String> {
+    let st = schema
         .structs
-        .get(&schema.root)
-        .unwrap_or_else(|| panic!("Root struct {:?} not found", schema.root));
-    resolved_struct_to_field_defs(schema, root_struct)
+        .get(name)
+        .ok_or_else(|| format!("unknown struct: {}", name.join("::")))?;
+    if !visiting.insert(name) {
+        return Err(format!("recursive struct: {}", name.join("::")));
+    }
+    let fields = st
+        .fields
+        .iter()
+        .map(|f| resolved_field_to_field_def(schema, f, visiting))
+        .collect::<Result<Vec<_>, _>>()?;
+    visiting.remove(name);
+    Ok(FieldDefs::new(fields))
 }
 
-fn resolved_struct_to_field_defs(schema: &ResolvedSchema, st: &ResolvedStruct) -> FieldDefs {
-    FieldDefs::new(
-        st.fields
-            .iter()
-            .map(|f| resolved_field_to_field_def(schema, f))
-            .collect(),
-    )
-}
-
-fn resolved_field_to_field_def(schema: &ResolvedSchema, field: &ResolvedField) -> FieldDef {
-    let inner_dt = resolved_type_to_data_type_def(schema, &field.ty);
+fn resolved_field_to_field_def<'s>(
+    schema: &'s ResolvedSchema,
+    field: &'s ResolvedField,
+    visiting: &mut HashSet<&'s [String]>,
+) -> Result<FieldDef, String> {
+    let inner_dt = resolved_type_to_data_type_def(schema, &field.ty, visiting)?;
 
     // Wrap in Array when the field has a fixed static length.
     let dt = match field.fixed_len {
@@ -47,18 +74,18 @@ fn resolved_field_to_field_def(schema: &ResolvedSchema, field: &ResolvedField) -
         None => inner_dt,
     };
 
-    FieldDef::new(&field.name, dt, false)
+    Ok(FieldDef::new(&field.name, dt, false))
 }
 
-fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) -> DataTypeDef {
-    match ty {
+fn resolved_type_to_data_type_def<'s>(
+    schema: &'s ResolvedSchema,
+    ty: &'s ResolvedType,
+    visiting: &mut HashSet<&'s [String]>,
+) -> Result<DataTypeDef, String> {
+    Ok(match ty {
         ResolvedType::Primitive(p) => primitive_to_data_type_def(p),
         ResolvedType::Struct(name) => {
-            let st = schema
-                .structs
-                .get(name)
-                .unwrap_or_else(|| panic!("Struct {:?} not found", name));
-            let fields = resolved_struct_to_field_defs(schema, st);
+            let fields = resolved_struct_to_field_defs(schema, name, visiting)?;
             DataTypeDef::Struct(StructDef {
                 type_name: Some(name.join("/")),
                 fields,
@@ -80,7 +107,7 @@ fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) ->
         }
         ResolvedType::Sequence { elem, max_len } => {
             let element = Box::new(ElementDef::new(
-                resolved_type_to_data_type_def(schema, elem),
+                resolved_type_to_data_type_def(schema, elem, visiting)?,
                 false,
             ));
             match max_len {
@@ -90,7 +117,7 @@ fn resolved_type_to_data_type_def(schema: &ResolvedSchema, ty: &ResolvedType) ->
         }
         ResolvedType::BoundedString(size) => DataTypeDef::BoundedString(*size),
         ResolvedType::BoundedWString(size) => DataTypeDef::BoundedWString(*size),
-    }
+    })
 }
 
 fn primitive_to_data_type_def(p: &PrimitiveType) -> DataTypeDef {
