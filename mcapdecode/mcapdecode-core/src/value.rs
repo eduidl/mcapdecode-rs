@@ -22,7 +22,7 @@ pub enum Value {
     F64(f64),
     String(Arc<str>),
     Bytes(Arc<[u8]>),
-    Struct(Vec<Value>),
+    Struct(StructValue),
     List(Vec<Value>),
     /// Packed unsigned byte sequence, distinct from opaque binary data.
     Uint8List(Arc<[u8]>),
@@ -30,8 +30,82 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
 }
 
+/// A decoded struct with its shared field definitions.
+#[derive(Clone)]
+pub struct StructValue {
+    schema: Arc<crate::StructDef>,
+    values: Vec<Value>,
+}
+impl StructValue {
+    pub fn schema(&self) -> &Arc<crate::StructDef> {
+        &self.schema
+    }
+    pub fn into_values(self) -> Vec<Value> {
+        self.values
+    }
+    /// Pair each field name with its value.
+    ///
+    /// Fails with [`ValueAccessError::SchemaMismatch`] when the number of values
+    /// differs from the number of schema fields, as for a positional struct
+    /// built with `From<Vec<Value>>`.
+    pub fn fields(&self) -> Result<impl Iterator<Item = (&str, &Value)>, ValueAccessError> {
+        self.check_schema()?;
+        Ok(self
+            .schema
+            .fields
+            .iter()
+            .zip(&self.values)
+            .map(|(field, value)| (field.name.as_str(), value)))
+    }
+    pub(crate) fn check_schema(&self) -> Result<(), ValueAccessError> {
+        if self.schema.fields.len() == self.values.len() {
+            Ok(())
+        } else {
+            Err(ValueAccessError::SchemaMismatch)
+        }
+    }
+}
+impl From<Vec<Value>> for StructValue {
+    /// Construct a positional struct without field names. Use `Value::structure`
+    /// with a schema when named field access is required.
+    fn from(values: Vec<Value>) -> Self {
+        static EMPTY: std::sync::LazyLock<Arc<crate::StructDef>> =
+            std::sync::LazyLock::new(|| Arc::new(crate::StructDef::default()));
+        Self {
+            schema: Arc::clone(&EMPTY),
+            values,
+        }
+    }
+}
+impl std::fmt::Debug for StructValue {
+    /// Print only the values, so that the shared schema is not repeated for
+    /// every struct instance.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(&self.values).finish()
+    }
+}
+impl std::ops::Deref for StructValue {
+    type Target = [Value];
+    fn deref(&self) -> &[Value] {
+        &self.values
+    }
+}
+
 impl Value {
-    /// Access an element of a list or fixed-size array.
+    /// Construct a struct with a shared definition and values in schema order.
+    ///
+    /// `values` must hold exactly one value per schema field. This is checked
+    /// only in debug builds, since decoders call this for every struct.
+    pub fn structure(schema: Arc<crate::StructDef>, values: Vec<Value>) -> Self {
+        debug_assert_eq!(
+            schema.fields.len(),
+            values.len(),
+            "struct values must match the schema fields"
+        );
+        Self::Struct(StructValue { schema, values })
+    }
+
+    /// Access a named struct field or string map key, or a sequence element.
     pub fn get<I: crate::ValueIndex>(&self, index: I) -> Result<&Value, ValueAccessError> {
         index.get(self)
     }

@@ -229,7 +229,7 @@ fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> 
     reader
         .for_each_decoded_message(path, topic, |message| {
             let value = match message.value {
-                Value::Struct(mut fields) => match fields.remove(0) {
+                Value::Struct(fields) => match fields.into_values().remove(0) {
                     Value::I64(value) => value,
                     other => panic!("expected I64 field, got {other:?}"),
                 },
@@ -274,7 +274,7 @@ fn decode_test_value(message_data: &[u8]) -> Result<i64, DecoderError> {
 
 struct TestJsonDecoder;
 struct TestJsonTopicDecoder {
-    field_defs: FieldDefs,
+    schema: Arc<mcapdecode_core::StructDef>,
 }
 
 impl MessageDecoder for TestJsonDecoder {
@@ -288,20 +288,21 @@ impl MessageDecoder for TestJsonDecoder {
         _schema_data: &[u8],
     ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
         Ok(Box::new(TestJsonTopicDecoder {
-            field_defs: vec![FieldDef::new("value", DataTypeDef::I64, true)].into(),
+            schema: Arc::new(vec![FieldDef::new("value", DataTypeDef::I64, true)].into()),
         }))
     }
 }
 
 impl TopicDecoder for TestJsonTopicDecoder {
     fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError> {
-        Ok(Value::Struct(vec![Value::I64(decode_test_value(
-            message_data,
-        )?)]))
+        Ok(Value::structure(
+            Arc::clone(&self.schema),
+            vec![Value::I64(decode_test_value(message_data)?)],
+        ))
     }
 
     fn field_defs(&self) -> &FieldDefs {
-        &self.field_defs
+        &self.schema.fields
     }
 }
 
@@ -320,7 +321,7 @@ impl MessageDecoder for SchemaNamedFieldDecoder {
     ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
         let field = std::str::from_utf8(schema_data).unwrap();
         Ok(Box::new(TestJsonTopicDecoder {
-            field_defs: vec![FieldDef::new(field, DataTypeDef::I64, true)].into(),
+            schema: Arc::new(vec![FieldDef::new(field, DataTypeDef::I64, true)].into()),
         }))
     }
 }
@@ -352,9 +353,9 @@ struct CountingTestJsonTopicDecoder {
 impl TopicDecoder for CountingTestJsonTopicDecoder {
     fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError> {
         self.count.fetch_add(1, Ordering::Relaxed);
-        Ok(Value::Struct(vec![Value::I64(decode_test_value(
-            message_data,
-        )?)]))
+        Ok(Value::Struct(
+            vec![Value::I64(decode_test_value(message_data)?)].into(),
+        ))
     }
 
     fn field_defs(&self) -> &FieldDefs {

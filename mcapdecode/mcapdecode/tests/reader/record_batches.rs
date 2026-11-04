@@ -77,7 +77,7 @@ impl MessageDecoder for CollidingJsonDecoder {
         _schema_data: &[u8],
     ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
         Ok(Box::new(TestJsonTopicDecoder {
-            field_defs: vec![FieldDef::new("log_time", DataTypeDef::I64, true)].into(),
+            schema: Arc::new(vec![FieldDef::new("log_time", DataTypeDef::I64, true)].into()),
         }))
     }
 }
@@ -104,7 +104,7 @@ struct MismatchedJsonTopicDecoder;
 
 impl TopicDecoder for MismatchedJsonTopicDecoder {
     fn decode(&self, _message_data: &[u8]) -> Result<Value, DecoderError> {
-        Ok(Value::Struct(vec![Value::string("not an integer")]))
+        Ok(Value::Struct(vec![Value::string("not an integer")].into()))
     }
 
     fn field_defs(&self) -> &FieldDefs {

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use mcapdecode::{
     TopicInfo,
-    core::{DataTypeDef, ElementDef, FieldDefs, Value},
+    core::{FieldDefs, StructValue, Value},
 };
 
 use crate::app::DetailRow;
@@ -20,12 +20,7 @@ pub fn format_timestamp(timestamp_ns: u64) -> String {
     }
 }
 
-pub fn format_detail_rows(
-    log_time: u64,
-    publish_time: u64,
-    value: &Value,
-    field_defs: &FieldDefs,
-) -> Vec<DetailRow> {
+pub fn format_detail_rows(log_time: u64, publish_time: u64, value: &Value) -> Vec<DetailRow> {
     let mut rows = vec![
         DetailRow::new(format!("@log_time: {log_time}"), None),
         DetailRow::new(format!("@publish_time: {publish_time}"), None),
@@ -33,31 +28,8 @@ pub fn format_detail_rows(
     ];
 
     match value {
-        Value::Struct(fields) => {
-            for (index, field_value) in fields.iter().enumerate() {
-                let fallback_name = format!("field_{index}");
-                if let Some(field_def) = field_defs.get(index) {
-                    push_field_lines(
-                        &field_def.name,
-                        field_value,
-                        &field_def.element,
-                        Some(field_def.name.as_str()),
-                        1,
-                        &mut rows,
-                    );
-                } else {
-                    push_value_lines(
-                        &fallback_name,
-                        field_value,
-                        None,
-                        Some(fallback_name.as_str()),
-                        1,
-                        &mut rows,
-                    );
-                }
-            }
-        }
-        other => push_value_lines("value", other, None, Some("value"), 1, &mut rows),
+        Value::Struct(fields) => push_struct_fields(fields, None, 1, &mut rows),
+        other => push_value_lines("value", other, Some("value"), 1, &mut rows),
     }
 
     rows
@@ -74,7 +46,7 @@ pub fn format_json_detail_rows(
     let Value::Struct(fields) = value else {
         return None;
     };
-    let [Value::String(text)] = fields.as_slice() else {
+    let [Value::String(text)] = &fields[..] else {
         return None;
     };
     let json: serde_json::Value = serde_json::from_str(text).ok()?;
@@ -141,28 +113,27 @@ pub fn format_raw_detail_rows(log_time: u64, publish_time: u64, payload: &[u8]) 
     rows
 }
 
-fn push_field_lines(
-    label: &str,
-    value: &Value,
-    element: &ElementDef,
+/// Push one row group per field, named from the struct's own schema.
+///
+/// A positional struct without field names (built from `Vec<Value>`) has no
+/// fields to show. Every decoder in this workspace attaches a schema.
+fn push_struct_fields(
+    fields: &StructValue,
     field_path: Option<&str>,
     indent: usize,
     rows: &mut Vec<DetailRow>,
 ) {
-    push_value_lines(
-        label,
-        value,
-        Some(&element.data_type),
-        field_path,
-        indent,
-        rows,
-    );
+    for (name, value) in fields.fields().into_iter().flatten() {
+        let child_path = field_path
+            .map(|path| format!("{path}.{name}"))
+            .unwrap_or_else(|| name.to_owned());
+        push_value_lines(name, value, Some(&child_path), indent, rows);
+    }
 }
 
 fn push_value_lines(
     label: &str,
     value: &Value,
-    data_type: Option<&DataTypeDef>,
     field_path: Option<&str>,
     indent: usize,
     rows: &mut Vec<DetailRow>,
@@ -174,59 +145,15 @@ fn push_value_lines(
                 format!("{pad}{label}:"),
                 field_path.map(ToOwned::to_owned),
             ));
-            let schema_fields = match data_type {
-                Some(DataTypeDef::Struct(definition)) => Some(&definition.fields),
-                _ => None,
-            };
-            for (index, field_value) in fields.iter().enumerate() {
-                let fallback_name = format!("field_{index}");
-                if let Some(field_def) = schema_fields.and_then(|defs| defs.get(index)) {
-                    let child_path = field_path
-                        .map(|path| format!("{path}.{}", field_def.name))
-                        .unwrap_or_else(|| field_def.name.clone());
-                    push_field_lines(
-                        &field_def.name,
-                        field_value,
-                        &field_def.element,
-                        Some(&child_path),
-                        indent + 1,
-                        rows,
-                    );
-                } else {
-                    let fallback_path = field_path
-                        .map(|path| format!("{path}.{fallback_name}"))
-                        .unwrap_or_else(|| fallback_name.clone());
-                    push_value_lines(
-                        &fallback_name,
-                        field_value,
-                        None,
-                        Some(&fallback_path),
-                        indent + 1,
-                        rows,
-                    );
-                }
-            }
+            push_struct_fields(fields, field_path, indent + 1, rows);
         }
         Value::List(items) | Value::Array(items) => {
             rows.push(DetailRow::new(
                 format!("{pad}{label}: [{} items]", items.len()),
                 field_path.map(ToOwned::to_owned),
             ));
-            let child_type = match data_type {
-                Some(DataTypeDef::List(element))
-                | Some(DataTypeDef::BoundedList(element, _))
-                | Some(DataTypeDef::Array(element, _)) => Some(&element.data_type),
-                _ => None,
-            };
             for (index, item) in items.iter().take(DETAIL_COLLECTION_ITEM_LIMIT).enumerate() {
-                push_value_lines(
-                    &format!("[{index}]"),
-                    item,
-                    child_type,
-                    field_path,
-                    indent + 1,
-                    rows,
-                );
+                push_value_lines(&format!("[{index}]"), item, field_path, indent + 1, rows);
             }
             push_truncated_summary(
                 items.len(),
@@ -241,12 +168,6 @@ fn push_value_lines(
                 format!("{pad}{label}: [{} entries]", entries.len()),
                 field_path.map(ToOwned::to_owned),
             ));
-            let (key_type, value_type) = match data_type {
-                Some(DataTypeDef::Map { key, value }) => {
-                    (Some(&key.data_type), Some(&value.data_type))
-                }
-                _ => (None, None),
-            };
             for (index, (key, value)) in entries
                 .iter()
                 .take(DETAIL_COLLECTION_ITEM_LIMIT)
@@ -256,8 +177,8 @@ fn push_value_lines(
                     format!("{}  entry[{index}]:", pad),
                     field_path.map(ToOwned::to_owned),
                 ));
-                push_value_lines("key", key, key_type, field_path, indent + 2, rows);
-                push_value_lines("value", value, value_type, field_path, indent + 2, rows);
+                push_value_lines("key", key, field_path, indent + 2, rows);
+                push_value_lines("value", value, field_path, indent + 2, rows);
             }
             push_truncated_summary(
                 entries.len(),

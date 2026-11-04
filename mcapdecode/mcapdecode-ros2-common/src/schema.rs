@@ -101,7 +101,7 @@ impl<'s> Builder<'s> {
                 self.built.insert(name, Arc::clone(&definition));
                 DataTypeDef::Struct(definition)
             }
-            // An unknown enum stays decodable (`decode_cdr_to_value` falls back to the raw
+            // An unknown enum stays decodable (the CDR decoder falls back to the raw
             // number), so it must not be treated as harder than a missing struct.
             ResolvedType::Enum(name) => DataTypeDef::Enum(EnumDef {
                 type_name: Some(name.join("/")),

@@ -99,6 +99,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Decoded structs carry a shared schema, so fields can be accessed by name without
+passing a separate schema:
+
+```rust,no_run
+use std::path::Path;
+use mcapdecode::{McapReader, ReadOptions};
+
+let reader = McapReader::builder().with_default_decoders().build();
+reader.with_prepared_topic(Path::new("sample.mcap"), "/topic/name", |topic| {
+    topic.for_each_decoded_message_with_options(&ReadOptions::default(), |message| {
+        let x = message.value
+            .get("poses")?.get(0)?.get("position")?.get("x")?
+            .try_widen_f64()?;
+        println!("x={x}");
+        Ok(())
+    })
+})?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Name lookup is linear in the number of fields. Lists and arrays also expose
+`as_sequence()`, and maps expose `get_key()` and `as_map()`. Integer conversions
+only accept source types whose entire range fits the destination; `f32` can
+widen to `f64`, and null is reported as
+`ValueAccessError::NullValue`. Existing exact-type methods such as `try_str()`
+and `try_u64()` retain their null behavior.
+
+For example, `try_widen_i64()` accepts `U32` but rejects `U64`, even for zero;
+`try_widen_u64()` accepts unsigned integers but rejects all signed integers.
+
 ## Multiple Topics
 
 Read multiple topics in one pass, sharing chunk reads and decompression. The

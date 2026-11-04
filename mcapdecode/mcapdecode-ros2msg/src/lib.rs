@@ -16,7 +16,7 @@
 //!   └─ parse_schema_bundle     – optional split at `====` / `MSG:`
 //!       └─ parse_msg            – re_ros_msg parser → StructDef
 //!           └─ resolve_schema   – type resolution → ResolvedSchema
-//!               └─ decode_cdr_to_value – CDR bytes → Value
+//!               └─ Ros2CdrTopicDecoder – CDR bytes → Value
 //! ```
 
 mod parser;

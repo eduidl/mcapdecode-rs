@@ -13,7 +13,7 @@ use std::{
 use anyhow::Result;
 use mcapdecode::{
     McapReader, McapReaderError, RawMessage,
-    core::{DataTypeDef, DecodedMessage, DecoderError, FieldDef, FieldDefs, Value},
+    core::{DecodedMessage, DecoderError, Value},
 };
 
 use crate::{
@@ -39,7 +39,6 @@ pub(crate) struct TopicLoader {
 }
 
 enum LoaderEvent {
-    FieldDefs(mcapdecode::core::FieldDefs),
     Messages(Vec<LoadedMessage>),
     Finished { topic: String },
     Failed { topic: String, error: String },
@@ -58,19 +57,14 @@ impl TopicLoader {
                 .with_parallel(parallel)
                 .build();
 
+            // Deriving the schema up front tells whether the topic can be
+            // decoded, or has to be shown as raw payload bytes.
             let field_defs = match row.channel_id {
                 Some(channel_id) => reader.field_defs_by_channel_id(&input, channel_id),
                 None => reader.topic_field_defs(&input, row.topic()),
             };
             let load_result = match field_defs {
-                Ok(field_defs) => load_decoded_topic(
-                    &reader,
-                    &input,
-                    &row,
-                    field_defs,
-                    &sender,
-                    &cancel_for_thread,
-                ),
+                Ok(_) => load_decoded_topic(&reader, &input, &row, &sender, &cancel_for_thread),
                 Err(error) if supports_raw_fallback(&error) => {
                     load_raw_topic(&reader, &input, &row, &sender, &cancel_for_thread)
                 }
@@ -117,11 +111,6 @@ pub(crate) fn drain_loader_events(
             }
 
             match active_loader.receiver.try_recv() {
-                Ok(LoaderEvent::FieldDefs(field_defs)) => {
-                    app.set_message_field_defs(field_defs);
-                    result.state_changed = true;
-                    processed += 1;
-                }
                 Ok(LoaderEvent::Messages(messages)) => {
                     app.append_loaded_messages(messages);
                     result.state_changed = true;
@@ -183,14 +172,9 @@ fn load_decoded_topic(
     reader: &McapReader,
     input: &Path,
     row: &TopicRow,
-    field_defs: FieldDefs,
     sender: &mpsc::Sender<LoaderEvent>,
     cancel: &AtomicBool,
 ) -> Result<()> {
-    if sender.send(LoaderEvent::FieldDefs(field_defs)).is_err() {
-        return Ok(());
-    }
-
     let mut pending = Vec::new();
     let mut last_flush = Instant::now();
     let mut next_index = 0usize;
@@ -227,13 +211,6 @@ fn load_raw_topic(
     sender: &mpsc::Sender<LoaderEvent>,
     cancel: &AtomicBool,
 ) -> Result<()> {
-    if sender
-        .send(LoaderEvent::FieldDefs(raw_payload_field_defs()))
-        .is_err()
-    {
-        return Ok(());
-    }
-
     let mut pending = Vec::new();
     let mut last_flush = Instant::now();
     let mut next_index = 0usize;
@@ -285,10 +262,6 @@ fn to_loaded_raw_message(index: usize, message: RawMessage) -> LoadedMessage {
         detail_rows: Some(detail_rows),
         detail_text: Some(detail_text),
     }
-}
-
-fn raw_payload_field_defs() -> FieldDefs {
-    vec![FieldDef::new("payload", DataTypeDef::Bytes, false)].into()
 }
 
 fn supports_raw_fallback(error: &McapReaderError) -> bool {

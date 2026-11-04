@@ -42,4 +42,6 @@ pub enum ValueAccessError {
     NullValue,
     #[error(transparent)]
     TypeMismatch(#[from] ValueTypeError),
+    #[error("value does not match its schema")]
+    SchemaMismatch,
 }

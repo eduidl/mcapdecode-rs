@@ -43,9 +43,13 @@ fn sample_schema() -> FieldDefs {
 }
 
 fn sample_value() -> Value {
-    Value::Struct(vec![
-        Value::I64(42),
-        Value::Struct(vec![
+    let schema = sample_schema();
+    let DataTypeDef::Struct(nested) = &schema[1].element.data_type else {
+        panic!("expected nested struct")
+    };
+    let nested = Value::structure(
+        Arc::clone(nested),
+        vec![
             Value::List(vec![Value::I64(1), Value::I64(2), Value::I64(3)]),
             Value::Map(vec![(
                 Value::string("camera"),
@@ -53,8 +57,14 @@ fn sample_value() -> Value {
                     [0_u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].as_slice(),
                 )),
             )]),
-        ]),
-    ])
+        ],
+    );
+    structure(schema, vec![Value::I64(42), nested])
+}
+
+/// A root struct value that carries `fields` as its schema.
+fn structure(fields: FieldDefs, values: Vec<Value>) -> Value {
+    Value::structure(Arc::new(StructDef::from(fields)), values)
 }
 
 fn sample_topic() -> TopicInfo {
@@ -78,7 +88,7 @@ fn timestamp_is_formatted_readably() {
 
 #[test]
 fn detail_formatter_renders_struct_list_map_and_bytes() {
-    let lines: Vec<_> = format_detail_rows(10, 20, &sample_value(), &sample_schema())
+    let lines: Vec<_> = format_detail_rows(10, 20, &sample_value())
         .into_iter()
         .map(|row| row.text)
         .collect();
@@ -113,16 +123,19 @@ fn detail_formatter_truncates_large_collections() {
         ),
     ]
     .into();
-    let value = Value::Struct(vec![
-        Value::List((0_i64..40).map(Value::I64).collect()),
-        Value::Map(
-            (0_i64..35)
-                .map(|index| (Value::string(format!("k{index}")), Value::I64(index)))
-                .collect(),
-        ),
-    ]);
+    let value = structure(
+        schema,
+        vec![
+            Value::List((0_i64..40).map(Value::I64).collect()),
+            Value::Map(
+                (0_i64..35)
+                    .map(|index| (Value::string(format!("k{index}")), Value::I64(index)))
+                    .collect(),
+            ),
+        ],
+    );
 
-    let lines: Vec<_> = format_detail_rows(10, 20, &value, &schema)
+    let lines: Vec<_> = format_detail_rows(10, 20, &value)
         .into_iter()
         .map(|row| row.text)
         .collect();
@@ -229,10 +242,10 @@ fn schema_formatter_uses_nullable_suffixes() {
 fn uint8_lists_show_their_schema_type_and_use_the_bytes_preview() {
     for ty in [DataTypeDef::Uint8List, DataTypeDef::BoundedUint8List(8)] {
         let schema: FieldDefs = vec![FieldDef::new("data", ty.clone(), false)].into();
-        let value = Value::Struct(vec![Value::Uint8List(Arc::from([0, 255]))]);
-        let bytes = Value::Struct(vec![Value::Bytes(Arc::from([0, 255]))]);
-        let rows = format_detail_rows(0, 0, &value, &schema);
-        let old_rows = format_detail_rows(0, 0, &bytes, &schema);
+        let value = structure(schema.clone(), vec![Value::Uint8List(Arc::from([0, 255]))]);
+        let bytes = structure(schema.clone(), vec![Value::Bytes(Arc::from([0, 255]))]);
+        let rows = format_detail_rows(0, 0, &value);
+        let old_rows = format_detail_rows(0, 0, &bytes);
         assert_eq!(
             rows.iter().map(|r| &r.text).collect::<Vec<_>>(),
             old_rows.iter().map(|r| &r.text).collect::<Vec<_>>()
@@ -247,7 +260,7 @@ fn uint8_lists_show_their_schema_type_and_use_the_bytes_preview() {
 
 #[test]
 fn json_detail_rows_are_pretty_printed_in_message_key_order() {
-    let value = Value::Struct(vec![Value::string(r#"{"z": 1.5, "a": [true]}"#)]);
+    let value = Value::Struct(vec![Value::string(r#"{"z": 1.5, "a": [true]}"#)].into());
 
     let rows = format_json_detail_rows(10, 20, &value).unwrap();
     let lines: Vec<_> = rows.iter().map(|row| row.text.as_str()).collect();
@@ -271,9 +284,9 @@ fn json_detail_rows_are_pretty_printed_in_message_key_order() {
 #[test]
 fn json_detail_rows_leave_other_values_to_the_default_format() {
     for value in [
-        Value::Struct(vec![Value::string("{broken")]),
-        Value::Struct(vec![Value::I64(1)]),
-        Value::Struct(vec![Value::string("{}"), Value::string("{}")]),
+        Value::Struct(vec![Value::string("{broken")].into()),
+        Value::Struct(vec![Value::I64(1)].into()),
+        Value::Struct(vec![Value::string("{}"), Value::string("{}")].into()),
         Value::string("{}"),
     ] {
         assert!(format_json_detail_rows(0, 0, &value).is_none(), "{value:?}");
@@ -282,7 +295,7 @@ fn json_detail_rows_leave_other_values_to_the_default_format() {
 
 #[test]
 fn json_detail_rows_keep_float_values_exact() {
-    let value = Value::Struct(vec![Value::string(r#"{"wy": -0.0009321063815277333}"#)]);
+    let value = Value::Struct(vec![Value::string(r#"{"wy": -0.0009321063815277333}"#)].into());
 
     let rows = format_json_detail_rows(0, 0, &value).unwrap();
 

@@ -11,9 +11,11 @@ mod policy;
 mod proto_to_arrow;
 mod schema;
 
+use std::sync::Arc;
+
 use mcapdecode_core::{
     DecoderError, EncodingKey, FieldDefs, MessageDecoder, MessageEncoding, SchemaEncoding,
-    TopicDecoder, Value,
+    StructDef, TopicDecoder, Value,
 };
 pub use policy::PresencePolicy;
 use prost_reflect::MessageDescriptor;
@@ -56,7 +58,7 @@ impl MessageDecoder for ProtobufDecoder {
         let field_defs = schema::message_fields_to_field_defs(&desc, self.presence_policy)?;
         Ok(Box::new(ProtobufTopicDecoder {
             desc,
-            field_defs,
+            schema: Arc::new(StructDef::from(field_defs)),
             presence_policy: self.presence_policy,
         }))
     }
@@ -64,16 +66,21 @@ impl MessageDecoder for ProtobufDecoder {
 
 struct ProtobufTopicDecoder {
     desc: MessageDescriptor,
-    field_defs: FieldDefs,
+    schema: Arc<StructDef>,
     presence_policy: PresencePolicy,
 }
 
 impl TopicDecoder for ProtobufTopicDecoder {
     fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError> {
-        proto_to_arrow::decode_from_descriptor(&self.desc, message_data, self.presence_policy)
+        proto_to_arrow::decode_from_descriptor(
+            &self.desc,
+            message_data,
+            self.presence_policy,
+            &self.schema,
+        )
     }
 
     fn field_defs(&self) -> &FieldDefs {
-        &self.field_defs
+        &self.schema.fields
     }
 }

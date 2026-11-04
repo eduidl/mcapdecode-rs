@@ -239,6 +239,22 @@ fn with_prepared_topic_exposes_topic_metadata_and_derived_schema() {
 }
 
 #[test]
+fn prepared_topic_schema_enables_value_access() {
+    let fixture = write_chunked_fixture("prepared-value-view", &[br#"{"value":42}"#]);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build();
+    reader
+        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
+            prepared.for_each_decoded_message_with_options(&ReadOptions::default(), |message| {
+                assert_eq!(message.value.get("value")?.try_widen_i64()?, 42);
+                Ok(())
+            })
+        })
+        .unwrap();
+}
+
+#[test]
 fn with_prepared_topic_scans_repeatedly_from_one_preparation() {
     let fixture = write_chunked_fixture(
         "prepared-repeat",
@@ -888,9 +904,9 @@ fn default_decoders_expose_json_topics_unparsed() {
     let mut decoded = Vec::new();
     reader
         .for_each_decoded_message(fixture.path(), "/json", |message| {
-            decoded.push(format!("{:?}", message.value));
+            decoded.push(message.value.get("json")?.try_str()?.unwrap().to_owned());
             Ok(())
         })
         .unwrap();
-    assert_eq!(decoded, [r#"Struct([String("{\"x\": 7}")])"#]);
+    assert_eq!(decoded, [r#"{"x": 7}"#]);
 }

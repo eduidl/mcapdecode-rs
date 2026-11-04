@@ -137,6 +137,15 @@ fn decode_nested_message() {
 
     let wire = encode_dynamic(&outer_dm);
     let value = decode_protobuf_to_value("Outer", &fds, &wire).unwrap();
+    assert_eq!(
+        value
+            .get("inner")
+            .unwrap()
+            .get("x")
+            .unwrap()
+            .try_widen_i64(),
+        Ok(99)
+    );
 
     let Value::Struct(outer_fields) = value else {
         panic!("expected Struct");
@@ -271,6 +280,15 @@ fn decode_map_field() {
 
     let wire = encode_dynamic(&dm);
     let value = decode_protobuf_to_value("WithMap", &fds, &wire).unwrap();
+    assert_eq!(
+        value
+            .get("labels")
+            .unwrap()
+            .get("a")
+            .unwrap()
+            .try_widen_i64(),
+        Ok(1)
+    );
 
     let Value::Struct(fields) = value else {
         panic!("expected Struct");

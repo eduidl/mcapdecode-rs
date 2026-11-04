@@ -70,6 +70,81 @@ fn repeated_struct_references_share_one_definition() {
 }
 
 #[test]
+fn rejects_missing_and_recursive_structs_without_panicking() {
+    let missing = make_schema(
+        vec![ResolvedField {
+            name: "child".into(),
+            ty: ResolvedType::Struct(vec!["missing".into()]),
+            fixed_len: None,
+        }],
+        HashMap::new(),
+    );
+    assert!(
+        format!(
+            "{:#}",
+            decode_cdr_to_value(&missing, &cdr_with_payload(vec![])).unwrap_err()
+        )
+        .contains("unknown struct")
+    );
+
+    let mut recursive = make_schema(vec![], HashMap::new());
+    let root = recursive.root.clone();
+    recursive
+        .structs
+        .get_mut(&root)
+        .unwrap()
+        .fields
+        .push(ResolvedField {
+            name: "child".into(),
+            ty: ResolvedType::Struct(root),
+            fixed_len: None,
+        });
+    assert!(
+        format!(
+            "{:#}",
+            decode_cdr_to_value(&recursive, &cdr_with_payload(vec![])).unwrap_err()
+        )
+        .contains("recursive struct")
+    );
+}
+
+#[test]
+fn decoded_struct_references_share_one_definition() {
+    let point = vec!["ex".to_string(), "msg".to_string(), "P".to_string()];
+    let mut schema = make_schema(
+        vec![
+            ResolvedField {
+                name: "a".into(),
+                ty: ResolvedType::Struct(point.clone()),
+                fixed_len: None,
+            },
+            ResolvedField {
+                name: "b".into(),
+                ty: ResolvedType::Struct(point.clone()),
+                fixed_len: None,
+            },
+        ],
+        HashMap::new(),
+    );
+    schema.structs.insert(
+        point,
+        ResolvedStruct {
+            fields: vec![ResolvedField {
+                name: "x".into(),
+                ty: ResolvedType::Primitive(PrimitiveType::U8),
+                fixed_len: None,
+            }],
+        },
+    );
+    let value = decode_cdr_to_value(&schema, &cdr_with_payload(vec![1, 2])).unwrap();
+    let (Value::Struct(a), Value::Struct(b)) = (value.get("a").unwrap(), value.get("b").unwrap())
+    else {
+        panic!("expected structs")
+    };
+    assert!(std::sync::Arc::ptr_eq(a.schema(), b.schema()));
+}
+
+#[test]
 fn decodes_f64_with_encapsulation_relative_alignment() {
     let schema = make_schema(
         vec![

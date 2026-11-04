@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mcapdecode_core::{DecoderError, Value};
+use mcapdecode_core::{DataTypeDef, DecoderError, StructDef, Value};
 use prost_reflect::{
     DynamicMessage, EnumDescriptor, Kind, MapKey, MessageDescriptor, Value as ProtoValue,
 };
@@ -19,10 +19,16 @@ pub(crate) fn decode_from_descriptor(
     message_desc: &MessageDescriptor,
     message_data: &[u8],
     policy: PresencePolicy,
+    schema: &Arc<StructDef>,
 ) -> Result<Value, DecoderError> {
     let dynamic_message = DynamicMessage::decode(message_desc.clone(), message_data)
         .map_err(|e| DecoderError::MessageDecode(Box::new(e)))?;
-    Ok(message_to_value(&dynamic_message, message_desc, policy))
+    Ok(message_to_value(
+        &dynamic_message,
+        message_desc,
+        policy,
+        schema,
+    ))
 }
 
 /// Decode a serialized protobuf message into a [`Value`].
@@ -31,6 +37,10 @@ pub(crate) fn decode_from_descriptor(
 /// `schema_data` must be a valid serialized
 /// `google.protobuf.FileDescriptorSet`.  `message_data` is the
 /// wire-format encoded protobuf message.
+///
+/// This parses the descriptor set and derives the schema on every call. To
+/// decode many messages of one type, build a topic decoder once with
+/// [`ProtobufDecoder`](crate::ProtobufDecoder) and reuse it instead.
 pub fn decode_protobuf_to_value(
     schema_name: &str,
     schema_data: &[u8],
@@ -46,6 +56,10 @@ pub fn decode_protobuf_to_value(
 
 /// Decode a serialized protobuf message into a [`Value`] using a presence
 /// policy.
+///
+/// This parses the descriptor set and derives the schema on every call. To
+/// decode many messages of one type, build a topic decoder once with
+/// [`ProtobufDecoder`](crate::ProtobufDecoder) and reuse it instead.
 pub fn decode_protobuf_to_value_with_policy(
     schema_name: &str,
     schema_data: &[u8],
@@ -53,17 +67,22 @@ pub fn decode_protobuf_to_value_with_policy(
     policy: PresencePolicy,
 ) -> Result<Value, DecoderError> {
     let desc = parse_message_descriptor(schema_name, schema_data)?;
-    decode_from_descriptor(&desc, message_data, policy)
+    let schema = Arc::new(StructDef::from(crate::message_fields_to_field_defs(
+        &desc, policy,
+    )?));
+    decode_from_descriptor(&desc, message_data, policy, &schema)
 }
 
 fn message_to_value(
     msg: &DynamicMessage,
     desc: &MessageDescriptor,
     policy: PresencePolicy,
+    schema: &Arc<StructDef>,
 ) -> Value {
     let fields = desc
         .fields()
-        .map(|field_desc| {
+        .zip(schema.fields.iter())
+        .map(|(field_desc, field)| {
             if matches!(policy, PresencePolicy::PresenceAware)
                 && field_desc.supports_presence()
                 && !msg.has_field(&field_desc)
@@ -71,13 +90,23 @@ fn message_to_value(
                 return Value::Null;
             }
             let value = msg.get_field(&field_desc);
-            proto_value_to_value(value.as_ref(), &field_desc.kind(), policy)
+            proto_value_to_value(
+                value.as_ref(),
+                &field_desc.kind(),
+                policy,
+                &field.element.data_type,
+            )
         })
         .collect();
-    Value::Struct(fields)
+    Value::structure(Arc::clone(schema), fields)
 }
 
-fn proto_value_to_value(value: &ProtoValue, kind: &Kind, policy: PresencePolicy) -> Value {
+fn proto_value_to_value(
+    value: &ProtoValue,
+    kind: &Kind,
+    policy: PresencePolicy,
+    schema: &DataTypeDef,
+) -> Value {
     match value {
         ProtoValue::Bool(v) => Value::Bool(*v),
         ProtoValue::I32(v) => Value::I32(*v),
@@ -98,15 +127,30 @@ fn proto_value_to_value(value: &ProtoValue, kind: &Kind, policy: PresencePolicy)
             let Kind::Message(md) = kind else {
                 panic!("Message with non-Message kind: {kind:?}")
             };
-            message_to_value(m, md, policy)
+            let DataTypeDef::Struct(def) = schema else {
+                unreachable!("message schema must be a struct")
+            };
+            message_to_value(m, md, policy, def)
         }
-        ProtoValue::List(items) => Value::List(
-            items
-                .iter()
-                .map(|v| proto_value_to_value(v, kind, policy))
-                .collect(),
-        ),
+        ProtoValue::List(items) => {
+            let DataTypeDef::List(element) = schema else {
+                unreachable!("list schema must be a list")
+            };
+            Value::List(
+                items
+                    .iter()
+                    .map(|v| proto_value_to_value(v, kind, policy, &element.data_type))
+                    .collect(),
+            )
+        }
         ProtoValue::Map(map) => {
+            let DataTypeDef::Map {
+                value: value_schema,
+                ..
+            } = schema
+            else {
+                unreachable!("map schema must be a map")
+            };
             let value_kind = match kind {
                 Kind::Message(entry_desc) if entry_desc.is_map_entry() => {
                     entry_desc.map_entry_value_field().kind()
@@ -118,7 +162,7 @@ fn proto_value_to_value(value: &ProtoValue, kind: &Kind, policy: PresencePolicy)
                 .map(|(k, v)| {
                     (
                         map_key_to_value(k),
-                        proto_value_to_value(v, &value_kind, policy),
+                        proto_value_to_value(v, &value_kind, policy, &value_schema.data_type),
                     )
                 })
                 .collect();

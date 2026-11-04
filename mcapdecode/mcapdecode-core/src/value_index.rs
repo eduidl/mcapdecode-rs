@@ -5,6 +5,24 @@ use crate::{Value, ValueAccessError};
 pub trait ValueIndex {
     fn get(self, value: &Value) -> Result<&Value, ValueAccessError>;
 }
+impl ValueIndex for &str {
+    fn get(self, value: &Value) -> Result<&Value, ValueAccessError> {
+        if matches!(value, Value::Map(_)) {
+            return value.get_key(self);
+        }
+        let Value::Struct(fields) = value else {
+            return Err(value.access_mismatch("Struct"));
+        };
+        fields.check_schema()?;
+        let index = fields
+            .schema()
+            .fields
+            .iter()
+            .position(|field| field.name == self)
+            .ok_or(ValueAccessError::NotFound)?;
+        Ok(&fields[index])
+    }
+}
 impl ValueIndex for usize {
     fn get(self, value: &Value) -> Result<&Value, ValueAccessError> {
         value

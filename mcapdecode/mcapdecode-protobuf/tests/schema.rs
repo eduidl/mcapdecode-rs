@@ -240,6 +240,8 @@ fn recursive_message_is_a_schema_error() {
         matches!(err, DecoderError::SchemaDerivation(ref m) if m.contains("recursive message type: Node")),
         "{err}"
     );
+    let err = mcapdecode_protobuf::decode_protobuf_to_value("Node", &fds, &[]).unwrap_err();
+    assert!(matches!(err, DecoderError::SchemaDerivation(_)));
 }
 
 #[test]

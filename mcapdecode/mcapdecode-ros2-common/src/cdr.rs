@@ -3,7 +3,7 @@
 use std::{fmt, sync::Arc};
 
 use bytes::Buf;
-use mcapdecode_core::{DecoderError, Value};
+use mcapdecode_core::{DataTypeDef, DecoderError, StructDef, Value};
 
 use crate::{
     ast::PrimitiveType,
@@ -11,12 +11,29 @@ use crate::{
     type_resolver::{ResolvedField, ResolvedSchema, ResolvedType},
 };
 
+/// Decode one CDR message.
+///
+/// This derives the schema from `schema` on every call. To decode many messages
+/// of one type, build a [`Ros2CdrTopicDecoder`](crate::Ros2CdrTopicDecoder) once
+/// and reuse it instead.
 pub fn decode_cdr_to_value(schema: &ResolvedSchema, data: &[u8]) -> Result<Value, DecoderError> {
+    let root = Arc::new(StructDef::from(
+        crate::schema::try_resolved_schema_to_field_defs(schema)
+            .map_err(DecoderError::SchemaDerivation)?,
+    ));
+    decode_with_schema(schema, data, &root)
+}
+
+pub(crate) fn decode_with_schema(
+    schema: &ResolvedSchema,
+    data: &[u8],
+    root: &Arc<StructDef>,
+) -> Result<Value, DecoderError> {
     let mut d = Decoder::new(data);
     d.read_encapsulation()
         .map_err(|detail| DecoderError::MessageDecode(detail.into()))?;
     let mut path = FieldPath::new(&schema.root);
-    d.decode_struct(schema, &schema.root, &mut path)
+    d.decode_struct(schema, &schema.root, &mut path, root)
         .map_err(|detail| DecoderError::MessageDecode(detail.into()))
 }
 
@@ -103,6 +120,7 @@ impl<'a> Decoder<'a> {
         schema: &'s ResolvedSchema,
         struct_name: &[String],
         path: &mut FieldPath<'s>,
+        definition: &Arc<StructDef>,
     ) -> Result<Value, Ros2Error> {
         let s = schema
             .structs
@@ -123,14 +141,16 @@ impl<'a> Decoder<'a> {
                 ))
             })?;
         }
-        for field in &s.fields {
+        // `definition` is derived from this same schema, so the fields line up.
+        debug_assert_eq!(s.fields.len(), definition.fields.len());
+        for (field, field_def) in s.fields.iter().zip(definition.fields.iter()) {
             path.segments.push(PathSegment::Field(&field.name));
-            let v = self.decode_field(schema, field, path);
+            let v = self.decode_field(schema, field, path, &field_def.element.data_type);
             path.segments.pop();
             let v = v?;
             fields.push(v);
         }
-        Ok(Value::Struct(fields))
+        Ok(Value::structure(Arc::clone(definition), fields))
     }
 
     fn decode_field<'s>(
@@ -138,18 +158,22 @@ impl<'a> Decoder<'a> {
         schema: &'s ResolvedSchema,
         field: &'s ResolvedField,
         path: &mut FieldPath<'s>,
+        data_type: &DataTypeDef,
     ) -> Result<Value, Ros2Error> {
         if let Some(n) = field.fixed_len {
+            let DataTypeDef::Array(element, _) = data_type else {
+                unreachable!("fixed-length field schema must be an array")
+            };
             let mut arr = Vec::with_capacity(n);
             for i in 0..n {
                 path.segments.push(PathSegment::Index(i));
-                let v = self.decode_type(schema, &field.ty, path);
+                let v = self.decode_type(schema, &field.ty, path, &element.data_type);
                 path.segments.pop();
                 arr.push(v?);
             }
             return Ok(Value::Array(arr));
         }
-        self.decode_type(schema, &field.ty, path)
+        self.decode_type(schema, &field.ty, path, data_type)
     }
 
     fn decode_type<'s>(
@@ -157,6 +181,7 @@ impl<'a> Decoder<'a> {
         schema: &'s ResolvedSchema,
         ty: &'s ResolvedType,
         path: &mut FieldPath<'s>,
+        data_type: &DataTypeDef,
     ) -> Result<Value, Ros2Error> {
         match ty {
             ResolvedType::Primitive(p) => self.decode_primitive(p, path),
@@ -172,7 +197,12 @@ impl<'a> Decoder<'a> {
             ResolvedType::BoundedWString(_max) => {
                 Err(format!("wstring not supported at {path}").into())
             }
-            ResolvedType::Struct(name) => self.decode_struct(schema, name, path),
+            ResolvedType::Struct(name) => {
+                let DataTypeDef::Struct(definition) = data_type else {
+                    unreachable!("struct schema must be a struct")
+                };
+                self.decode_struct(schema, name, path, definition)
+            }
             ResolvedType::Enum(name) => {
                 self.align(4)?;
                 let raw = self
@@ -215,10 +245,14 @@ impl<'a> Decoder<'a> {
                 ) {
                     return Ok(Value::Uint8List(Arc::from(self.read_bytes(len, path)?)));
                 }
+                let (DataTypeDef::List(element) | DataTypeDef::BoundedList(element, _)) = data_type
+                else {
+                    unreachable!("sequence schema must be a list")
+                };
                 let mut out = Vec::with_capacity(len);
                 for i in 0..len {
                     path.segments.push(PathSegment::Index(i));
-                    let v = self.decode_type(schema, elem, path);
+                    let v = self.decode_type(schema, elem, path, &element.data_type);
                     path.segments.pop();
                     out.push(v?);
                 }
