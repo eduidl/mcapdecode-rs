@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::error::ValueTypeError;
+use crate::{ValueAccessError, error::ValueTypeError};
 
 /// Value produced by message decoders.
 /// All types are explicit; no lossy conversions.
@@ -31,6 +31,87 @@ pub enum Value {
 }
 
 impl Value {
+    /// Access an element of a list or fixed-size array.
+    pub fn get<I: crate::ValueIndex>(&self, index: I) -> Result<&Value, ValueAccessError> {
+        index.get(self)
+    }
+
+    /// Look up a map key by value.
+    pub fn get_key<K: crate::MapKey>(&self, key: K) -> Result<&Value, ValueAccessError> {
+        let Self::Map(entries) = self else {
+            return Err(self.access_mismatch("Map"));
+        };
+        entries
+            .iter()
+            .find(|(candidate, _)| key.matches(candidate))
+            .map(|(_, value)| value)
+            .ok_or(ValueAccessError::NotFound)
+    }
+
+    /// Borrow elements of a list or fixed-size array.
+    pub fn as_sequence(&self) -> Result<&[Value], ValueAccessError> {
+        match self {
+            Self::List(values) | Self::Array(values) => Ok(values),
+            _ => Err(self.access_mismatch("List or Array")),
+        }
+    }
+
+    /// Borrow map entries.
+    pub fn as_map(&self) -> Result<&[(Value, Value)], ValueAccessError> {
+        match self {
+            Self::Map(entries) => Ok(entries),
+            _ => Err(self.access_mismatch("Map")),
+        }
+    }
+
+    pub(crate) fn access_mismatch(&self, expected: &'static str) -> ValueAccessError {
+        if matches!(self, Self::Null) {
+            ValueAccessError::NullValue
+        } else {
+            ValueAccessError::TypeMismatch(self.type_mismatch(expected))
+        }
+    }
+
+    /// Widen signed integers and unsigned integers up to `u32` to `i64`.
+    /// `u64` is rejected even when the particular value would fit.
+    ///
+    /// Unlike the exact-type `try_*` methods, which return `Ok(None)` for null,
+    /// the `try_widen_*` methods report null as [`ValueAccessError::NullValue`]
+    /// so that they chain with [`Value::get`] using `?`.
+    pub fn try_widen_i64(&self) -> Result<i64, ValueAccessError> {
+        match self {
+            Self::I8(v) => Ok(i64::from(*v)),
+            Self::I16(v) => Ok(i64::from(*v)),
+            Self::I32(v) => Ok(i64::from(*v)),
+            Self::I64(v) => Ok(*v),
+            Self::U8(v) => Ok(i64::from(*v)),
+            Self::U16(v) => Ok(i64::from(*v)),
+            Self::U32(v) => Ok(i64::from(*v)),
+            _ => Err(self.access_mismatch("integer safely representable as i64")),
+        }
+    }
+
+    /// Widen an unsigned integer to `u64`. Signed integers are rejected,
+    /// even when the particular value is non-negative.
+    pub fn try_widen_u64(&self) -> Result<u64, ValueAccessError> {
+        match self {
+            Self::U8(v) => Ok(u64::from(*v)),
+            Self::U16(v) => Ok(u64::from(*v)),
+            Self::U32(v) => Ok(u64::from(*v)),
+            Self::U64(v) => Ok(*v),
+            _ => Err(self.access_mismatch("unsigned integer")),
+        }
+    }
+
+    /// Widen f32 to f64 or return an f64, rejecting null and non-float values.
+    pub fn try_widen_f64(&self) -> Result<f64, ValueAccessError> {
+        match self {
+            Self::F32(v) => Ok(f64::from(*v)),
+            Self::F64(v) => Ok(*v),
+            _ => Err(self.access_mismatch("float")),
+        }
+    }
+
     pub fn string(s: impl AsRef<str>) -> Self {
         Self::String(Arc::from(s.as_ref()))
     }

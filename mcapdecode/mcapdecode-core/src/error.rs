@@ -32,3 +32,14 @@ impl ValueTypeError {
         }
     }
 }
+
+/// An error encountered while accessing or converting a decoded value.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ValueAccessError {
+    #[error("field or element not found")]
+    NotFound,
+    #[error("value is null")]
+    NullValue,
+    #[error(transparent)]
+    TypeMismatch(#[from] ValueTypeError),
+}
