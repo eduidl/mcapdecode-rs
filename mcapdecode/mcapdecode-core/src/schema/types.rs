@@ -1,6 +1,7 @@
 use std::{
     fmt::{Display, Formatter, Result},
     ops::Deref,
+    sync::Arc,
 };
 
 /// Arrow-independent data type definition for schema intermediate representation.
@@ -26,7 +27,7 @@ pub enum DataTypeDef {
     BoundedWString(usize),
     Bytes,
     Enum(EnumDef),
-    Struct(StructDef),
+    Struct(Arc<StructDef>),
     List(Box<ElementDef>),
     BoundedList(Box<ElementDef>, usize),
     /// Unsigned byte sequence stored in bulk, rather than as opaque bytes.
@@ -40,6 +41,11 @@ pub enum DataTypeDef {
 }
 
 impl DataTypeDef {
+    /// Construct a struct type with a shared definition.
+    pub fn structure(definition: StructDef) -> Self {
+        Self::Struct(Arc::new(definition))
+    }
+
     pub fn is_primitive(&self) -> bool {
         !matches!(
             self,

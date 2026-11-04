@@ -5,7 +5,7 @@ use mcapdecode_core::{
 
 #[test]
 fn named_types_render_qualified_names_in_collections() -> Result<(), std::fmt::Error> {
-    let pose = DataTypeDef::Struct(StructDef {
+    let pose = DataTypeDef::structure(StructDef {
         type_name: Some("example.Pose".into()),
         fields: vec![FieldDef::new(
             "mode",
@@ -64,12 +64,12 @@ lookup: map<string, example.Pose[]>
 fn nested_struct_keeps_compact_type_labels_and_indentation() -> Result<(), std::fmt::Error> {
     let fields = vec![FieldDef::new(
         "field_root",
-        DataTypeDef::Struct(
+        DataTypeDef::structure(
             vec![
                 FieldDef::new("field_a", DataTypeDef::F64, true),
                 FieldDef::new(
                     "field_b",
-                    DataTypeDef::Struct(
+                    DataTypeDef::structure(
                         vec![FieldDef::new("field_c", DataTypeDef::String, true)].into(),
                     ),
                     true,
@@ -95,11 +95,11 @@ field_root: struct?
 fn list_of_complex_item_is_rendered_as_block() -> Result<(), std::fmt::Error> {
     let fields = vec![FieldDef::new(
         "field_root",
-        DataTypeDef::Struct(
+        DataTypeDef::structure(
             vec![FieldDef::new(
                 "field_list",
                 DataTypeDef::List(Box::new(ElementDef::new(
-                    DataTypeDef::Struct(
+                    DataTypeDef::structure(
                         vec![
                             FieldDef::new("item_a", DataTypeDef::I32, true),
                             FieldDef::new("item_b", DataTypeDef::String, true),
@@ -130,7 +130,7 @@ field_root: struct?
 fn non_nullable_fields_do_not_get_nullable_suffix() -> Result<(), std::fmt::Error> {
     let fields = vec![FieldDef::new(
         "field_root",
-        DataTypeDef::Struct(
+        DataTypeDef::structure(
             vec![
                 FieldDef::new("field_a", DataTypeDef::F64, false),
                 FieldDef::new(
@@ -202,9 +202,10 @@ fn enums_render_declared_wire_values() -> Result<(), std::fmt::Error> {
 
 #[test]
 fn maps_expand_struct_bodies_without_item_labels() -> Result<(), std::fmt::Error> {
-    let struct_key = DataTypeDef::Struct(vec![FieldDef::new("id", DataTypeDef::U32, false)].into());
+    let struct_key =
+        DataTypeDef::structure(vec![FieldDef::new("id", DataTypeDef::U32, false)].into());
     let struct_value =
-        DataTypeDef::Struct(vec![FieldDef::new("enabled", DataTypeDef::Bool, false)].into());
+        DataTypeDef::structure(vec![FieldDef::new("enabled", DataTypeDef::Bool, false)].into());
     let fields = vec![
         FieldDef::new(
             "labels",
