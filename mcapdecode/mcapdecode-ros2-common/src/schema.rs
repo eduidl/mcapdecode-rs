@@ -13,7 +13,10 @@
 //! | BoundedString/WString  | bounded string variants      |
 //! | Fixed-length field     | `Array(element type, n)`     |
 
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use mcapdecode_core::{DataTypeDef, ElementDef, EnumDef, FieldDef, FieldDefs, StructDef};
 
@@ -36,88 +39,93 @@ pub fn resolved_schema_to_field_defs(schema: &ResolvedSchema) -> FieldDefs {
 pub(crate) fn try_resolved_schema_to_field_defs(
     schema: &ResolvedSchema,
 ) -> Result<FieldDefs, String> {
-    resolved_struct_to_field_defs(schema, &schema.root, &mut HashSet::new())
-}
-
-/// `visiting` holds the structs on the current path, to detect recursion.
-fn resolved_struct_to_field_defs<'s>(
-    schema: &'s ResolvedSchema,
-    name: &'s [String],
-    visiting: &mut HashSet<&'s [String]>,
-) -> Result<FieldDefs, String> {
-    let st = schema
-        .structs
-        .get(name)
-        .ok_or_else(|| format!("unknown struct: {}", name.join("::")))?;
-    if !visiting.insert(name) {
-        return Err(format!("recursive struct: {}", name.join("::")));
-    }
-    let fields = st
-        .fields
-        .iter()
-        .map(|f| resolved_field_to_field_def(schema, f, visiting))
-        .collect::<Result<Vec<_>, _>>()?;
-    visiting.remove(name);
-    Ok(FieldDefs::new(fields))
-}
-
-fn resolved_field_to_field_def<'s>(
-    schema: &'s ResolvedSchema,
-    field: &'s ResolvedField,
-    visiting: &mut HashSet<&'s [String]>,
-) -> Result<FieldDef, String> {
-    let inner_dt = resolved_type_to_data_type_def(schema, &field.ty, visiting)?;
-
-    // Wrap in Array when the field has a fixed static length.
-    let dt = match field.fixed_len {
-        Some(n) => DataTypeDef::Array(Box::new(ElementDef::new(inner_dt, false)), n),
-        None => inner_dt,
+    let mut builder = Builder {
+        schema,
+        built: HashMap::new(),
+        visiting: HashSet::new(),
     };
-
-    Ok(FieldDef::new(&field.name, dt, false))
+    builder.struct_fields(&schema.root)
 }
 
-fn resolved_type_to_data_type_def<'s>(
+/// Builds each struct definition once, so every reference to the same struct
+/// type shares one `Arc<StructDef>`.
+struct Builder<'s> {
     schema: &'s ResolvedSchema,
-    ty: &'s ResolvedType,
-    visiting: &mut HashSet<&'s [String]>,
-) -> Result<DataTypeDef, String> {
-    Ok(match ty {
-        ResolvedType::Primitive(p) => primitive_to_data_type_def(p),
-        ResolvedType::Struct(name) => {
-            let fields = resolved_struct_to_field_defs(schema, name, visiting)?;
-            DataTypeDef::Struct(StructDef {
-                type_name: Some(name.join("/")),
-                fields,
-            })
+    built: HashMap<&'s [String], Arc<StructDef>>,
+    visiting: HashSet<&'s [String]>,
+}
+
+impl<'s> Builder<'s> {
+    fn struct_fields(&mut self, name: &'s [String]) -> Result<FieldDefs, String> {
+        let st = self
+            .schema
+            .structs
+            .get(name)
+            .ok_or_else(|| format!("unknown struct: {}", name.join("::")))?;
+        if !self.visiting.insert(name) {
+            return Err(format!("recursive struct: {}", name.join("::")));
         }
-        // An unknown enum stays decodable (`decode_cdr_to_value` falls back to the raw
-        // number), so it must not be treated as harder than a missing struct.
-        ResolvedType::Enum(name) => DataTypeDef::Enum(EnumDef {
-            type_name: Some(name.join("/")),
-            variants: schema.enums.get(name).cloned().unwrap_or_default(),
-        }),
-        ResolvedType::Sequence { elem, max_len }
-            if matches!(
-                elem.as_ref(),
-                ResolvedType::Primitive(PrimitiveType::U8 | PrimitiveType::Octet)
-            ) =>
-        {
-            max_len.map_or(DataTypeDef::Uint8List, DataTypeDef::BoundedUint8List)
-        }
-        ResolvedType::Sequence { elem, max_len } => {
-            let element = Box::new(ElementDef::new(
-                resolved_type_to_data_type_def(schema, elem, visiting)?,
-                false,
-            ));
-            match max_len {
-                Some(size) => DataTypeDef::BoundedList(element, *size),
-                None => DataTypeDef::List(element),
+        let fields = st
+            .fields
+            .iter()
+            .map(|f| self.field(f))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.visiting.remove(name);
+        Ok(FieldDefs::new(fields))
+    }
+
+    fn field(&mut self, field: &'s ResolvedField) -> Result<FieldDef, String> {
+        let inner_dt = self.data_type(&field.ty)?;
+
+        // Wrap in Array when the field has a fixed static length.
+        let dt = match field.fixed_len {
+            Some(n) => DataTypeDef::Array(Box::new(ElementDef::new(inner_dt, false)), n),
+            None => inner_dt,
+        };
+
+        Ok(FieldDef::new(&field.name, dt, false))
+    }
+
+    fn data_type(&mut self, ty: &'s ResolvedType) -> Result<DataTypeDef, String> {
+        Ok(match ty {
+            ResolvedType::Primitive(p) => primitive_to_data_type_def(p),
+            ResolvedType::Struct(name) => {
+                if let Some(definition) = self.built.get(name.as_slice()) {
+                    return Ok(DataTypeDef::Struct(Arc::clone(definition)));
+                }
+                let fields = self.struct_fields(name)?;
+                let definition = Arc::new(StructDef {
+                    type_name: Some(name.join("/")),
+                    fields,
+                });
+                self.built.insert(name, Arc::clone(&definition));
+                DataTypeDef::Struct(definition)
             }
-        }
-        ResolvedType::BoundedString(size) => DataTypeDef::BoundedString(*size),
-        ResolvedType::BoundedWString(size) => DataTypeDef::BoundedWString(*size),
-    })
+            // An unknown enum stays decodable (`decode_cdr_to_value` falls back to the raw
+            // number), so it must not be treated as harder than a missing struct.
+            ResolvedType::Enum(name) => DataTypeDef::Enum(EnumDef {
+                type_name: Some(name.join("/")),
+                variants: self.schema.enums.get(name).cloned().unwrap_or_default(),
+            }),
+            ResolvedType::Sequence { elem, max_len }
+                if matches!(
+                    elem.as_ref(),
+                    ResolvedType::Primitive(PrimitiveType::U8 | PrimitiveType::Octet)
+                ) =>
+            {
+                max_len.map_or(DataTypeDef::Uint8List, DataTypeDef::BoundedUint8List)
+            }
+            ResolvedType::Sequence { elem, max_len } => {
+                let element = Box::new(ElementDef::new(self.data_type(elem)?, false));
+                match max_len {
+                    Some(size) => DataTypeDef::BoundedList(element, *size),
+                    None => DataTypeDef::List(element),
+                }
+            }
+            ResolvedType::BoundedString(size) => DataTypeDef::BoundedString(*size),
+            ResolvedType::BoundedWString(size) => DataTypeDef::BoundedWString(*size),
+        })
+    }
 }
 
 fn primitive_to_data_type_def(p: &PrimitiveType) -> DataTypeDef {

@@ -41,6 +41,35 @@ fn cdr_with_payload(payload: Vec<u8>) -> Vec<u8> {
 // ── existing tests ────────────────────────────────────────────────────────────
 
 #[test]
+fn repeated_struct_references_share_one_definition() {
+    let point = vec!["ex".to_string(), "msg".to_string(), "P".to_string()];
+    let field = |name: &str| ResolvedField {
+        name: name.into(),
+        ty: ResolvedType::Struct(point.clone()),
+        fixed_len: None,
+    };
+    let mut schema = make_schema(vec![field("a"), field("b")], HashMap::new());
+    schema.structs.insert(
+        point.clone(),
+        ResolvedStruct {
+            fields: vec![ResolvedField {
+                name: "x".into(),
+                ty: ResolvedType::Primitive(PrimitiveType::U8),
+                fixed_len: None,
+            }],
+        },
+    );
+    let field_defs = resolved_schema_to_field_defs(&schema);
+    let (DataTypeDef::Struct(a), DataTypeDef::Struct(b)) = (
+        &field_defs[0].element.data_type,
+        &field_defs[1].element.data_type,
+    ) else {
+        panic!("expected structs")
+    };
+    assert!(std::sync::Arc::ptr_eq(a, b));
+}
+
+#[test]
 fn decodes_f64_with_encapsulation_relative_alignment() {
     let schema = make_schema(
         vec![

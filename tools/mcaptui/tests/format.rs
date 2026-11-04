@@ -4,7 +4,7 @@ use mcapdecode::{
     TopicInfo,
     core::{
         DataTypeDef,
-        DataTypeDef::{Bytes, I64, Map, String as StringType, Struct},
+        DataTypeDef::{Bytes, I64, Map, String as StringType},
         ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef, Value,
     },
 };
@@ -18,7 +18,7 @@ fn sample_schema() -> FieldDefs {
         FieldDef::new("stamp", I64, false),
         FieldDef::new(
             "nested",
-            Struct(
+            DataTypeDef::structure(
                 vec![
                     FieldDef::new(
                         "items",
@@ -158,7 +158,7 @@ fn schema_formatter_uses_qualified_names_and_nullable_suffixes() {
     let fields = vec![FieldDef::new(
         "poses",
         DataTypeDef::List(Box::new(ElementDef::new(
-            Struct(StructDef {
+            DataTypeDef::structure(StructDef {
                 type_name: Some("example.Pose".into()),
                 fields: vec![
                     FieldDef::new("x", DataTypeDef::F64, true),

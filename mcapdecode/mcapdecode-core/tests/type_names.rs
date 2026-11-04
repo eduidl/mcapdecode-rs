@@ -4,7 +4,7 @@ use mcapdecode_core::{DataTypeDef, ElementDef, EnumDef, StructDef};
 fn named_definitions_display_original_names() {
     let named_types = [
         (
-            DataTypeDef::Struct(StructDef {
+            DataTypeDef::structure(StructDef {
                 type_name: Some("example.Pose".into()),
                 ..Default::default()
             }),
@@ -28,7 +28,7 @@ fn named_definitions_display_original_names() {
 
 #[test]
 fn collections_display_named_elements() {
-    let pose = DataTypeDef::Struct(StructDef {
+    let pose = DataTypeDef::structure(StructDef {
         type_name: Some("example.Pose".into()),
         ..Default::default()
     });
@@ -85,7 +85,7 @@ fn numeric_types_use_language_independent_names() {
 #[test]
 fn anonymous_definitions_have_only_category_names() {
     for (data_type, expected) in [
-        (DataTypeDef::Struct(StructDef::default()), "struct"),
+        (DataTypeDef::structure(StructDef::default()), "struct"),
         (DataTypeDef::Enum(EnumDef::default()), "enum"),
     ] {
         assert_eq!(data_type.type_name(), expected);

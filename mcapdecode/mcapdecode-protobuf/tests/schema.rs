@@ -110,7 +110,7 @@ fn nested_message_becomes_struct() {
     assert_eq!(field.name, "inner");
     assert_eq!(
         field.element.data_type,
-        DataTypeDef::Struct(StructDef {
+        DataTypeDef::structure(StructDef {
             type_name: Some("Inner".into()),
             fields: vec![FieldDef::new("x", DataTypeDef::I32, false)].into()
         })
@@ -243,7 +243,7 @@ fn recursive_message_is_a_schema_error() {
 }
 
 #[test]
-fn sibling_fields_of_one_message_type_are_not_recursion() {
+fn repeated_references_share_one_definition() {
     let inner = DescriptorProto {
         name: Some("Inner".to_string()),
         field: vec![scalar_field("x", 1, Type::Int32)],
@@ -257,7 +257,12 @@ fn sibling_fields_of_one_message_type_are_not_recursion() {
         ],
         ..Default::default()
     };
-    let fds = build_fds("siblings.proto", vec![inner, outer]);
+    let fds = build_fds("shared.proto", vec![inner, outer]);
     let schema = derive_schema("Outer", &fds, PresencePolicy::PresenceAware).unwrap();
-    assert_eq!(schema.len(), 2);
+    let (DataTypeDef::Struct(a), DataTypeDef::Struct(b)) =
+        (&schema[0].element.data_type, &schema[1].element.data_type)
+    else {
+        panic!("expected structs")
+    };
+    assert!(std::sync::Arc::ptr_eq(a, b));
 }
