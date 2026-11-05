@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use mcapdecode::{
-    TopicInfo,
+    ChannelInfo,
     core::{
         DataTypeDef,
         DataTypeDef::{Bytes, I64, Map, String as StringType},
@@ -67,14 +67,15 @@ fn structure(fields: FieldDefs, values: Vec<Value>) -> Value {
     Value::structure(Arc::new(StructDef::from(fields)), values)
 }
 
-fn sample_topic() -> TopicInfo {
-    TopicInfo {
+fn sample_topic() -> ChannelInfo {
+    ChannelInfo {
+        id: 1,
         topic: "/camera/image".to_string(),
         message_count: Some(3),
         schema_name: Some("sensor_msgs/msg/Image".to_string()),
         schema_encoding: "ros2idl".to_string(),
         message_encoding: "cdr".to_string(),
-        channel_count: 1,
+        metadata: Default::default(),
     }
 }
 

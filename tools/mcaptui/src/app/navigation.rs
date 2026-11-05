@@ -342,16 +342,6 @@ impl App {
             return AppUpdate::changed();
         }
 
-        if let Some((topic, reason)) = self.selected_topic().and_then(|row| {
-            row.unsupported_reason
-                .as_deref()
-                .map(|reason| (row.topic().to_string(), reason.to_string()))
-        }) {
-            self.clear_schema_view();
-            self.set_status(format!("Cannot show schema for '{topic}': {reason}"));
-            return AppUpdate::changed();
-        }
-
         self.begin_schema_view();
         AppUpdate::changed_with_request(AppRequest::LoadSelectedSchema)
     }
@@ -363,7 +353,7 @@ impl App {
                 return AppUpdate::changed();
             }
 
-            self.start_loading(row.label(), row.info.message_count);
+            self.start_loading(row.label(), row.channel.message_count);
             return AppUpdate::changed_with_request(AppRequest::StartTopicLoad);
         }
 
@@ -371,16 +361,6 @@ impl App {
     }
 
     fn toggle_schema(&mut self) -> AppUpdate {
-        if let Some(row) = self.selected_topic()
-            && let Some(reason) = &row.unsupported_reason
-        {
-            self.set_status(format!(
-                "Cannot show schema for '{}': {reason}",
-                row.topic()
-            ));
-            return AppUpdate::changed();
-        }
-
         if self.schema_visible() {
             self.clear_schema_view();
             self.set_status("Schema hidden");

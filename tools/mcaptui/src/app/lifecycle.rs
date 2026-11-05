@@ -1,26 +1,17 @@
 use super::*;
 
 impl App {
-    pub fn new(topics: Vec<TopicInfo>) -> Self {
-        Self::from_rows(topics.into_iter().map(TopicRow::from_info).collect())
-    }
-
-    /// List one row per topic, except that a topic with several channels gets
-    /// one row per channel.
+    /// List one row per channel, showing IDs when a topic has multiple channels.
     pub fn with_channels(topics: Vec<TopicInfo>, channels: &[ChannelInfo]) -> Self {
-        let mut rows = Vec::with_capacity(topics.len());
+        let mut rows = Vec::with_capacity(channels.len());
         for topic in topics {
-            if topic.channel_count > 1 {
-                rows.extend(
-                    channels
-                        .iter()
-                        .filter(|channel| channel.topic == topic.topic)
-                        .cloned()
-                        .map(TopicRow::from_channel),
-                );
-            } else {
-                rows.push(TopicRow::from_info(topic));
-            }
+            rows.extend(
+                channels
+                    .iter()
+                    .filter(|channel| channel.topic == topic.topic)
+                    .cloned()
+                    .map(|channel| TopicRow::from_channel(channel, topic.channel_count > 1)),
+            );
         }
         Self::from_rows(rows)
     }

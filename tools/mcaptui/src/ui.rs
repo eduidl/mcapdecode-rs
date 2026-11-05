@@ -41,24 +41,22 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         .style(Style::default().add_modifier(Modifier::BOLD));
     let rows = app.topic_rows().iter().map(|row| {
         let count = row
-            .info
+            .channel
             .message_count
             .map(|count| count.to_string())
             .unwrap_or_else(|| "-".to_string());
         let schema = row
-            .info
+            .channel
             .schema_name
             .clone()
             .map(|schema| display_empty_text(&schema))
             .unwrap_or_else(|| "-".to_string());
         let encoding = format!(
             "{} / {}",
-            display_empty_text(&row.info.message_encoding),
-            display_empty_text(&row.info.schema_encoding)
+            display_empty_text(&row.channel.message_encoding),
+            display_empty_text(&row.channel.schema_encoding)
         );
-        let style = if !row.is_supported() {
-            Style::default().fg(Color::Yellow)
-        } else if !row.has_messages() {
+        let style = if !row.has_messages() {
             Style::default().add_modifier(Modifier::DIM)
         } else {
             Style::default()

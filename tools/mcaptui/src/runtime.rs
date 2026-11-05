@@ -108,7 +108,7 @@ fn run(cli: Cli) -> Result<()> {
     if cli.topic.is_some() {
         let selected = app
             .selected_topic()
-            .map(|row| (row.topic().to_string(), row.info.message_count))
+            .map(|row| (row.topic().to_string(), row.channel.message_count))
             .context("selected topic missing")?;
         app.start_loading(selected.0, selected.1);
         start_topic_loader(&mut app, &mut loader, &cli.input, cli.parallel)?;
