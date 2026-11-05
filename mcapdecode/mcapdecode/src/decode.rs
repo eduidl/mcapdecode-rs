@@ -14,7 +14,10 @@ use std::{
 use mcapdecode_core::{DecodedMessage, FieldDefs, TopicDecoder};
 use rayon::prelude::*;
 
-use crate::{McapReader, ReadOptions, TimeRange, error::McapReaderError, mcap_file::McapFile};
+use crate::{
+    McapReader, ReadOptions, TimeRange, error::McapReaderError, internal_reader::InternalReader,
+    mcap_file::McapFile,
+};
 
 /// Chunk- and message-level predicates shared by the sequential and parallel
 /// read paths.
@@ -56,7 +59,7 @@ impl MessageFilter {
     }
 }
 
-impl McapReader {
+impl InternalReader {
     pub(crate) fn for_each_decoded_message_impl<F>(
         &self,
         file: &McapFile,
@@ -246,69 +249,6 @@ impl McapReader {
         })
     }
 
-    /// Read several topics while decompressing each selected chunk only once.
-    /// The callback runs on the calling thread, in file order within each topic.
-    /// Order between topics is unspecified. Duplicate topics are read once.
-    pub fn for_each_topic_decoded_message(
-        &self,
-        path: &Path,
-        topics: &[&str],
-        callback: impl FnMut(
-            &str,
-            DecodedMessage,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        self.for_each_topic_decoded_message_with_options(
-            path,
-            topics,
-            &ReadOptions::default(),
-            callback,
-        )
-    }
-
-    /// Read selected topics with per-topic filtering, offset, and limit.
-    /// Bounded reads reuse the single-topic path so decoding stops at the limit.
-    /// Duplicate topics are read once.
-    pub fn for_each_topic_decoded_message_with_options(
-        &self,
-        path: &Path,
-        topics: &[&str],
-        options: &ReadOptions,
-        mut callback: impl FnMut(
-            &str,
-            DecodedMessage,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        if topics.is_empty() {
-            return Ok(());
-        }
-        self.with_topic_contexts(path, topics, |file, topics, contexts| {
-            self.for_each_topic_decoded_message_impl(file, contexts, options, &mut |i, message| {
-                callback(topics[i], message).map_err(McapReaderError::Callback)
-            })
-        })
-    }
-
-    pub(crate) fn with_topic_contexts<T>(
-        &self,
-        path: &Path,
-        topics: &[&str],
-        callback: impl FnOnce(&McapFile, &[&str], &[TopicDecodeContext]) -> Result<T, McapReaderError>,
-    ) -> Result<T, McapReaderError> {
-        let file = McapFile::open(path)?;
-        let mut seen = HashSet::new();
-        let topics: Vec<_> = topics
-            .iter()
-            .copied()
-            .filter(|topic| seen.insert(*topic))
-            .collect();
-        let contexts: Vec<_> = topics
-            .iter()
-            .map(|topic| self.resolve_topic_decode_context(&file.summary, topic))
-            .collect::<Result<_, _>>()?;
-        callback(&file, &topics, &contexts)
-    }
-
     pub(crate) fn for_each_topic_decoded_message_impl(
         &self,
         file: &McapFile,
@@ -400,6 +340,77 @@ impl McapReader {
             }
         }
         Ok(())
+    }
+}
+
+impl McapReader {
+    /// Read several topics while decompressing each selected chunk only once.
+    /// The callback runs on the calling thread, in file order within each topic.
+    /// Order between topics is unspecified. Duplicate topics are read once.
+    pub fn for_each_topic_decoded_message(
+        &self,
+        path: &Path,
+        topics: &[&str],
+        callback: impl FnMut(
+            &str,
+            DecodedMessage,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        self.for_each_topic_decoded_message_with_options(
+            path,
+            topics,
+            &ReadOptions::default(),
+            callback,
+        )
+    }
+
+    /// Read selected topics with per-topic filtering, offset, and limit.
+    /// Bounded reads reuse the single-topic path so decoding stops at the limit.
+    /// Duplicate topics are read once.
+    pub fn for_each_topic_decoded_message_with_options(
+        &self,
+        path: &Path,
+        topics: &[&str],
+        options: &ReadOptions,
+        mut callback: impl FnMut(
+            &str,
+            DecodedMessage,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        if topics.is_empty() {
+            return Ok(());
+        }
+        self.with_topic_contexts(path, topics, |file, topics, contexts| {
+            self.inner.for_each_topic_decoded_message_impl(
+                file,
+                contexts,
+                options,
+                &mut |i, message| callback(topics[i], message).map_err(McapReaderError::Callback),
+            )
+        })
+    }
+
+    pub(crate) fn with_topic_contexts<T>(
+        &self,
+        path: &Path,
+        topics: &[&str],
+        callback: impl FnOnce(&McapFile, &[&str], &[TopicDecodeContext]) -> Result<T, McapReaderError>,
+    ) -> Result<T, McapReaderError> {
+        let file = McapFile::open(path)?;
+        let mut seen = HashSet::new();
+        let topics: Vec<_> = topics
+            .iter()
+            .copied()
+            .filter(|topic| seen.insert(*topic))
+            .collect();
+        let contexts: Vec<_> = topics
+            .iter()
+            .map(|topic| {
+                self.inner
+                    .resolve_topic_decode_context(&file.summary, topic)
+            })
+            .collect::<Result<_, _>>()?;
+        callback(&file, &topics, &contexts)
     }
 }
 

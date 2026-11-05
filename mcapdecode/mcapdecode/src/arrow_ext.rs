@@ -117,7 +117,7 @@ impl McapReader {
                 .iter()
                 .map(|_| Vec::with_capacity(batch_size))
                 .collect();
-            self.for_each_topic_decoded_message_impl(
+            self.inner.for_each_topic_decoded_message_impl(
                 file,
                 contexts,
                 &options.read_options,

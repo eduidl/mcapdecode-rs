@@ -9,7 +9,9 @@ pub use mcapdecode_arrow::{
 };
 mod decode;
 mod error;
+mod internal_reader;
 mod mcap_file;
+mod opened;
 mod prepared_topic;
 mod reader;
 mod summary;
@@ -19,6 +21,7 @@ pub use error::McapReaderError;
 #[cfg(feature = "arrow")]
 pub use mcapdecode_arrow as arrow;
 pub use mcapdecode_core as core;
+pub use opened::OpenedMcap;
 pub use prepared_topic::PreparedTopic;
 pub use reader::{McapReader, McapReaderBuilder};
 pub use types::{

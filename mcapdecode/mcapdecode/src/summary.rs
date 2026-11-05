@@ -23,13 +23,7 @@ pub(crate) fn channel_infos_from_summary(summary: &mcap::read::Summary) -> Vec<C
             ChannelInfo {
                 id: channel.id,
                 topic: channel.topic.clone(),
-                message_count: summary.stats.as_ref().map(|stats| {
-                    stats
-                        .channel_message_counts
-                        .get(&channel.id)
-                        .copied()
-                        .unwrap_or_default()
-                }),
+                message_count: channel_message_count(summary, channel.id),
                 schema_name: schema.map(|schema| schema.name.clone()),
                 schema_encoding: schema
                     .map(|schema| schema.encoding.clone())
@@ -56,17 +50,10 @@ pub(crate) fn get_channel_from_summary<'a>(
 }
 
 pub(crate) fn topic_infos_from_summary(summary: &mcap::read::Summary) -> Vec<TopicInfo> {
-    let stats = summary.stats.as_ref();
     let mut topics = BTreeMap::<String, TopicInfo>::new();
 
     for channel in summary.channels.values() {
-        let message_count = stats.map(|summary_stats| {
-            summary_stats
-                .channel_message_counts
-                .get(&channel.id)
-                .copied()
-                .unwrap_or_default()
-        });
+        let message_count = channel_message_count(summary, channel.id);
         let schema = channel.schema.as_ref();
 
         topics
@@ -101,4 +88,24 @@ pub(crate) fn get_schema_from_channel<'a>(
         .schema
         .as_ref()
         .ok_or(McapReaderError::SchemaNotAvailable)
+}
+
+/// Return a single channel topic's count from summary statistics.
+pub(crate) fn message_count(
+    summary: &mcap::read::Summary,
+    topic: &str,
+) -> Result<u64, McapReaderError> {
+    let channel = get_channel_from_summary(summary, topic)?;
+
+    channel_message_count(summary, channel.id).ok_or(McapReaderError::StatsNotAvailable)
+}
+
+fn channel_message_count(summary: &mcap::read::Summary, channel_id: u16) -> Option<u64> {
+    summary.stats.as_ref().map(|stats| {
+        stats
+            .channel_message_counts
+            .get(&channel_id)
+            .copied()
+            .unwrap_or_default()
+    })
 }
