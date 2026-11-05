@@ -5,8 +5,7 @@ use mcapdecode::{McapReader, McapReaderError, core::DecoderError};
 
 use crate::{app, format};
 
-/// Keyed by topic and channel, because labels of different rows can coincide.
-pub(crate) type SchemaCache = HashMap<(String, Option<u16>), app::SchemaView>;
+pub(crate) type SchemaCache = HashMap<u16, app::SchemaView>;
 
 pub(crate) fn open_selected_schema(
     app: &mut app::App,
@@ -31,13 +30,13 @@ pub(crate) fn load_schema_view(
     schema_cache: &mut SchemaCache,
     row: &app::TopicRow,
 ) -> Result<app::SchemaView> {
-    let key = (row.topic().to_string(), row.channel_id);
+    let key = row.channel.id;
     if let Some(schema_view) = schema_cache.get(&key) {
         return Ok(schema_view.clone());
     }
 
     let label = row.label();
-    let topic = &row.info;
+    let topic = &row.channel;
     let title = match topic.schema_name.as_deref() {
         Some(schema_name) => format!("Schema: {label} ({schema_name})"),
         None => format!("Schema: {label}"),
@@ -45,13 +44,10 @@ pub(crate) fn load_schema_view(
     let text = if topic.schema_encoding == "jsonschema" && topic.message_encoding == "json" {
         format::format_unsupported_schema_text(topic)
     } else {
-        let field_defs = match row.channel_id {
-            Some(channel_id) => reader.field_defs_by_channel_id(input, channel_id),
-            None => reader.topic_field_defs(input, &topic.topic),
-        };
+        let field_defs = reader.field_defs_by_channel_id(input, row.channel.id);
         match field_defs {
             Ok(field_defs) => format::format_schema_text(topic, &field_defs),
-            Err(error) if supports_raw_schema_view(&error) => {
+            Err(error) if supports_raw_fallback(&error) => {
                 format::format_raw_schema_text(topic, &error.to_string())
             }
             Err(error) => {
@@ -72,7 +68,7 @@ pub(crate) fn load_schema_view(
     Ok(schema_view)
 }
 
-fn supports_raw_schema_view(error: &McapReaderError) -> bool {
+pub(crate) fn supports_raw_fallback(error: &McapReaderError) -> bool {
     matches!(
         error,
         McapReaderError::NoDecoder { .. }
@@ -85,20 +81,24 @@ fn supports_raw_schema_view(error: &McapReaderError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use mcapdecode::{ChannelInfo, TopicInfo};
+    use mcapdecode::ChannelInfo;
 
     use super::*;
 
     #[test]
     fn jsonschema_topics_report_the_schema_as_unsupported() {
-        let row = app::TopicRow::from_info(TopicInfo {
-            topic: "/imu".to_string(),
-            message_count: Some(1),
-            schema_name: Some("schema-a".to_string()),
-            schema_encoding: "jsonschema".to_string(),
-            message_encoding: "json".to_string(),
-            channel_count: 1,
-        });
+        let row = app::TopicRow::from_channel(
+            ChannelInfo {
+                id: 1,
+                topic: "/imu".to_string(),
+                message_count: Some(1),
+                schema_name: Some("schema-a".to_string()),
+                schema_encoding: "jsonschema".to_string(),
+                message_encoding: "json".to_string(),
+                metadata: Default::default(),
+            },
+            false,
+        );
         let mut cache = SchemaCache::default();
 
         let view = load_schema_view(
@@ -115,14 +115,18 @@ mod tests {
 
     #[test]
     fn jsonschema_with_other_message_encodings_goes_to_the_reader() {
-        let row = app::TopicRow::from_info(TopicInfo {
-            topic: "/imu".to_string(),
-            message_count: Some(1),
-            schema_name: Some("schema-a".to_string()),
-            schema_encoding: "jsonschema".to_string(),
-            message_encoding: "cbor".to_string(),
-            channel_count: 1,
-        });
+        let row = app::TopicRow::from_channel(
+            ChannelInfo {
+                id: 1,
+                topic: "/imu".to_string(),
+                message_count: Some(1),
+                schema_name: Some("schema-a".to_string()),
+                schema_encoding: "jsonschema".to_string(),
+                message_encoding: "cbor".to_string(),
+                metadata: Default::default(),
+            },
+            false,
+        );
         let mut cache = SchemaCache::default();
 
         // The reader fails on the missing file, so the unsupported text was not used.
@@ -139,23 +143,30 @@ mod tests {
 
     #[test]
     fn rows_with_the_same_label_do_not_share_a_cached_schema() {
-        let channel_row = app::TopicRow::from_channel(ChannelInfo {
-            id: 1,
-            topic: "/foo".to_string(),
-            message_count: Some(1),
-            schema_name: None,
-            schema_encoding: String::new(),
-            message_encoding: String::new(),
-            metadata: Default::default(),
-        });
-        let topic_row = app::TopicRow::from_info(TopicInfo {
-            topic: "/foo #1".to_string(),
-            message_count: Some(1),
-            schema_name: None,
-            schema_encoding: String::new(),
-            message_encoding: String::new(),
-            channel_count: 1,
-        });
+        let channel_row = app::TopicRow::from_channel(
+            ChannelInfo {
+                id: 1,
+                topic: "/foo".to_string(),
+                message_count: Some(1),
+                schema_name: None,
+                schema_encoding: String::new(),
+                message_encoding: String::new(),
+                metadata: Default::default(),
+            },
+            true,
+        );
+        let topic_row = app::TopicRow::from_channel(
+            ChannelInfo {
+                id: 2,
+                topic: "/foo #1".to_string(),
+                message_count: Some(1),
+                schema_name: None,
+                schema_encoding: String::new(),
+                message_encoding: String::new(),
+                metadata: Default::default(),
+            },
+            false,
+        );
         assert_eq!(channel_row.label(), topic_row.label());
 
         let cached = app::SchemaView {
@@ -164,7 +175,7 @@ mod tests {
             text: String::new(),
             line_count: 0,
         };
-        let mut cache = SchemaCache::from([(("/foo".to_string(), Some(1)), cached)]);
+        let mut cache = SchemaCache::from([(1, cached)]);
         let reader = McapReader::new();
         let missing = Path::new("/nonexistent.mcap");
 

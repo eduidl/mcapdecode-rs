@@ -1,6 +1,6 @@
 use std::{
     io,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -13,12 +13,12 @@ use std::{
 use anyhow::Result;
 use mcapdecode::{
     McapReader, McapReaderError, RawMessage,
-    core::{DecodedMessage, DecoderError, Value},
+    core::{DecodedMessage, Value},
 };
 
 use crate::{
     app::{App, LoadedMessage, TopicRow},
-    format,
+    format, schema,
 };
 
 const CANCELLED_ERROR: &str = "__mcaptui_loader_cancelled__";
@@ -59,15 +59,19 @@ impl TopicLoader {
 
             // Deriving the schema up front tells whether the topic can be
             // decoded, or has to be shown as raw payload bytes.
-            let field_defs = match row.channel_id {
-                Some(channel_id) => reader.field_defs_by_channel_id(&input, channel_id),
-                None => reader.topic_field_defs(&input, row.topic()),
-            };
+            let field_defs = reader.field_defs_by_channel_id(&input, row.channel.id);
             let load_result = match field_defs {
-                Ok(_) => load_decoded_topic(&reader, &input, &row, &sender, &cancel_for_thread),
-                Err(error) if supports_raw_fallback(&error) => {
-                    load_raw_topic(&reader, &input, &row, &sender, &cancel_for_thread)
-                }
+                Ok(_) => load_topic(&sender, &cancel_for_thread, to_loaded_message, |callback| {
+                    reader.for_each_decoded_message_by_channel_id(&input, row.channel.id, callback)
+                }),
+                Err(error) if schema::supports_raw_fallback(&error) => load_topic(
+                    &sender,
+                    &cancel_for_thread,
+                    to_loaded_raw_message,
+                    |callback| {
+                        reader.for_each_raw_message_by_channel_id(&input, row.channel.id, callback)
+                    },
+                ),
                 Err(error) => Err(anyhow::Error::new(error)
                     .context(format!("failed to load schema for topic '{label}'"))),
             };
@@ -168,70 +172,27 @@ fn to_loaded_message(index: usize, message: DecodedMessage) -> LoadedMessage {
     }
 }
 
-fn load_decoded_topic(
-    reader: &McapReader,
-    input: &Path,
-    row: &TopicRow,
+fn load_topic<T>(
     sender: &mpsc::Sender<LoaderEvent>,
     cancel: &AtomicBool,
+    convert: impl Fn(usize, T) -> LoadedMessage,
+    read: impl FnOnce(
+        &mut dyn FnMut(T) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError>,
 ) -> Result<()> {
     let mut pending = Vec::new();
     let mut last_flush = Instant::now();
     let mut next_index = 0usize;
-    let on_message = |message| {
+    let load_result = read(&mut |message| {
         if cancel.load(Ordering::Relaxed) {
             return Err(CANCELLED_ERROR.into());
         }
 
-        pending.push(to_loaded_message(next_index, message));
+        pending.push(convert(next_index, message));
         next_index += 1;
-
         flush_pending_messages(sender, &mut pending, &mut last_flush)?;
-
         Ok(())
-    };
-    let load_result = match row.channel_id {
-        Some(channel_id) => {
-            reader.for_each_decoded_message_by_channel_id(input, channel_id, on_message)
-        }
-        None => reader.for_each_decoded_message(input, row.topic(), on_message),
-    };
-
-    if !pending.is_empty() {
-        let _ = sender.send(LoaderEvent::Messages(pending));
-    }
-
-    load_result.map_err(anyhow::Error::from)
-}
-
-fn load_raw_topic(
-    reader: &McapReader,
-    input: &Path,
-    row: &TopicRow,
-    sender: &mpsc::Sender<LoaderEvent>,
-    cancel: &AtomicBool,
-) -> Result<()> {
-    let mut pending = Vec::new();
-    let mut last_flush = Instant::now();
-    let mut next_index = 0usize;
-    let on_message = |message| {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(CANCELLED_ERROR.into());
-        }
-
-        pending.push(to_loaded_raw_message(next_index, message));
-        next_index += 1;
-
-        flush_pending_messages(sender, &mut pending, &mut last_flush)?;
-
-        Ok(())
-    };
-    let load_result = match row.channel_id {
-        Some(channel_id) => {
-            reader.for_each_raw_message_by_channel_id(input, channel_id, on_message)
-        }
-        None => reader.for_each_raw_message(input, row.topic(), on_message),
-    };
+    });
 
     if !pending.is_empty() {
         let _ = sender.send(LoaderEvent::Messages(pending));
@@ -262,17 +223,6 @@ fn to_loaded_raw_message(index: usize, message: RawMessage) -> LoadedMessage {
         detail_rows: Some(detail_rows),
         detail_text: Some(detail_text),
     }
-}
-
-fn supports_raw_fallback(error: &McapReaderError) -> bool {
-    matches!(
-        error,
-        McapReaderError::NoDecoder { .. }
-            | McapReaderError::SchemaNotAvailable
-            | McapReaderError::Decoder(
-                DecoderError::SchemaParse(_) | DecoderError::SchemaDerivation(_)
-            )
-    )
 }
 
 fn flush_pending_messages(

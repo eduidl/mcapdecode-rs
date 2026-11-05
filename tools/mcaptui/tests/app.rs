@@ -71,6 +71,15 @@ fn channel(id: u16, name: &str, message_count: u64) -> ChannelInfo {
     }
 }
 
+fn app(topics: Vec<TopicInfo>) -> App {
+    let channels: Vec<_> = topics
+        .iter()
+        .enumerate()
+        .map(|(id, topic)| channel(id as u16, &topic.topic, topic.message_count.unwrap_or(0)))
+        .collect();
+    App::with_channels(topics, &channels)
+}
+
 #[test]
 fn topics_with_several_channels_get_one_row_per_channel() {
     let channels = [
@@ -86,28 +95,16 @@ fn topics_with_several_channels_get_one_row_per_channel() {
         ["/ok", "/tf-static #11", "/tf-static #22"]
     );
     assert_eq!(
-        rows.iter().map(|row| row.channel_id).collect::<Vec<_>>(),
-        [None, Some(11), Some(22)]
+        rows.iter().map(|row| row.channel.id).collect::<Vec<_>>(),
+        [1, 11, 22]
     );
-    assert!(rows.iter().all(|row| row.is_supported()));
     assert_eq!(rows[1].message_list_block_reason(), Some("no messages"));
     assert_eq!(rows[2].message_list_block_reason(), None);
 }
 
 #[test]
-fn duplicate_topic_rows_are_unsupported() {
-    let app = App::new(vec![topic("/ok", 1), topic("/dup", 2)]);
-
-    assert!(app.topic_rows()[0].is_supported());
-    assert_eq!(
-        app.topic_rows()[1].unsupported_reason.as_deref(),
-        Some("duplicate topic is not supported")
-    );
-}
-
-#[test]
 fn topic_selection_moves_with_page_actions() {
-    let mut app = App::new(vec![
+    let mut app = app(vec![
         topic("/a", 1),
         topic("/b", 1),
         topic("/c", 1),
@@ -127,7 +124,7 @@ fn topic_selection_moves_with_page_actions() {
 
 #[test]
 fn topic_screen_can_open_schema_action() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
 
     let update = app.handle_key(KeyCode::Char('s').into());
 
@@ -141,7 +138,7 @@ fn topic_screen_can_open_schema_action() {
 
 #[test]
 fn topic_screen_enter_transitions_to_messages_immediately() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
 
     let update = app.handle_key(KeyCode::Enter.into());
 
@@ -156,7 +153,7 @@ fn topic_screen_enter_transitions_to_messages_immediately() {
 
 #[test]
 fn schema_widget_scrolls_via_mouse() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.set_schema_view(
         "/a",
         "Schema: /a",
@@ -178,7 +175,7 @@ fn schema_widget_scrolls_via_mouse() {
 
 #[test]
 fn message_screen_can_open_schema_action() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(1));
 
     let update = app.handle_key(KeyCode::Char('s').into());
@@ -193,7 +190,7 @@ fn message_screen_can_open_schema_action() {
 
 #[test]
 fn topics_tab_cycles_focus_into_schema_popup() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.set_schema_view("/a", "Schema: /a", "line-0\nline-1\nline-2\nline-3");
 
     app.handle_key(KeyCode::Tab.into());
@@ -205,7 +202,7 @@ fn topics_tab_cycles_focus_into_schema_popup() {
 
 #[test]
 fn topics_schema_focus_routes_handle_key_to_schema_scroll() {
-    let mut app = App::new(vec![topic("/a", 1), topic("/b", 1)]);
+    let mut app = app(vec![topic("/a", 1), topic("/b", 1)]);
     app.set_schema_view("/a", "Schema: /a", "line-0\nline-1\nline-2\nline-3");
     app.set_schema_area(Rect::new(0, 0, 20, 4));
 
@@ -220,7 +217,7 @@ fn topics_schema_focus_routes_handle_key_to_schema_scroll() {
 
 #[test]
 fn topic_navigation_requests_schema_reload() {
-    let mut app = App::new(vec![topic("/a", 1), topic("/b", 1)]);
+    let mut app = app(vec![topic("/a", 1), topic("/b", 1)]);
     app.set_schema_view("/a", "Schema: /a", "field: string");
 
     let update = app.handle_key(KeyCode::End.into());
@@ -233,7 +230,7 @@ fn topic_navigation_requests_schema_reload() {
 
 #[test]
 fn message_tab_cycles_focus_into_schema_popup() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(1));
     app.finish_loading("/a");
     app.set_schema_view("/a", "Schema: /a", "line-0\nline-1\nline-2\nline-3");
@@ -254,7 +251,7 @@ fn message_tab_cycles_focus_into_schema_popup() {
 
 #[test]
 fn clearing_schema_restores_previous_focus() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(1));
     app.finish_loading("/a");
     app.set_schema_view("/a", "Schema: /a", "line-0\nline-1\nline-2\nline-3");
@@ -271,7 +268,7 @@ fn clearing_schema_restores_previous_focus() {
 
 #[test]
 fn selecting_topic_by_name_requests_schema_reload() {
-    let mut app = App::new(vec![topic("/a", 1), topic("/b", 1)]);
+    let mut app = app(vec![topic("/a", 1), topic("/b", 1)]);
     app.set_schema_view("/a", "Schema: /a", "field: string");
 
     let update = app.select_topic_by_name("/b").expect("topic should exist");
@@ -285,7 +282,7 @@ fn selecting_topic_by_name_requests_schema_reload() {
 
 #[test]
 fn message_focus_toggle_and_detail_scroll_reset() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(2));
     app.append_loaded_messages(vec![message(0, 20), message(1, 5)]);
     app.finish_loading("/a");
@@ -305,7 +302,7 @@ fn message_focus_toggle_and_detail_scroll_reset() {
 
 #[test]
 fn message_selection_keeps_detail_scroll_at_field_level() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(2));
     app.append_loaded_messages(vec![
         message_with_rows(
@@ -353,7 +350,7 @@ fn message_selection_keeps_detail_scroll_at_field_level() {
 
 #[test]
 fn detail_pane_scrolls_with_vim_keys_and_jumps_to_ends() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(1));
     app.append_loaded_messages(vec![message(0, 20)]);
     app.finish_loading("/a");
@@ -378,7 +375,7 @@ fn detail_pane_scrolls_with_vim_keys_and_jumps_to_ends() {
 
 #[test]
 fn schema_pane_scrolls_with_vim_keys_and_jumps_to_ends() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.set_schema_view(
         "/a",
         "Schema: /a",
@@ -401,7 +398,7 @@ fn schema_pane_scrolls_with_vim_keys_and_jumps_to_ends() {
 
 #[test]
 fn message_list_end_key_is_a_no_op_without_messages() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(0));
 
     let update = app.handle_key(KeyCode::End.into());
@@ -412,7 +409,7 @@ fn message_list_end_key_is_a_no_op_without_messages() {
 
 #[test]
 fn append_loaded_messages_keeps_loading_state_incremental() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(3));
 
     app.append_loaded_messages(vec![message(0, 3)]);
@@ -427,7 +424,7 @@ fn append_loaded_messages_keeps_loading_state_incremental() {
 
 #[test]
 fn mouse_scroll_uses_detail_pane_without_focus() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(2));
     app.append_loaded_messages(vec![message(0, 20), message(1, 5)]);
     app.finish_loading("/a");
@@ -448,7 +445,7 @@ fn mouse_scroll_uses_detail_pane_without_focus() {
 
 #[test]
 fn mouse_scroll_uses_list_pane_without_focus() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(3));
     app.append_loaded_messages(vec![message(0, 20), message(1, 5), message(2, 5)]);
     app.finish_loading("/a");
@@ -470,7 +467,7 @@ fn mouse_scroll_uses_list_pane_without_focus() {
 
 #[test]
 fn detail_horizontal_scroll_clamps_to_longest_line() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.start_loading("/a", Some(1));
     app.append_loaded_messages(vec![message_with_rows(
         0,
@@ -490,7 +487,7 @@ fn detail_horizontal_scroll_clamps_to_longest_line() {
 
 #[test]
 fn schema_horizontal_scroll_clamps_to_longest_line() {
-    let mut app = App::new(vec![topic("/a", 1)]);
+    let mut app = app(vec![topic("/a", 1)]);
     app.set_schema_view("/a", "Schema: /a", "01234567890123456789");
     app.set_schema_area(Rect::new(0, 0, 10, 3));
     app.set_topics_area(Rect::new(10, 0, 40, 5));

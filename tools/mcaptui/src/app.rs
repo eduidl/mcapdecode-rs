@@ -28,62 +28,36 @@ pub enum MessageFocus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TopicRow {
-    pub info: TopicInfo,
-    /// Set when the topic spans several channels and this row shows one of them.
-    pub channel_id: Option<u16>,
-    pub unsupported_reason: Option<String>,
+    pub channel: ChannelInfo,
+    pub show_channel_id: bool,
 }
 
 impl TopicRow {
-    pub fn from_info(info: TopicInfo) -> Self {
-        let unsupported_reason =
-            (info.channel_count > 1).then(|| "duplicate topic is not supported".to_string());
+    pub fn from_channel(channel: ChannelInfo, show_channel_id: bool) -> Self {
         Self {
-            info,
-            channel_id: None,
-            unsupported_reason,
+            channel,
+            show_channel_id,
         }
     }
 
-    pub fn from_channel(channel: ChannelInfo) -> Self {
-        Self {
-            info: TopicInfo {
-                topic: channel.topic,
-                message_count: channel.message_count,
-                schema_name: channel.schema_name,
-                schema_encoding: channel.schema_encoding,
-                message_encoding: channel.message_encoding,
-                channel_count: 1,
-            },
-            channel_id: Some(channel.id),
-            unsupported_reason: None,
-        }
-    }
-
-    /// The name shown to the user, which tells the channels of a topic apart.
     pub fn label(&self) -> String {
-        match self.channel_id {
-            Some(id) => format!("{} #{id}", self.info.topic),
-            None => self.info.topic.clone(),
+        if self.show_channel_id {
+            format!("{} #{}", self.channel.topic, self.channel.id)
+        } else {
+            self.channel.topic.clone()
         }
-    }
-
-    pub fn is_supported(&self) -> bool {
-        self.unsupported_reason.is_none()
     }
 
     pub fn has_messages(&self) -> bool {
-        self.info.message_count != Some(0)
+        self.channel.message_count != Some(0)
     }
 
     pub fn message_list_block_reason(&self) -> Option<&str> {
-        self.unsupported_reason
-            .as_deref()
-            .or_else(|| (!self.has_messages()).then_some("no messages"))
+        (!self.has_messages()).then_some("no messages")
     }
 
     pub fn topic(&self) -> &str {
-        &self.info.topic
+        &self.channel.topic
     }
 }
 
