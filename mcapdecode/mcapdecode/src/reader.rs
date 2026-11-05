@@ -1,10 +1,8 @@
 //! MCAP file reader with pluggable decoder support.
 
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
-use mcapdecode_core::{
-    DecodedMessage, EncodingKey, FieldDefs, MessageDecoder, MessageEncoding, SchemaEncoding,
-};
+use mcapdecode_core::{DecodedMessage, FieldDefs, MessageDecoder};
 #[cfg(feature = "protobuf")]
 use mcapdecode_protobuf::ProtobufDecoder;
 #[cfg(feature = "rawjson")]
@@ -13,23 +11,21 @@ use mcapdecode_rawjson::RawJsonDecoder;
 use mcapdecode_ros2idl::Ros2IdlDecoder;
 #[cfg(feature = "ros2msg")]
 use mcapdecode_ros2msg::Ros2MsgDecoder;
-use memmap2::Mmap;
 
 use crate::{
     ChannelInfo, PreparedTopic, RawMessage, ReadOptions, TopicDecodeStatus, TopicInfo, TopicSchema,
-    decode::TopicDecodeContext,
     error::McapReaderError,
+    internal_reader::{InternalReader, for_each_raw_message_impl},
     mcap_file::McapFile,
     summary::{
         channel_infos_from_summary, get_channel_by_id, get_channel_from_summary,
-        get_schema_from_channel, topic_infos_from_summary,
+        topic_infos_from_summary,
     },
 };
 
 /// Reads an MCAP file and decodes messages using registered [`MessageDecoder`]s.
 pub struct McapReader {
-    decoders: HashMap<EncodingKey, Arc<dyn MessageDecoder>>,
-    pub(crate) parallel: bool,
+    pub(crate) inner: InternalReader,
 }
 
 /// Builder for configuring [`McapReader`].
@@ -49,8 +45,7 @@ impl McapReader {
 
     pub fn new() -> Self {
         Self {
-            decoders: HashMap::new(),
-            parallel: true,
+            inner: InternalReader::new(),
         }
     }
 
@@ -61,48 +56,7 @@ impl McapReader {
 
     /// Register a shared decoder for a specific encoding pair.
     pub fn register_shared_decoder(&mut self, decoder: Arc<dyn MessageDecoder>) {
-        self.decoders.insert(decoder.encoding_key(), decoder);
-    }
-
-    fn find_decoder(
-        &self,
-        schema_enc: &SchemaEncoding,
-        message_enc: &MessageEncoding,
-    ) -> Result<&Arc<dyn MessageDecoder>, McapReaderError> {
-        let key = EncodingKey::new(schema_enc.clone(), message_enc.clone());
-        self.decoders
-            .get(&key)
-            .ok_or_else(|| McapReaderError::NoDecoder {
-                schema_encoding: schema_enc.to_string(),
-                message_encoding: message_enc.to_string(),
-            })
-    }
-
-    pub(crate) fn resolve_topic_decode_context(
-        &self,
-        summary: &mcap::read::Summary,
-        topic: &str,
-    ) -> Result<TopicDecodeContext, McapReaderError> {
-        self.resolve_channel_decode_context(get_channel_from_summary(summary, topic)?)
-    }
-
-    fn resolve_channel_decode_context(
-        &self,
-        channel: &Arc<mcap::Channel<'_>>,
-    ) -> Result<TopicDecodeContext, McapReaderError> {
-        let schema = Arc::clone(get_schema_from_channel(channel)?);
-        let schema_enc = SchemaEncoding::from(schema.encoding.as_str());
-        let message_enc = MessageEncoding::from(channel.message_encoding.as_str());
-        let decoder = Arc::clone(self.find_decoder(&schema_enc, &message_enc)?);
-        let topic_decoder = decoder.build_topic_decoder(&schema.name, &schema.data)?;
-        let field_defs = topic_decoder.field_defs().clone();
-
-        Ok(TopicDecodeContext {
-            channel_id: channel.id,
-            schema_name: schema.name.clone(),
-            decoder: topic_decoder,
-            field_defs,
-        })
+        self.inner.register_shared_decoder(decoder);
     }
 
     /// Prepare one topic for a decoder-backed output adapter.
@@ -116,9 +70,11 @@ impl McapReader {
         callback: impl FnOnce(&PreparedTopic<'_>) -> Result<T, McapReaderError>,
     ) -> Result<T, McapReaderError> {
         let file = McapFile::open(path)?;
-        let context = self.resolve_topic_decode_context(&file.summary, topic)?;
+        let context = self
+            .inner
+            .resolve_topic_decode_context(&file.summary, topic)?;
         callback(&PreparedTopic {
-            reader: self,
+            reader: &self.inner,
             file,
             context,
             topic: topic.to_string(),
@@ -144,21 +100,7 @@ impl McapReader {
         path: &Path,
     ) -> Result<Vec<TopicDecodeStatus>, McapReaderError> {
         let file = McapFile::open(path)?;
-
-        Ok(topic_infos_from_summary(&file.summary)
-            .into_iter()
-            .map(|topic| {
-                let decode_error = self
-                    .resolve_topic_decode_context(&file.summary, &topic.topic)
-                    .err()
-                    .map(|error| error.to_string());
-                TopicDecodeStatus {
-                    topic,
-                    decodable: decode_error.is_none(),
-                    decode_error,
-                }
-            })
-            .collect())
+        self.inner.list_topics_with_decode_status(&file.summary)
     }
 
     /// Read decoded messages for a topic and emit them one-by-one to callback.
@@ -212,11 +154,13 @@ impl McapReader {
         mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
         let file = McapFile::open(path)?;
-        let context =
-            self.resolve_channel_decode_context(get_channel_by_id(&file.summary, channel_id)?)?;
-        self.for_each_decoded_message_impl(&file, &context, options, &mut |decoded| {
-            callback(decoded).map_err(McapReaderError::Callback)
-        })
+        let context = self
+            .inner
+            .resolve_channel_decode_context(get_channel_by_id(&file.summary, channel_id)?)?;
+        self.inner
+            .for_each_decoded_message_impl(&file, &context, options, &mut |decoded| {
+                callback(decoded).map_err(McapReaderError::Callback)
+            })
     }
 
     /// Read raw message payloads for a topic and emit them one-by-one to callback.
@@ -228,7 +172,7 @@ impl McapReader {
     ) -> Result<(), McapReaderError> {
         let file = McapFile::open(path)?;
         let channel = get_channel_from_summary(&file.summary, topic)?;
-        Self::for_each_raw_message_impl(&file.mmap, channel.id, callback)
+        for_each_raw_message_impl(&file.mmap, channel.id, callback)
     }
 
     /// Read raw message payloads of one channel and emit them one-by-one to callback.
@@ -240,29 +184,7 @@ impl McapReader {
     ) -> Result<(), McapReaderError> {
         let file = McapFile::open(path)?;
         get_channel_by_id(&file.summary, channel_id)?;
-        Self::for_each_raw_message_impl(&file.mmap, channel_id, callback)
-    }
-
-    fn for_each_raw_message_impl(
-        mmap: &Mmap,
-        channel_id: u16,
-        mut callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        for message in mcap::MessageStream::new(mmap)? {
-            let message = message?;
-            if message.channel.id != channel_id {
-                continue;
-            }
-
-            callback(RawMessage {
-                log_time: message.log_time,
-                publish_time: message.publish_time,
-                data: Arc::from(message.data),
-            })
-            .map_err(McapReaderError::Callback)?;
-        }
-
-        Ok(())
+        for_each_raw_message_impl(&file.mmap, channel_id, callback)
     }
 
     /// Return the total message count from the MCAP summary section.
@@ -270,25 +192,15 @@ impl McapReader {
     /// MCAP summary and summary stats are required.
     pub fn message_count(&self, path: &Path, topic: &str) -> Result<u64, McapReaderError> {
         let file = McapFile::open(path)?;
-        let channel = get_channel_from_summary(&file.summary, topic)?;
-
-        let stats = file
-            .summary
-            .stats
-            .as_ref()
-            .ok_or(McapReaderError::StatsNotAvailable)?;
-
-        Ok(stats
-            .channel_message_counts
-            .get(&channel.id)
-            .copied()
-            .unwrap_or_default())
+        crate::summary::message_count(&file.summary, topic)
     }
 
     /// Derive and return schema IR (`FieldDef`) for a topic without reading message payloads.
     pub fn topic_field_defs(&self, path: &Path, topic: &str) -> Result<FieldDefs, McapReaderError> {
         let file = McapFile::open(path)?;
-        let context = self.resolve_topic_decode_context(&file.summary, topic)?;
+        let context = self
+            .inner
+            .resolve_topic_decode_context(&file.summary, topic)?;
         Ok(context.field_defs)
     }
 
@@ -300,8 +212,9 @@ impl McapReader {
         channel_id: u16,
     ) -> Result<FieldDefs, McapReaderError> {
         let file = McapFile::open(path)?;
-        let context =
-            self.resolve_channel_decode_context(get_channel_by_id(&file.summary, channel_id)?)?;
+        let context = self
+            .inner
+            .resolve_channel_decode_context(get_channel_by_id(&file.summary, channel_id)?)?;
         Ok(context.field_defs)
     }
 
@@ -310,16 +223,7 @@ impl McapReader {
     /// The MCAP file and its summary are each read once for this operation.
     pub fn topic_schema(&self, path: &Path, topic: &str) -> Result<TopicSchema, McapReaderError> {
         let file = McapFile::open(path)?;
-        let context = self.resolve_topic_decode_context(&file.summary, topic)?;
-        let info = topic_infos_from_summary(&file.summary)
-            .into_iter()
-            .find(|info| info.topic == topic)
-            .expect("resolved topic must be present in the summary");
-
-        Ok(TopicSchema {
-            info,
-            field_defs: context.field_defs,
-        })
+        self.inner.topic_schema(&file.summary, topic)
     }
 }
 
@@ -362,7 +266,7 @@ impl McapReaderBuilder {
     /// Build the reader.
     pub fn build(self) -> McapReader {
         let mut reader = McapReader::new();
-        reader.parallel = self.parallel;
+        reader.inner.parallel = self.parallel;
         for decoder in self.decoders {
             reader.register_shared_decoder(decoder);
         }

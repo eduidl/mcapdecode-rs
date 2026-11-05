@@ -2,21 +2,21 @@
 
 use mcapdecode_core::{DecodedMessage, FieldDefs};
 
-use crate::{
-    McapReader, ReadOptions, decode::TopicDecodeContext, error::McapReaderError,
-    mcap_file::McapFile,
-};
 #[cfg(feature = "arrow")]
 use crate::{MessageBatchSchema, RecordBatchOptions};
+use crate::{
+    ReadOptions, decode::TopicDecodeContext, error::McapReaderError,
+    internal_reader::InternalReader, mcap_file::McapFile,
+};
 
 /// A topic whose MCAP summary and decoder have already been resolved.
 ///
-/// Values are created only through [`McapReader::with_prepared_topic`]. This
+/// Values are created only through [`McapReader::with_prepared_topic`](crate::McapReader::with_prepared_topic). This
 /// keeps the mapped MCAP file, its summary, and decoder context together so an
 /// output adapter can derive a schema and scan messages without reopening the
 /// file or rereading the summary.
 pub struct PreparedTopic<'reader> {
-    pub(crate) reader: &'reader McapReader,
+    pub(crate) reader: &'reader InternalReader,
     pub(crate) file: McapFile,
     pub(crate) context: TopicDecodeContext,
     pub(crate) topic: String,

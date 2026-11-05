@@ -364,6 +364,7 @@ impl TopicDecoder for CountingTestJsonTopicDecoder {
 }
 
 mod core;
+mod opened;
 mod read_options;
 
 #[cfg(feature = "arrow")]
