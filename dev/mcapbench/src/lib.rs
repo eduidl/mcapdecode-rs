@@ -23,6 +23,17 @@ pub(crate) const OTHER_TOPIC: &str = "/other";
 
 pub type BenchResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+/// Criterion settings shared by every benchmark suite.
+///
+/// Kept short so a full run stays cheap enough to repeat across several releases.
+/// `--warm-up-time` and `--measurement-time` on the command line still override it.
+pub fn criterion() -> criterion::Criterion {
+    criterion::Criterion::default()
+        .sample_size(10)
+        .warm_up_time(std::time::Duration::from_secs(1))
+        .measurement_time(std::time::Duration::from_secs(3))
+}
+
 /// Shape of one message, chosen to isolate a specific cost in the decoder.
 #[derive(Clone, Copy, Debug, clap::ValueEnum, PartialEq, Eq)]
 pub enum PayloadCase {

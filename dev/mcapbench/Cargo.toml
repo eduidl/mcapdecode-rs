@@ -34,6 +34,7 @@ required-features = ["fixture-tests"]
 
 [dependencies]
 clap.workspace = true
+criterion.workspace = true
 bytes = "1.11.1"
 mcap.workspace = true
 prost = "0.14.3"
