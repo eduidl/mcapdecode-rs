@@ -2,8 +2,9 @@
 """Compare benchmark results across revisions with interleaved rounds.
 
 The current `benches/` and `dev/mcapbench` are copied onto every revision, so all of
-them run the same cases. Revisions are measured in turn, round after round, so drift
-on the host spreads over all of them instead of favouring whichever ran first.
+them run the same cases. Revisions are measured in turn, round after round, with the
+order rotated each round, so drift on the host spreads over all of them instead of
+favouring whichever runs first.
 
     python3 dev/mcapbench/bench_compare.py v0.10.0 WORKTREE
     python3 dev/mcapbench/bench_compare.py --rounds 5 v0.10.0 HEAD
@@ -178,7 +179,10 @@ def main():
         time.sleep(args.cooldown)
         log = (work / "run.log").open("w")
         for rnd in range(1, args.rounds + 1):
-            for rev in args.revs:
+            # Rotate the order each round so no revision always runs first, where it
+            # would see the same point of any drift during a round.
+            shift = (rnd - 1) % len(args.revs)
+            for rev in args.revs[shift:] + args.revs[:shift]:
                 load = " ".join(f"{x:.2f}" for x in os.getloadavg())
                 print(f"round {rnd} {rev} (load {load})", flush=True)
                 for suite in SUITES:

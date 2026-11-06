@@ -68,7 +68,8 @@ python3 dev/mcapbench/bench_compare.py v0.10.0 WORKTREE
 
 The script copies the current `benches/` and `dev/mcapbench` onto every revision, builds
 each into its own executables under `target/bench-compare`, waits for a cooldown, then
-runs the revisions in turn for `--rounds` rounds (default 3). It prints, per case, the
+runs the revisions in turn for `--rounds` rounds (default 3), rotating their order each
+round so none always runs first; use at least as many rounds as revisions. It prints, per case, the
 median of the round means, their range, and the change against the first revision.
 `WORKTREE` means the working tree, uncommitted changes included. A change only counts
 when the round ranges of the two revisions do not overlap.
