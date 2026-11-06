@@ -1626,6 +1626,7 @@ version = "0.10.0"
 dependencies = [
  "bytes",
  "clap",
+ "criterion",
  "dhat",
  "mcap",
  "mcapdecode",
@@ -2907,10 +2908,8 @@ dependencies = [
  "anyhow",
  "arrow",
  "clap",
- "criterion",
  "indicatif",
  "mcap",
- "mcapbench",
  "mcapdecode",
  "parquet",
  "serde",

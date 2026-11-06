@@ -36,7 +36,7 @@ criterion.workspace = true
 mcapbench.workspace = true
 
 [[bench]]
-name = "decoder"
+name = "decode"
 harness = false
 required-features = ["protobuf", "ros2idl", "ros2msg"]
 

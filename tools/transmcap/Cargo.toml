@@ -25,10 +25,4 @@ serde_json.workspace = true
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-criterion.workspace = true
-mcapbench.workspace = true
 mcap.workspace = true
-
-[[bench]]
-name = "parquet"
-harness = false
