@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 include.workspace = true
 description = "MCAP decoding library with optional Arrow integration, protobuf, ROS 2, and raw JSON decoders."
-readme = "README.md"
+readme = "../../README.md"
 
 [dependencies]
 mcapdecode-arrow = { workspace = true, optional = true }
