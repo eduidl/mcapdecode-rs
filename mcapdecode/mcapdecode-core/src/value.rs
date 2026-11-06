@@ -30,6 +30,80 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TypeName {
+    Null,
+    Bool,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
+    String,
+    Bytes,
+    Struct,
+    List,
+    Uint8List,
+    Array,
+    Map,
+}
+
+impl TypeName {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "Null" => Self::Null,
+            "Bool" => Self::Bool,
+            "I8" => Self::I8,
+            "I16" => Self::I16,
+            "I32" => Self::I32,
+            "I64" => Self::I64,
+            "U8" => Self::U8,
+            "U16" => Self::U16,
+            "U32" => Self::U32,
+            "U64" => Self::U64,
+            "F32" => Self::F32,
+            "F64" => Self::F64,
+            "String" => Self::String,
+            "Bytes" => Self::Bytes,
+            "Struct" => Self::Struct,
+            "List" => Self::List,
+            "Uint8List" => Self::Uint8List,
+            "Array" => Self::Array,
+            "Map" => Self::Map,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Null => "Null",
+            Self::Bool => "Bool",
+            Self::I8 => "I8",
+            Self::I16 => "I16",
+            Self::I32 => "I32",
+            Self::I64 => "I64",
+            Self::U8 => "U8",
+            Self::U16 => "U16",
+            Self::U32 => "U32",
+            Self::U64 => "U64",
+            Self::F32 => "F32",
+            Self::F64 => "F64",
+            Self::String => "String",
+            Self::Bytes => "Bytes",
+            Self::Struct => "Struct",
+            Self::List => "List",
+            Self::Uint8List => "Uint8List",
+            Self::Array => "Array",
+            Self::Map => "Map",
+        }
+    }
+}
+
 /// A decoded struct with its shared field definitions.
 #[derive(Clone)]
 pub struct StructValue {
@@ -194,7 +268,7 @@ impl Value {
         match self {
             Value::I8(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("I8")),
+            _ => Err(ValueTypeError::for_types(TypeName::I8, self.type_name())),
         }
     }
 
@@ -202,7 +276,7 @@ impl Value {
         match self {
             Value::I16(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("I16")),
+            _ => Err(ValueTypeError::for_types(TypeName::I16, self.type_name())),
         }
     }
 
@@ -210,7 +284,7 @@ impl Value {
         match self {
             Value::I32(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("I32")),
+            _ => Err(ValueTypeError::for_types(TypeName::I32, self.type_name())),
         }
     }
 
@@ -218,7 +292,7 @@ impl Value {
         match self {
             Value::I64(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("I64")),
+            _ => Err(ValueTypeError::for_types(TypeName::I64, self.type_name())),
         }
     }
 
@@ -226,7 +300,7 @@ impl Value {
         match self {
             Value::U8(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("U8")),
+            _ => Err(ValueTypeError::for_types(TypeName::U8, self.type_name())),
         }
     }
 
@@ -234,7 +308,7 @@ impl Value {
         match self {
             Value::U16(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("U16")),
+            _ => Err(ValueTypeError::for_types(TypeName::U16, self.type_name())),
         }
     }
 
@@ -242,7 +316,7 @@ impl Value {
         match self {
             Value::U32(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("U32")),
+            _ => Err(ValueTypeError::for_types(TypeName::U32, self.type_name())),
         }
     }
 
@@ -250,7 +324,7 @@ impl Value {
         match self {
             Value::U64(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("U64")),
+            _ => Err(ValueTypeError::for_types(TypeName::U64, self.type_name())),
         }
     }
 
@@ -258,7 +332,7 @@ impl Value {
         match self {
             Value::Bool(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("Bool")),
+            _ => Err(ValueTypeError::for_types(TypeName::Bool, self.type_name())),
         }
     }
 
@@ -266,7 +340,7 @@ impl Value {
         match self {
             Value::F32(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("F32")),
+            _ => Err(ValueTypeError::for_types(TypeName::F32, self.type_name())),
         }
     }
 
@@ -274,7 +348,7 @@ impl Value {
         match self {
             Value::F64(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("F64")),
+            _ => Err(ValueTypeError::for_types(TypeName::F64, self.type_name())),
         }
     }
 
@@ -282,7 +356,10 @@ impl Value {
         match self {
             Value::String(v) => Ok(Some(v.as_ref())),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("String")),
+            _ => Err(ValueTypeError::for_types(
+                TypeName::String,
+                self.type_name(),
+            )),
         }
     }
 
@@ -291,35 +368,35 @@ impl Value {
         match self {
             Value::Bytes(v) | Value::Uint8List(v) => Ok(Some(v.as_ref())),
             Value::Null => Ok(None),
-            _ => Err(self.type_mismatch("Bytes")),
+            _ => Err(ValueTypeError::for_types(TypeName::Bytes, self.type_name())),
         }
     }
 
     pub fn type_mismatch(&self, expected: impl Into<String>) -> ValueTypeError {
-        ValueTypeError::new(expected, self.variant_name())
+        ValueTypeError::for_value(expected, self.type_name())
     }
 
-    fn variant_name(&self) -> &'static str {
+    fn type_name(&self) -> TypeName {
         match self {
-            Value::Null => "Null",
-            Value::Bool(_) => "Bool",
-            Value::I8(_) => "I8",
-            Value::I16(_) => "I16",
-            Value::I32(_) => "I32",
-            Value::I64(_) => "I64",
-            Value::U8(_) => "U8",
-            Value::U16(_) => "U16",
-            Value::U32(_) => "U32",
-            Value::U64(_) => "U64",
-            Value::F32(_) => "F32",
-            Value::F64(_) => "F64",
-            Value::String(_) => "String",
-            Value::Bytes(_) => "Bytes",
-            Value::Struct(_) => "Struct",
-            Value::List(_) => "List",
-            Value::Uint8List(_) => "Uint8List",
-            Value::Array(_) => "Array",
-            Value::Map(_) => "Map",
+            Value::Null => TypeName::Null,
+            Value::Bool(_) => TypeName::Bool,
+            Value::I8(_) => TypeName::I8,
+            Value::I16(_) => TypeName::I16,
+            Value::I32(_) => TypeName::I32,
+            Value::I64(_) => TypeName::I64,
+            Value::U8(_) => TypeName::U8,
+            Value::U16(_) => TypeName::U16,
+            Value::U32(_) => TypeName::U32,
+            Value::U64(_) => TypeName::U64,
+            Value::F32(_) => TypeName::F32,
+            Value::F64(_) => TypeName::F64,
+            Value::String(_) => TypeName::String,
+            Value::Bytes(_) => TypeName::Bytes,
+            Value::Struct(_) => TypeName::Struct,
+            Value::List(_) => TypeName::List,
+            Value::Uint8List(_) => TypeName::Uint8List,
+            Value::Array(_) => TypeName::Array,
+            Value::Map(_) => TypeName::Map,
         }
     }
 }

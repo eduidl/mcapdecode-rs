@@ -1,5 +1,8 @@
 //! Error types for the decoder layer.
+
 use thiserror::Error;
+
+use crate::value::TypeName;
 
 /// Error returned by [`MessageDecoder`](crate::MessageDecoder) implementations.
 #[derive(Debug, Error)]
@@ -17,18 +20,68 @@ pub enum DecoderError {
     MessageDecode(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("expected {expected}, got {actual}")]
+// Box arbitrary descriptions so errors containing only type names stay small.
+#[derive(Clone, PartialEq, Eq)]
+enum TypeMismatch {
+    Types(TypeName, TypeName),
+    Descriptions(Box<(String, String)>),
+}
+
+impl TypeMismatch {
+    fn descriptions(&self) -> (&str, &str) {
+        match self {
+            Self::Types(expected, actual) => (expected.as_str(), actual.as_str()),
+            Self::Descriptions(pair) => (&pair.0, &pair.1),
+        }
+    }
+}
+
+impl std::fmt::Display for TypeMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (expected, actual) = self.descriptions();
+        write!(f, "expected {expected}, got {actual}")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Error)]
+#[error("{inner}")]
 pub struct ValueTypeError {
-    expected: String,
-    actual: String,
+    inner: TypeMismatch,
+}
+
+impl std::fmt::Debug for ValueTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (expected, actual) = self.inner.descriptions();
+        f.debug_struct("ValueTypeError")
+            .field("expected", &expected)
+            .field("actual", &actual)
+            .finish()
+    }
 }
 
 impl ValueTypeError {
     pub fn new(expected: impl Into<String>, actual: impl Into<String>) -> Self {
+        let expected = expected.into();
+        let actual = actual.into();
+        match (TypeName::parse(&expected), TypeName::parse(&actual)) {
+            (Some(expected), Some(actual)) => Self::for_types(expected, actual),
+            _ => Self {
+                inner: TypeMismatch::Descriptions(Box::new((expected, actual))),
+            },
+        }
+    }
+
+    pub(crate) fn for_types(expected: TypeName, actual: TypeName) -> Self {
         Self {
-            expected: expected.into(),
-            actual: actual.into(),
+            inner: TypeMismatch::Types(expected, actual),
+        }
+    }
+
+    pub(crate) fn for_value(expected: impl Into<String>, actual: TypeName) -> Self {
+        let expected = expected.into();
+        match TypeName::parse(&expected) {
+            Some(expected) => Self::for_types(expected, actual),
+            None => Self::new(expected, actual.as_str()),
         }
     }
 }
