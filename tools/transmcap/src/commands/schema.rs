@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::Result;
 use clap::Args;
-use mcapdecode::{McapReader, core::format_field_defs};
+use mcapdecode::McapReader;
 
 #[derive(Args)]
 pub struct SchemaArgs {
@@ -22,7 +22,7 @@ impl SchemaArgs {
     pub fn run(self) -> Result<()> {
         let reader = McapReader::open(&self.input)?;
         let field_defs = reader.topic_field_defs(&self.topic)?;
-        let text = format_field_defs(&field_defs)?;
+        let text = field_defs.to_string();
 
         match self.output {
             Some(path) => fs::write(path, format!("{text}\n"))?,

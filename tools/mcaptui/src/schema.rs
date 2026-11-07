@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use mcapdecode::{McapReader, McapReaderError, core::DecoderError};
+use mcapdecode::{McapReader, McapReaderError, decoder::DecoderError};
 
 use crate::{app, format};
 

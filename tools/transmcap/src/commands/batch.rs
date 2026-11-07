@@ -11,13 +11,12 @@ use arrow::record_batch::RecordBatch;
 use clap::{Args, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use mcapdecode::{
-    McapReader, McapReaderError, MessageBatchSchema, MetadataColumns, MetadataTimestampFormat,
-    NonFiniteFloats,
+    DecodedMessage, McapReader, McapReaderError, MessageBatchSchema, MetadataColumns,
+    MetadataTimestampFormat, NonFiniteFloats,
     arrow::{
         ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, flatten_record_batch,
         project_record_batch,
     },
-    core::DecodedMessage,
 };
 use serde::Deserialize;
 

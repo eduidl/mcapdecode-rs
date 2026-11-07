@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind};
-use mcapdecode::{ChannelInfo, TopicInfo, core::Value};
+use mcapdecode::{ChannelInfo, TopicInfo, Value};
 use mcaptui::app::{App, AppRequest, AppUpdate, DetailRow, LoadedMessage, MessageFocus, Screen};
 use ratatui::layout::Rect;
 

@@ -1,4 +1,4 @@
-use mcapdecode::{ChannelInfo, TopicInfo, core::Value};
+use mcapdecode::{ChannelInfo, TopicInfo, Value};
 use ratatui::layout::Rect;
 
 mod detail;

@@ -11,10 +11,7 @@ use std::{
 };
 
 use anyhow::Result;
-use mcapdecode::{
-    McapReader, McapReaderError, RawMessage,
-    core::{DecodedMessage, Value},
-};
+use mcapdecode::{DecodedMessage, McapReader, McapReaderError, RawMessage, Value};
 
 use crate::{
     app::{App, LoadedMessage, TopicRow},

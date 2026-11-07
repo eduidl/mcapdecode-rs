@@ -6,8 +6,9 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mcapbench::{Encoding, PayloadCase, fixture};
 use mcapdecode::{
+    DecodedMessage,
     arrow::{MessageBatchSchema, MetadataColumns},
-    core::{DecodedMessage, MessageDecoder},
+    decoder::MessageDecoder,
 };
 use mcapdecode_ros2idl::Ros2IdlDecoder;
 

@@ -109,7 +109,7 @@ type before reading, and to skip name lookups for every message, resolve it once
 against the topic schema with `FieldPath`:
 
 ```rust,no_run
-use mcapdecode::{McapReader, core::FieldPath};
+use mcapdecode::{FieldPath, McapReader};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reader = McapReader::open("sample.mcap")?;

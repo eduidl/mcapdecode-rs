@@ -6,7 +6,7 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mcapbench::{Encoding, PayloadCase, fixture};
-use mcapdecode::core::MessageDecoder;
+use mcapdecode::decoder::MessageDecoder;
 use mcapdecode_protobuf::ProtobufDecoder;
 use mcapdecode_ros2idl::Ros2IdlDecoder;
 use mcapdecode_ros2msg::Ros2MsgDecoder;

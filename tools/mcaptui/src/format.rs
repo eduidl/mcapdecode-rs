@@ -1,11 +1,7 @@
 use std::{collections::BTreeSet, ops::RangeInclusive};
 
 use chrono::{DateTime, Utc};
-use mcapdecode::{
-    ChannelInfo,
-    core::{FieldDefs, StructValue, Value},
-    mcap::read::Summary,
-};
+use mcapdecode::{ChannelInfo, FieldDefs, StructValue, Value, mcap::read::Summary};
 
 use crate::app::DetailRow;
 

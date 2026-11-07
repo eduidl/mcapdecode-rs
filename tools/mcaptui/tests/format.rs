@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
 use mcapdecode::{
-    ChannelInfo,
-    core::{
-        DataTypeDef,
-        DataTypeDef::{Bytes, I64, Map, String as StringType},
-        ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef, Value,
-    },
+    ChannelInfo, DataTypeDef,
+    DataTypeDef::{Bytes, I64, Map, String as StringType},
+    ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef, Value,
 };
 use mcaptui::format::{
     format_detail_rows, format_file_info_text, format_json_detail_rows, format_raw_detail_rows,
@@ -251,11 +248,7 @@ fn uint8_lists_show_their_schema_type_and_use_the_bytes_preview() {
             rows.iter().map(|r| &r.text).collect::<Vec<_>>(),
             old_rows.iter().map(|r| &r.text).collect::<Vec<_>>()
         );
-        assert!(
-            mcapdecode::core::format_field_defs(&schema)
-                .unwrap()
-                .contains(&ty.to_string())
-        );
+        assert!(schema.to_string().contains(&ty.to_string()));
     }
 }
 
