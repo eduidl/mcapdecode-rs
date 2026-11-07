@@ -41,9 +41,16 @@ impl App {
                 return_focus: MessageFocus::List,
                 pane: ScrollPane::new(SCHEMA_HORIZONTAL_STEP),
             },
+            file_info: FileInfoPaneState {
+                visible: false,
+                text: "No file information".to_string(),
+                return_focus: MessageFocus::List,
+                pane: ScrollPane::new(SCHEMA_HORIZONTAL_STEP),
+            },
             layout: LayoutState {
                 topics_area: Rect::default(),
                 schema_area: Rect::default(),
+                file_info_area: Rect::default(),
                 message_list_area: Rect::default(),
                 message_detail_area: Rect::default(),
             },
@@ -136,6 +143,27 @@ impl App {
 
     pub fn detail_hscroll(&self) -> u16 {
         self.detail.hscroll
+    }
+
+    pub fn set_file_info_text(&mut self, text: impl Into<String>) {
+        self.file_info.text = text.into();
+        self.file_info.pane.reset();
+    }
+
+    pub fn file_info_text(&self) -> &str {
+        &self.file_info.text
+    }
+
+    pub fn file_info_visible(&self) -> bool {
+        self.file_info.visible
+    }
+
+    pub fn file_info_scroll(&self) -> u16 {
+        self.file_info.pane.scroll
+    }
+
+    pub fn file_info_hscroll(&self) -> u16 {
+        self.file_info.pane.hscroll
     }
 
     pub fn select_topic_by_name(&mut self, topic: &str) -> Option<AppUpdate> {
@@ -271,6 +299,14 @@ impl App {
         self.schema.pane.view_width = area.width.saturating_sub(2);
         self.schema.pane.page_step = self.schema.pane.view_height.max(1);
         self.clamp_schema();
+    }
+
+    pub fn set_file_info_area(&mut self, area: Rect) {
+        self.layout.file_info_area = area;
+        self.file_info.pane.view_height = area.height.saturating_sub(2);
+        self.file_info.pane.view_width = area.width.saturating_sub(2);
+        self.file_info.pane.page_step = self.file_info.pane.view_height.max(1);
+        self.clamp_file_info();
     }
 
     pub fn set_message_areas(&mut self, list_area: Rect, detail_area: Rect) {

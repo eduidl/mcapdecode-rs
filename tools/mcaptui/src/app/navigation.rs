@@ -19,6 +19,10 @@ impl App {
             return self.apply_navigation(navigation);
         }
 
+        if key.code == KeyCode::Char('i') {
+            return self.toggle_file_info();
+        }
+
         match self.session.screen {
             Screen::Topics => self.handle_topics_key(key.code),
             Screen::Messages => self.handle_messages_key(key.code),
@@ -42,17 +46,17 @@ impl App {
     /// The pane keyboard navigation acts on for the current screen and focus.
     fn focused_target(&self) -> NavigationTarget {
         match self.session.screen {
-            Screen::Topics
-                if self.session.focus == MessageFocus::Schema && self.schema_visible() =>
-            {
-                NavigationTarget::Schema
-            }
-            Screen::Topics => NavigationTarget::Topics,
+            Screen::Topics => match self.session.focus {
+                MessageFocus::Schema if self.schema_visible() => NavigationTarget::Schema,
+                MessageFocus::FileInfo if self.file_info.visible => NavigationTarget::FileInfo,
+                _ => NavigationTarget::Topics,
+            },
             Screen::Messages => match self.session.focus {
                 MessageFocus::List => NavigationTarget::MessageList,
                 MessageFocus::Detail => NavigationTarget::MessageDetail,
                 MessageFocus::Schema if self.schema_visible() => NavigationTarget::Schema,
-                MessageFocus::Schema => NavigationTarget::MessageList,
+                MessageFocus::FileInfo if self.file_info.visible => NavigationTarget::FileInfo,
+                MessageFocus::Schema | MessageFocus::FileInfo => NavigationTarget::MessageList,
             },
         }
     }
@@ -65,6 +69,9 @@ impl App {
         };
 
         let target = match self.session.screen {
+            _ if contains_point(self.layout.file_info_area, mouse.column, mouse.row) => {
+                Some(NavigationTarget::FileInfo)
+            }
             Screen::Topics => {
                 if contains_point(self.layout.schema_area, mouse.column, mouse.row) {
                     Some(NavigationTarget::Schema)
@@ -105,6 +112,11 @@ impl App {
                     pane.scroll_by(delta, limits);
                     AppUpdate::changed()
                 }
+                NavigationTarget::FileInfo => {
+                    let (pane, limits) = self.file_info_pane();
+                    pane.scroll_by(delta, limits);
+                    AppUpdate::changed()
+                }
             },
             NavigationCommand::Page { target, delta } => match target {
                 NavigationTarget::Topics => self.page_topic_selection_by(delta),
@@ -116,6 +128,11 @@ impl App {
                 }
                 NavigationTarget::MessageDetail => {
                     let (pane, limits) = self.detail_pane();
+                    pane.page_by(delta, limits);
+                    AppUpdate::changed()
+                }
+                NavigationTarget::FileInfo => {
+                    let (pane, limits) = self.file_info_pane();
                     pane.page_by(delta, limits);
                     AppUpdate::changed()
                 }
@@ -139,11 +156,17 @@ impl App {
                     self.detail.scroll = endpoint.scroll(limits);
                     AppUpdate::changed()
                 }
+                NavigationTarget::FileInfo => {
+                    let limits = self.file_info_limits();
+                    self.file_info.pane.scroll = endpoint.scroll(limits);
+                    AppUpdate::changed()
+                }
             },
         };
 
         self.clamp_schema();
         self.clamp_detail();
+        self.clamp_file_info();
         update
     }
 
@@ -156,12 +179,8 @@ impl App {
                 AppUpdate::changed()
             }
             KeyCode::Char('s') => self.toggle_schema(),
-            KeyCode::Left | KeyCode::Char('h') if self.schema_visible() => {
-                self.scroll_schema_horizontal(-1)
-            }
-            KeyCode::Right | KeyCode::Char('l') if self.schema_visible() => {
-                self.scroll_schema_horizontal(1)
-            }
+            KeyCode::Left | KeyCode::Char('h') => self.scroll_popup_horizontal(-1),
+            KeyCode::Right | KeyCode::Char('l') => self.scroll_popup_horizontal(1),
             KeyCode::Enter => self.open_selected_topic(),
             _ => AppUpdate::default(),
         }
@@ -191,6 +210,23 @@ impl App {
         AppUpdate::changed()
     }
 
+    /// Scroll whichever popup is visible; the topic list has no horizontal scroll.
+    fn scroll_popup_horizontal(&mut self, delta: i32) -> AppUpdate {
+        if self.schema_visible() {
+            return self.scroll_schema_horizontal(delta);
+        }
+        if self.file_info.visible {
+            return self.scroll_file_info_horizontal(delta);
+        }
+        AppUpdate::default()
+    }
+
+    fn scroll_file_info_horizontal(&mut self, delta: i32) -> AppUpdate {
+        let (pane, limits) = self.file_info_pane();
+        pane.scroll_horizontal_by(delta, limits);
+        AppUpdate::changed()
+    }
+
     fn scroll_focused_horizontal(&mut self, delta: i32) -> AppUpdate {
         match self.session.focus {
             MessageFocus::Detail => {
@@ -199,30 +235,50 @@ impl App {
                 AppUpdate::changed()
             }
             MessageFocus::Schema if self.schema_visible() => self.scroll_schema_horizontal(delta),
-            MessageFocus::List | MessageFocus::Schema => AppUpdate::default(),
+            MessageFocus::FileInfo if self.file_info.visible => {
+                self.scroll_file_info_horizontal(delta)
+            }
+            MessageFocus::List | MessageFocus::Schema | MessageFocus::FileInfo => {
+                AppUpdate::default()
+            }
         }
     }
 
-    pub(super) fn cycle_topics_focus(&mut self) {
-        self.session.focus = if self.schema_visible() && self.session.focus != MessageFocus::Schema
-        {
-            self.schema.return_focus = self.session.focus;
-            MessageFocus::Schema
+    /// The focus of the visible popup, if any.
+    fn popup_focus(&self) -> Option<MessageFocus> {
+        if self.schema_visible() {
+            Some(MessageFocus::Schema)
+        } else if self.file_info.visible {
+            Some(MessageFocus::FileInfo)
         } else {
-            MessageFocus::List
-        };
+            None
+        }
+    }
+
+    /// Move focus into the visible popup, remembering where to return when it closes.
+    fn focus_popup(&mut self, popup: MessageFocus) {
+        match popup {
+            MessageFocus::FileInfo => self.file_info.return_focus = self.session.focus,
+            _ => self.schema.return_focus = self.session.focus,
+        }
+        self.session.focus = popup;
+    }
+
+    pub(super) fn cycle_topics_focus(&mut self) {
+        match self.popup_focus() {
+            Some(popup) if self.session.focus != popup => self.focus_popup(popup),
+            _ => self.session.focus = MessageFocus::List,
+        }
     }
 
     pub(super) fn cycle_messages_focus(&mut self) {
-        self.session.focus = match (self.session.focus, self.schema_visible()) {
-            (MessageFocus::List, _) => MessageFocus::Detail,
-            (MessageFocus::Detail, true) => {
-                self.schema.return_focus = MessageFocus::Detail;
-                MessageFocus::Schema
+        match (self.session.focus, self.popup_focus()) {
+            (MessageFocus::List, _) => self.session.focus = MessageFocus::Detail,
+            (MessageFocus::Detail, Some(popup)) => self.focus_popup(popup),
+            (MessageFocus::Detail | MessageFocus::Schema | MessageFocus::FileInfo, _) => {
+                self.session.focus = MessageFocus::List
             }
-            (MessageFocus::Detail, false) => MessageFocus::List,
-            (MessageFocus::Schema, _) => MessageFocus::List,
-        };
+        }
     }
 
     fn move_topic_selection(&mut self, delta: isize) -> AppUpdate {
@@ -251,6 +307,25 @@ impl App {
     fn page_message_selection_by(&mut self, delta: i32) -> AppUpdate {
         let step = self.messages.page_step as isize;
         self.move_message_selection(step.saturating_mul(delta as isize))
+    }
+
+    /// The file info pane together with the limits of its text.
+    fn file_info_pane(&mut self) -> (&mut ScrollPane, ScrollLimits) {
+        let limits = self.file_info_limits();
+        (&mut self.file_info.pane, limits)
+    }
+
+    fn file_info_limits(&self) -> ScrollLimits {
+        let text = &self.file_info.text;
+        ScrollLimits {
+            vertical: max_vertical_scroll(text.lines().count(), self.file_info.pane.view_height),
+            horizontal: max_horizontal_scroll(text.lines(), self.file_info.pane.view_width),
+        }
+    }
+
+    pub(super) fn clamp_file_info(&mut self) {
+        let (pane, limits) = self.file_info_pane();
+        pane.clamp(limits);
     }
 
     /// The detail pane together with the limits of the selected message's rows.
@@ -360,6 +435,28 @@ impl App {
         AppUpdate::default()
     }
 
+    /// Opening the popup leaves focus where it is; `Tab` moves into it.
+    /// It sits where the schema popup does, so opening either one closes the other.
+    fn toggle_file_info(&mut self) -> AppUpdate {
+        if self.file_info.visible {
+            self.close_file_info();
+        } else {
+            if self.schema_visible() {
+                self.clear_schema_view();
+            }
+            self.file_info.visible = true;
+            self.file_info.pane.reset();
+        }
+        AppUpdate::changed()
+    }
+
+    fn close_file_info(&mut self) {
+        self.file_info.visible = false;
+        if self.session.focus == MessageFocus::FileInfo {
+            self.session.focus = self.file_info.return_focus;
+        }
+    }
+
     fn toggle_schema(&mut self) -> AppUpdate {
         if self.schema_visible() {
             self.clear_schema_view();
@@ -367,6 +464,7 @@ impl App {
             return AppUpdate::changed();
         }
 
+        self.close_file_info();
         self.begin_schema_view();
         AppUpdate::changed_with_request(AppRequest::LoadSelectedSchema)
     }

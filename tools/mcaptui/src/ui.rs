@@ -25,8 +25,29 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         Screen::Messages => render_messages(frame, layout[0], app),
     }
 
+    let file_info_area = app
+        .file_info_visible()
+        .then(|| schema_popup_area(layout[0]));
+    app.set_file_info_area(file_info_area.unwrap_or_default());
+    if let Some(area) = file_info_area {
+        render_file_info_widget(frame, area, app);
+    }
+
     render_status(frame, layout[1], app.status());
     render_help(frame, layout[2], app.screen(), app.focus());
+}
+
+fn render_file_info_widget(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let title = if app.focus() == MessageFocus::FileInfo {
+        "File info [focus]"
+    } else {
+        "File info"
+    };
+    frame.render_widget(Clear, area);
+    let paragraph = Paragraph::new(app.file_info_text())
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .scroll((app.file_info_scroll(), app.file_info_hscroll()));
+    frame.render_widget(paragraph, area);
 }
 
 fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -246,18 +267,19 @@ fn render_help(frame: &mut Frame<'_>, area: Rect, screen: Screen, focus: Message
         Screen::Topics => Line::from(vec![
             Span::raw(format!(
                 "Focus: {}  ",
-                if focus == MessageFocus::Schema {
-                    "schema"
-                } else {
-                    "topics"
+                match focus {
+                    MessageFocus::Schema => "schema",
+                    MessageFocus::FileInfo => "file info",
+                    MessageFocus::List | MessageFocus::Detail => "topics",
                 }
             )),
             Span::raw("Tab switch  "),
             Span::raw("Up/Down j/k move  "),
-            Span::raw("Left/Right h/l schema x-scroll  "),
+            Span::raw("Left/Right h/l popup x-scroll  "),
             Span::raw("PageUp/PageDown page  "),
             Span::raw("Home/End jump  "),
             Span::raw("s toggle schema  "),
+            Span::raw("i file info  "),
             Span::raw("Enter open  "),
             Span::raw("q quit"),
         ]),
@@ -266,10 +288,12 @@ fn render_help(frame: &mut Frame<'_>, area: Rect, screen: Screen, focus: Message
                 MessageFocus::List => "list",
                 MessageFocus::Detail => "detail",
                 MessageFocus::Schema => "schema",
+                MessageFocus::FileInfo => "file info",
             };
             Line::from(vec![
                 Span::raw(format!("Focus: {focus_text}  ")),
                 Span::raw("s toggle schema  "),
+                Span::raw("i file info  "),
                 Span::raw("Tab switch  "),
                 Span::raw("Up/Down move/scroll  "),
                 Span::raw("Left/Right h/l x-scroll  "),

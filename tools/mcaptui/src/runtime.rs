@@ -7,6 +7,7 @@ use mcapdecode::{McapReader, OpenedMcap};
 
 use crate::{
     app::{self, App, AppRequest, AppUpdate},
+    format,
     loader::{self, TopicLoader},
     schema::{self, SchemaCache},
     terminal, ui,
@@ -65,6 +66,15 @@ fn run(cli: Cli) -> Result<()> {
             .with_context(|| format!("failed to open {}", cli.input.display()))?,
     );
     let mut app = App::with_channels(reader.list_topics(), &reader.list_channels());
+    let file_size = std::fs::metadata(&cli.input)
+        .with_context(|| format!("failed to stat {}", cli.input.display()))?
+        .len();
+    app.set_file_info_text(format::format_file_info_text(
+        &cli.input.display().to_string(),
+        file_size,
+        reader.summary(),
+        reader.message_time_range(),
+    ));
     let mut loader = None;
     let mut schema_cache = SchemaCache::default();
 
