@@ -18,23 +18,28 @@ pub(crate) fn channel_infos_from_summary(summary: &mcap::read::Summary) -> Vec<C
     let mut channels: Vec<_> = summary
         .channels
         .values()
-        .map(|channel| {
-            let schema = channel.schema.as_ref();
-            ChannelInfo {
-                id: channel.id,
-                topic: channel.topic.clone(),
-                message_count: channel_message_count(summary, channel.id),
-                schema_name: schema.map(|schema| schema.name.clone()),
-                schema_encoding: schema
-                    .map(|schema| schema.encoding.clone())
-                    .unwrap_or_default(),
-                message_encoding: channel.message_encoding.clone(),
-                metadata: channel.metadata.clone(),
-            }
-        })
+        .map(|channel| channel_info(summary, channel))
         .collect();
     channels.sort_unstable_by_key(|channel| channel.id);
     channels
+}
+
+pub(crate) fn channel_info(
+    summary: &mcap::read::Summary,
+    channel: &mcap::Channel<'_>,
+) -> ChannelInfo {
+    let schema = channel.schema.as_ref();
+    ChannelInfo {
+        id: channel.id,
+        topic: channel.topic.clone(),
+        message_count: channel_message_count(summary, channel.id),
+        schema_name: schema.map(|schema| schema.name.clone()),
+        schema_encoding: schema
+            .map(|schema| schema.encoding.clone())
+            .unwrap_or_default(),
+        message_encoding: channel.message_encoding.clone(),
+        metadata: channel.metadata.clone(),
+    }
 }
 
 pub(crate) fn get_channel_from_summary<'a>(

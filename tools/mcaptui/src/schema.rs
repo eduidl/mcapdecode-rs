@@ -1,20 +1,20 @@
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use mcapdecode::{McapReader, McapReaderError, core::DecoderError};
+use mcapdecode::{McapReaderError, OpenedMcap, core::DecoderError};
 
 use crate::{app, format};
 
+/// Channel IDs identify schemas even when display labels coincide.
 pub(crate) type SchemaCache = HashMap<u16, app::SchemaView>;
 
 pub(crate) fn open_selected_schema(
     app: &mut app::App,
-    reader: &McapReader,
-    input: &Path,
+    reader: &OpenedMcap,
     schema_cache: &mut SchemaCache,
 ) -> Result<()> {
     let row = app.selected_topic().context("no topic selected")?.clone();
-    let schema_view = load_schema_view(reader, input, schema_cache, &row)?;
+    let schema_view = load_schema_view(reader, schema_cache, &row)?;
     app.set_schema_view(
         schema_view.topic.clone(),
         schema_view.title.clone(),
@@ -25,8 +25,7 @@ pub(crate) fn open_selected_schema(
 }
 
 pub(crate) fn load_schema_view(
-    reader: &McapReader,
-    input: &Path,
+    reader: &OpenedMcap,
     schema_cache: &mut SchemaCache,
     row: &app::TopicRow,
 ) -> Result<app::SchemaView> {
@@ -44,7 +43,7 @@ pub(crate) fn load_schema_view(
     let text = if topic.schema_encoding == "jsonschema" && topic.message_encoding == "json" {
         format::format_unsupported_schema_text(topic)
     } else {
-        let field_defs = reader.field_defs_by_channel_id(input, row.channel.id);
+        let field_defs = reader.field_defs_by_channel_id(row.channel.id);
         match field_defs {
             Ok(field_defs) => format::format_schema_text(topic, &field_defs),
             Err(error) if supports_raw_fallback(&error) => {
@@ -81,7 +80,18 @@ pub(crate) fn supports_raw_fallback(error: &McapReaderError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use mcapdecode::ChannelInfo;
+    use std::path::Path;
+
+    use mcapdecode::{ChannelInfo, McapReader};
+
+    fn reader() -> OpenedMcap {
+        McapReader::new()
+            .open_file(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../mcapdecode/mcapdecode/tests/fixtures/with_summary.mcap"),
+            )
+            .unwrap()
+    }
 
     use super::*;
 
@@ -89,7 +99,7 @@ mod tests {
     fn jsonschema_topics_report_the_schema_as_unsupported() {
         let row = app::TopicRow::from_channel(
             ChannelInfo {
-                id: 1,
+                id: u16::MAX,
                 topic: "/imu".to_string(),
                 message_count: Some(1),
                 schema_name: Some("schema-a".to_string()),
@@ -101,13 +111,7 @@ mod tests {
         );
         let mut cache = SchemaCache::default();
 
-        let view = load_schema_view(
-            &McapReader::new(),
-            Path::new("/nonexistent.mcap"),
-            &mut cache,
-            &row,
-        )
-        .unwrap();
+        let view = load_schema_view(&reader(), &mut cache, &row).unwrap();
 
         assert!(view.text.contains("JSON Schema is not supported"));
         assert!(!view.text.contains("json: string"));
@@ -117,7 +121,7 @@ mod tests {
     fn jsonschema_with_other_message_encodings_goes_to_the_reader() {
         let row = app::TopicRow::from_channel(
             ChannelInfo {
-                id: 1,
+                id: u16::MAX,
                 topic: "/imu".to_string(),
                 message_count: Some(1),
                 schema_name: Some("schema-a".to_string()),
@@ -129,16 +133,8 @@ mod tests {
         );
         let mut cache = SchemaCache::default();
 
-        // The reader fails on the missing file, so the unsupported text was not used.
-        assert!(
-            load_schema_view(
-                &McapReader::new(),
-                Path::new("/nonexistent.mcap"),
-                &mut cache,
-                &row,
-            )
-            .is_err()
-        );
+        // The topic is absent, so the unsupported text was not used.
+        assert!(load_schema_view(&reader(), &mut cache, &row).is_err());
     }
 
     #[test]
@@ -157,7 +153,7 @@ mod tests {
         );
         let topic_row = app::TopicRow::from_channel(
             ChannelInfo {
-                id: 2,
+                id: u16::MAX,
                 topic: "/foo #1".to_string(),
                 message_count: Some(1),
                 schema_name: None,
@@ -176,12 +172,11 @@ mod tests {
             line_count: 0,
         };
         let mut cache = SchemaCache::from([(1, cached)]);
-        let reader = McapReader::new();
-        let missing = Path::new("/nonexistent.mcap");
+        let reader = reader();
 
-        let hit = load_schema_view(&reader, missing, &mut cache, &channel_row).unwrap();
+        let hit = load_schema_view(&reader, &mut cache, &channel_row).unwrap();
         assert_eq!(hit.title, "cached");
-        // A miss goes to the file, which does not exist.
-        assert!(load_schema_view(&reader, missing, &mut cache, &topic_row).is_err());
+        // A cache miss queries the reader, where the topic is absent.
+        assert!(load_schema_view(&reader, &mut cache, &topic_row).is_err());
     }
 }

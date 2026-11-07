@@ -39,35 +39,404 @@ fn reads_with_and_without_chunk_indexes() {
         writer.finish().unwrap();
         let reader = McapReader::builder()
             .with_decoder(Box::new(TestJsonDecoder))
-            .build();
-        assert_eq!(
-            collect_raw_payloads(&reader, fixture.path(), "/decoded").len(),
-            3
-        );
+            .build()
+            .open_file(fixture.path())
+            .unwrap();
+        let mut count = 0;
+        reader
+            .read()
+            .topic("/decoded")
+            .raw()
+            .for_each(|_, _| {
+                count += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(count, 3);
         for parallel in [false, true] {
             let mut actual = Vec::new();
             reader
-                .for_each_topic_decoded_message_with_options(
-                    fixture.path(),
-                    &["/decoded", "/other"],
-                    &ReadOptions {
-                        parallel: Some(parallel),
-                        time_range: Some(TimeRange {
-                            start: Some(2),
-                            end: Some(3),
-                        }),
-                    },
-                    |topic, message| {
-                        actual.push((topic.to_owned(), message.log_time));
-                        Ok(())
-                    },
-                )
+                .read()
+                .topics(["/decoded", "/other"])
+                .options(ReadOptions {
+                    parallel: Some(parallel),
+                    time_range: Some(TimeRange {
+                        start: Some(2),
+                        end: Some(3),
+                    }),
+                })
+                .decoded()
+                .for_each(|channel, message| {
+                    actual.push((channel.topic.clone(), message.log_time));
+                    Ok(())
+                })
                 .unwrap();
             assert_eq!(
                 actual,
                 [("/decoded".to_owned(), 2), ("/other".to_owned(), 2)]
             );
         }
+    }
+}
+
+#[test]
+fn raw_reads_include_messages_without_chunk_indexes() {
+    for use_chunks in [false, true] {
+        let fixture = multi_topic_fixture_with_options(
+            WriteOptions::new()
+                .use_chunks(use_chunks)
+                .emit_chunk_indexes(false),
+        );
+        let reader = McapReader::open(fixture.path()).unwrap();
+        for parallel in [false, true] {
+            for (start, end, expected) in [
+                (3, 8, vec![3, 4, 5, 6, 7]),
+                (4, 6, vec![4, 5]),
+                (3, 3, vec![]),
+                (2000, 3000, vec![]),
+            ] {
+                let mut actual = BTreeMap::<String, Vec<u64>>::new();
+                reader
+                    .read()
+                    .topics(["/first", "/second"])
+                    .options(ReadOptions {
+                        time_range: Some(TimeRange {
+                            start: Some(start),
+                            end: Some(end),
+                        }),
+                        parallel: Some(parallel),
+                    })
+                    .raw()
+                    .for_each(|channel, message| {
+                        assert_eq!(message.publish_time, message.log_time);
+                        let value =
+                            message.log_time + if channel.topic == "/second" { 100 } else { 0 };
+                        assert_eq!(
+                            message.data.as_ref(),
+                            format!(r#"{{"value":{value}}}"#).as_bytes()
+                        );
+                        actual
+                            .entry(channel.topic.clone())
+                            .or_default()
+                            .push(message.log_time);
+                        Ok(())
+                    })
+                    .unwrap();
+                for topic in ["/first", "/second"] {
+                    assert_eq!(actual.get(topic).cloned().unwrap_or_default(), expected);
+                }
+            }
+        }
+        let mut calls = 0;
+        let error = reader
+            .read()
+            .raw()
+            .for_each(|_, _| {
+                calls += 1;
+                Err("stop reading".into())
+            })
+            .unwrap_err();
+        assert_eq!(calls, 1);
+        assert!(matches!(error, McapReaderError::Callback(_)));
+    }
+}
+
+#[test]
+fn raw_reads_match_with_parallel_overrides() {
+    let fixture = multi_topic_fixture_with_indexes(false);
+    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let mut results = Vec::new();
+    for parallel in [false, true] {
+        let mut messages = Vec::new();
+        reader
+            .read()
+            .topics(["/first", "/second"])
+            .options(ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(4),
+                    end: Some(8),
+                }),
+                parallel: Some(parallel),
+            })
+            .raw()
+            .for_each(|channel, message| {
+                messages.push((channel.id, message.log_time));
+                Ok(())
+            })
+            .unwrap();
+        results.push(messages);
+    }
+    assert_eq!(results[0], results[1]);
+    assert_eq!(results[0].len(), 8);
+}
+
+#[test]
+fn opened_reader_default_selects_all_channels_even_with_duplicate_topics() {
+    let fixture = write_split_topic_fixture("opened-all-channels");
+    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let mut raw = BTreeMap::<u16, usize>::new();
+    reader
+        .read()
+        .raw()
+        .for_each(|channel, _| {
+            *raw.entry(channel.id).or_default() += 1;
+            Ok(())
+        })
+        .unwrap();
+    let mut decoded = BTreeMap::<u16, usize>::new();
+    reader
+        .read()
+        .decoded()
+        .for_each(|channel, _| {
+            *decoded.entry(channel.id).or_default() += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(raw, decoded);
+    assert_eq!(raw.len(), 2);
+    assert!(raw.values().all(|&count| count == 2));
+}
+
+#[test]
+fn opened_reader_all_decoded_rejects_schema_less_channel() {
+    let reader = McapReader::open(fixture_path("with_summary.mcap")).unwrap();
+    assert!(matches!(
+        reader.read().decoded().for_each(|_, _| Ok(())),
+        Err(McapReaderError::SchemaNotAvailable | McapReaderError::NoDecoder { .. })
+    ));
+    assert!(matches!(
+        reader
+            .read()
+            .topic("/raw")
+            .decoded()
+            .for_each(|_, _| Ok(())),
+        Err(McapReaderError::SchemaNotAvailable)
+    ));
+}
+
+#[test]
+fn opened_reader_empty_selection_emits_no_messages() {
+    let reader = McapReader::open(fixture_path("with_summary.mcap")).unwrap();
+    reader
+        .read()
+        .topics([] as [&str; 0])
+        .raw()
+        .for_each(|_, _| panic!("empty selection"))
+        .unwrap();
+    reader
+        .read()
+        .topics([] as [&str; 0])
+        .decoded()
+        .for_each(|_, _| panic!("empty selection"))
+        .unwrap();
+}
+
+#[test]
+fn opened_reader_selects_multiple_channels_and_reports_metadata() {
+    let fixture = write_split_topic_fixture("opened-multiple-channels");
+    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let channels = reader.list_channels();
+    let ids = [channels[0].id, channels[1].id, channels[0].id];
+    let options = ReadOptions {
+        time_range: Some(TimeRange {
+            start: Some(3),
+            end: None,
+        }),
+        ..ReadOptions::default()
+    };
+    let mut raw = BTreeMap::new();
+    reader
+        .read()
+        .channels(ids)
+        .options(options.clone())
+        .raw()
+        .for_each(|channel, message| {
+            assert_eq!(channel.topic, "/split");
+            assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
+            raw.insert(channel.id, message.log_time);
+            Ok(())
+        })
+        .unwrap();
+    let mut decoded = BTreeMap::new();
+    reader
+        .read()
+        .channels(ids)
+        .options(options)
+        .decoded()
+        .for_each(|channel, message| {
+            assert_eq!(channel.topic, "/split");
+            assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
+            decoded.insert(channel.id, message.log_time);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(raw, decoded);
+    assert_eq!(raw.len(), 2);
+    assert_eq!(raw[&ids[0]], 3);
+    assert_eq!(raw[&ids[1]], 4);
+    assert!(matches!(
+        reader
+            .read()
+            .channels([ids[0], u16::MAX])
+            .raw()
+            .for_each(|_, _| panic!("invalid channel must be rejected before callbacks")),
+        Err(McapReaderError::ChannelNotFound)
+    ));
+}
+
+#[test]
+fn opened_reader_exposes_schemas_and_counts() {
+    let fixture = write_split_topic_fixture("opened-schema");
+    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let channels = reader.list_channels();
+    assert!(
+        !reader
+            .field_defs_by_channel_id(channels[0].id)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        reader.topic_field_defs("/split"),
+        Err(McapReaderError::MultipleChannels)
+    ));
+    assert!(matches!(
+        reader.message_count("/split"),
+        Err(McapReaderError::MultipleChannels)
+    ));
+    let fixture = multi_topic_fixture();
+    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    assert_eq!(reader.message_count("/first").unwrap(), 1024);
+    assert!(!reader.topic_field_defs("/first").unwrap().is_empty());
+}
+
+#[test]
+fn opened_reader_reuses_file_for_topic_and_channel_reads() {
+    let fixture = write_split_topic_fixture("opened-reader");
+    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let channels = reader.list_channels();
+    assert_eq!(reader.list_topics().len(), 1);
+
+    for _ in 0..2 {
+        let mut times = Vec::new();
+        reader
+            .read()
+            .channel(channels[0].id)
+            .decoded()
+            .for_each(|topic, message| {
+                assert_eq!(topic.topic, "/split");
+                times.push(message.log_time);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(times, [1, 3]);
+    }
+    assert!(matches!(
+        reader
+            .read()
+            .topics(["/split"])
+            .decoded()
+            .for_each(|_, _| Ok(())),
+        Err(McapReaderError::MultipleChannels)
+    ));
+}
+
+#[test]
+fn opened_reader_selects_raw_topics_and_channel() {
+    let fixture = write_split_topic_fixture("opened-raw");
+    let reader = McapReader::open(fixture.path()).unwrap();
+    let channel = reader.list_channels()[1].id;
+    let mut times = Vec::new();
+    reader
+        .read()
+        .channel(channel)
+        .raw()
+        .for_each(|topic, message| {
+            assert_eq!(topic.topic, "/split");
+            times.push(message.log_time);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(times, [2, 4]);
+    assert!(matches!(
+        reader
+            .read()
+            .topics(["/split"])
+            .raw()
+            .for_each(|_, _| Ok(())),
+        Err(McapReaderError::MultipleChannels)
+    ));
+}
+
+#[test]
+fn opened_reader_decoded_topics_apply_options_and_deduplicate() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .build()
+        .open_file(fixture.path())
+        .unwrap();
+    let mut topics = Vec::new();
+    reader
+        .read()
+        .topics(["/first", "/first", "/second"])
+        .options(ReadOptions {
+            time_range: Some(TimeRange {
+                start: None,
+                end: Some(1),
+            }),
+            ..ReadOptions::default()
+        })
+        .decoded()
+        .for_each(|topic, _| {
+            topics.push(topic.topic.clone());
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(topics, ["/first", "/second"]);
+}
+
+#[test]
+fn opened_reader_raw_and_decoded_share_filters() {
+    for indexes in [false, true] {
+        let fixture = multi_topic_fixture_with_indexes(indexes);
+        let reader = split_reader(false).open_file(fixture.path()).unwrap();
+        let options = ReadOptions {
+            time_range: Some(TimeRange {
+                start: Some(4),
+                end: Some(6),
+            }),
+            ..ReadOptions::default()
+        };
+        let mut raw = BTreeMap::<String, Vec<u64>>::new();
+        let mut decoded = BTreeMap::<String, Vec<u64>>::new();
+        reader
+            .read()
+            .topics(["/first", "/second"])
+            .options(options.clone())
+            .raw()
+            .for_each(|topic, message| {
+                raw.entry(topic.topic.clone())
+                    .or_default()
+                    .push(message.log_time);
+                Ok(())
+            })
+            .unwrap();
+        reader
+            .read()
+            .topics(["/first", "/second"])
+            .options(options)
+            .decoded()
+            .for_each(|topic, message| {
+                decoded
+                    .entry(topic.topic.clone())
+                    .or_default()
+                    .push(message.log_time);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(raw, decoded);
+        assert_eq!(raw["/first"], [4, 5]);
+        assert_eq!(raw["/second"], [4, 5]);
     }
 }
 
@@ -128,7 +497,12 @@ fn decoded_read_by_channel_id_returns_only_that_channel() {
         for id in split_channel_ids(&reader, fixture.path()) {
             let mut log_times = Vec::new();
             reader
-                .for_each_decoded_message_by_channel_id(fixture.path(), id, |message| {
+                .open_file(fixture.path())
+                .unwrap()
+                .read()
+                .channel(id)
+                .decoded()
+                .for_each(|_, message| {
                     log_times.push(message.log_time);
                     Ok(())
                 })
@@ -152,21 +526,22 @@ fn decoded_read_by_channel_id_applies_options() {
     let mut log_times = Vec::new();
 
     reader
-        .for_each_decoded_message_by_channel_id_with_options(
-            fixture.path(),
-            id,
-            &ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(4),
-                    end: None,
-                }),
-                ..ReadOptions::default()
-            },
-            |message| {
-                log_times.push(message.log_time);
-                Ok(())
-            },
-        )
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .channel(id)
+        .options(ReadOptions {
+            time_range: Some(TimeRange {
+                start: Some(3),
+                end: None,
+            }),
+            ..ReadOptions::default()
+        })
+        .decoded()
+        .for_each(|_, message| {
+            log_times.push(message.log_time);
+            Ok(())
+        })
         .unwrap();
 
     assert_eq!(log_times, [4]);
@@ -181,7 +556,12 @@ fn raw_read_by_channel_id_returns_only_that_channel() {
         for id in split_channel_ids(&reader, fixture.path()) {
             let mut log_times = Vec::new();
             reader
-                .for_each_raw_message_by_channel_id(fixture.path(), id, |message| {
+                .open_file(fixture.path())
+                .unwrap()
+                .read()
+                .channel(id)
+                .raw()
+                .for_each(|_, message| {
                     log_times.push(message.log_time);
                     Ok(())
                 })
@@ -218,11 +598,23 @@ fn channel_id_reads_report_unknown_channel() {
         Err(McapReaderError::ChannelNotFound)
     ));
     assert!(matches!(
-        reader.for_each_decoded_message_by_channel_id(fixture.path(), unknown, |_| Ok(())),
+        reader
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .channel(unknown)
+            .decoded()
+            .for_each(|_, _| Ok(())),
         Err(McapReaderError::ChannelNotFound)
     ));
     assert!(matches!(
-        reader.for_each_raw_message_by_channel_id(fixture.path(), unknown, |_| Ok(())),
+        reader
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .channel(unknown)
+            .raw()
+            .for_each(|_, _| Ok(())),
         Err(McapReaderError::ChannelNotFound)
     ));
 }
@@ -237,11 +629,23 @@ fn topic_reads_reject_a_topic_with_multiple_channels() {
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
-        reader.for_each_decoded_message(fixture.path(), "/split", |_| Ok(())),
+        reader
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .topic("/split")
+            .decoded()
+            .for_each(|_, _| Ok(())),
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
-        reader.for_each_raw_message(fixture.path(), "/split", |_| Ok(())),
+        reader
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .topic("/split")
+            .raw()
+            .for_each(|_, _| Ok(())),
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
@@ -278,130 +682,23 @@ fn message_count_unknown_topic_returns_error() {
     ));
 }
 
-fn collect_prepared_values(prepared: &PreparedTopic<'_>, options: &ReadOptions) -> Vec<i64> {
-    let mut values = Vec::new();
-    prepared
-        .for_each_decoded_message_with_options(options, |message| {
-            let Value::Struct(fields) = message.value else {
-                panic!("expected struct payload");
-            };
-            let Value::I64(value) = fields[0] else {
-                panic!("expected i64 field");
-            };
-            values.push(value);
+#[test]
+fn opened_topic_schema_enables_value_access() {
+    let fixture = write_chunked_fixture("opened-value-view", &[br#"{"value":42}"#]);
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .build()
+        .open_file(fixture.path())
+        .unwrap();
+    reader
+        .read()
+        .topic("/decoded")
+        .decoded()
+        .for_each(|_, message| {
+            assert_eq!(message.value.get("value")?.try_widen_i64()?, 42);
             Ok(())
         })
         .unwrap();
-    values
-}
-
-#[test]
-fn with_prepared_topic_exposes_topic_metadata_and_derived_schema() {
-    let fixture = write_chunked_fixture("prepared-metadata", &[br#"{"value":1}"#]);
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
-
-    reader
-        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
-            assert_eq!(prepared.topic(), "/decoded");
-            assert_eq!(prepared.schema_name(), "test.Msg");
-            assert!(!prepared.field_defs().is_empty());
-            Ok(())
-        })
-        .unwrap();
-}
-
-#[test]
-fn prepared_topic_schema_enables_value_access() {
-    let fixture = write_chunked_fixture("prepared-value-view", &[br#"{"value":42}"#]);
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
-    reader
-        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
-            prepared.for_each_decoded_message_with_options(&ReadOptions::default(), |message| {
-                assert_eq!(message.value.get("value")?.try_widen_i64()?, 42);
-                Ok(())
-            })
-        })
-        .unwrap();
-}
-
-#[test]
-fn with_prepared_topic_scans_repeatedly_from_one_preparation() {
-    let fixture = write_chunked_fixture(
-        "prepared-repeat",
-        &[br#"{"value":1}"#, br#"{"value":2}"#, br#"{"value":3}"#],
-    );
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
-
-    let (all, filtered) = reader
-        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
-            let all = collect_prepared_values(prepared, &ReadOptions::default());
-            let filtered = collect_prepared_values(
-                prepared,
-                &ReadOptions {
-                    time_range: Some(TimeRange {
-                        start: None,
-                        end: Some(3),
-                    }),
-                    ..ReadOptions::default()
-                },
-            );
-            Ok((all, filtered))
-        })
-        .unwrap();
-
-    assert_eq!(all, vec![1, 2, 3]);
-    assert_eq!(filtered, vec![1, 2]);
-}
-
-#[test]
-fn with_prepared_topic_matches_reader_level_filtered_read() {
-    let fixture = write_chunked_fixture(
-        "prepared-matches-reader",
-        &[br#"{"value":1}"#, br#"{"value":2}"#, br#"{"value":3}"#],
-    );
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
-    let options = ReadOptions {
-        time_range: Some(TimeRange {
-            start: Some(2),
-            end: None,
-        }),
-        ..ReadOptions::default()
-    };
-
-    let prepared_values = reader
-        .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
-            Ok(collect_prepared_values(prepared, &options))
-        })
-        .unwrap();
-
-    assert_eq!(
-        prepared_values,
-        super::read_options::collect_values(&reader, fixture.path(), &options)
-    );
-}
-
-#[test]
-fn with_prepared_topic_reports_unknown_topic_without_running_callback() {
-    let fixture = write_chunked_fixture("prepared-unknown-topic", &[br#"{"value":1}"#]);
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
-
-    let err = reader
-        .with_prepared_topic::<()>(fixture.path(), "/unknown", |_prepared| {
-            panic!("callback must not run when the topic cannot be resolved")
-        })
-        .unwrap_err();
-
-    assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[test]
@@ -534,50 +831,57 @@ fn list_topics_aggregates_duplicate_channels() {
 }
 
 #[test]
-fn for_each_decoded_message_unknown_topic_returns_error() {
+fn decoded_read_unknown_topic_returns_error() {
     let mut reader = McapReader::new();
     reader.register_decoder(Box::new(TestJsonDecoder));
 
     let err = reader
-        .for_each_decoded_message(&fixture_path("with_summary.mcap"), "/unknown", |_message| {
-            Ok(())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/unknown")
+        .decoded()
+        .for_each(|_, _message| Ok(()))
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[test]
-fn for_each_decoded_message_errors_when_schema_is_missing() {
+fn decoded_read_errors_when_schema_is_missing() {
     let mut reader = McapReader::new();
     reader.register_decoder(Box::new(TestJsonDecoder));
 
     let err = reader
-        .for_each_decoded_message(
-            &fixture_path("with_summary.mcap"),
-            "/raw",
-            |_message| Ok(()),
-        )
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/raw")
+        .decoded()
+        .for_each(|_, _message| Ok(()))
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::SchemaNotAvailable));
 }
 
 #[test]
-fn for_each_decoded_message_without_decoder_returns_error() {
+fn decoded_read_without_decoder_returns_error() {
     let reader = McapReader::new();
 
     let err = reader
-        .for_each_decoded_message(&fixture_path("with_summary.mcap"), "/decoded", |_message| {
-            Ok(())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .decoded()
+        .for_each(|_, _message| Ok(()))
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::NoDecoder { .. }));
 }
 
 #[test]
-fn for_each_raw_message_reads_schema_less_topic_payloads() {
+fn raw_read_reads_schema_less_topic_payloads() {
     let reader = McapReader::new();
 
     assert_eq!(
@@ -587,26 +891,32 @@ fn for_each_raw_message_reads_schema_less_topic_payloads() {
 }
 
 #[test]
-fn for_each_raw_message_unknown_topic_returns_error() {
+fn raw_read_unknown_topic_returns_error() {
     let reader = McapReader::new();
 
     let err = reader
-        .for_each_raw_message(&fixture_path("with_summary.mcap"), "/unknown", |_message| {
-            Ok(())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/unknown")
+        .raw()
+        .for_each(|_, _message| Ok(()))
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[test]
-fn for_each_raw_message_propagates_callback_error() {
+fn raw_read_propagates_callback_error() {
     let reader = McapReader::new();
 
     let err = reader
-        .for_each_raw_message(&fixture_path("with_summary.mcap"), "/raw", |_message| {
-            Err("callback failed".into())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/raw")
+        .raw()
+        .for_each(|_, _message| Err("callback failed".into()))
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::Callback(_)));
@@ -614,7 +924,7 @@ fn for_each_raw_message_propagates_callback_error() {
 }
 
 #[test]
-fn for_each_decoded_message_parallel_matches_sequential_for_multi_chunk_fixture() {
+fn decoded_read_parallel_matches_sequential_for_multi_chunk_fixture() {
     let fixture = write_chunked_fixture(
         "parallel-multi-chunk-decoded",
         &[
@@ -642,7 +952,7 @@ fn for_each_decoded_message_parallel_matches_sequential_for_multi_chunk_fixture(
 }
 
 #[test]
-fn for_each_decoded_message_parallel_propagates_decode_error() {
+fn decoded_read_parallel_propagates_decode_error() {
     let fixture = write_chunked_fixture(
         "parallel-decode-error-decoded",
         &[br#"{"value":1}"#, b"invalid", br#"{"value":3}"#],
@@ -654,7 +964,12 @@ fn for_each_decoded_message_parallel_propagates_decode_error() {
         .build();
 
     let err = reader
-        .for_each_decoded_message(fixture.path(), "/decoded", |_message| Ok(()))
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .decoded()
+        .for_each(|_, _message| Ok(()))
         .unwrap_err();
 
     assert!(matches!(
@@ -664,14 +979,17 @@ fn for_each_decoded_message_parallel_propagates_decode_error() {
 }
 
 #[test]
-fn for_each_decoded_message_propagates_callback_error() {
+fn decoded_read_propagates_callback_error() {
     let mut reader = McapReader::new();
     reader.register_decoder(Box::new(TestJsonDecoder));
 
     let err = reader
-        .for_each_decoded_message(&fixture_path("with_summary.mcap"), "/decoded", |_message| {
-            Err("callback failed".into())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .decoded()
+        .for_each(|_, _message| Err("callback failed".into()))
         .unwrap_err();
 
     let McapReaderError::Callback(inner) = &err else {
@@ -694,7 +1012,12 @@ fn parallel_reader_callback_can_use_rayon() {
     for topics in [&["/first"][..], &["/first", "/second"][..]] {
         let mut calls = 0;
         reader
-            .for_each_topic_decoded_message(fixture.path(), topics, |_, message| {
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .topics(topics)
+            .decoded()
+            .for_each(|_, message| {
                 let (log_time, publish_time) =
                     rayon::join(|| message.log_time, || message.publish_time);
                 assert_eq!(log_time, publish_time);
@@ -716,7 +1039,12 @@ fn parallel_reader_stops_after_callback_error_across_windows() {
     for topics in [&["/first"][..], &["/first", "/second"][..]] {
         let mut calls = 0;
         let error = reader
-            .for_each_topic_decoded_message(fixture.path(), topics, |_, _| {
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .topics(topics)
+            .decoded()
+            .for_each(|_, _| {
                 calls += 1;
                 if calls == 500 {
                     return Err("stop reading".into());
@@ -730,7 +1058,7 @@ fn parallel_reader_stops_after_callback_error_across_windows() {
 }
 
 #[test]
-fn for_each_decoded_message_parallel_stops_after_callback_error() {
+fn decoded_read_parallel_stops_after_callback_error() {
     let fixture = write_chunked_fixture(
         "parallel-callback-stop",
         &[
@@ -749,7 +1077,12 @@ fn for_each_decoded_message_parallel_stops_after_callback_error() {
     let mut visited = Vec::new();
 
     let err = reader
-        .for_each_decoded_message(fixture.path(), "/decoded", |message| {
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .decoded()
+        .for_each(|_, message| {
             if let Value::Struct(fields) = &message.value
                 && let Some(Value::I64(value)) = fields.first()
             {
@@ -824,6 +1157,13 @@ fn multi_topic_decoded_reads_work_without_arrow() {
             ReadOptions::default(),
             ReadOptions {
                 time_range: Some(TimeRange {
+                    start: Some(2),
+                    end: Some(7),
+                }),
+                ..ReadOptions::default()
+            },
+            ReadOptions {
+                time_range: Some(TimeRange {
                     start: Some(3),
                     end: Some(9),
                 }),
@@ -832,51 +1172,58 @@ fn multi_topic_decoded_reads_work_without_arrow() {
         ] {
             let mut actual = BTreeMap::<String, Vec<(u64, u64, i64)>>::new();
             reader
-                .for_each_topic_decoded_message_with_options(
-                    fixture.path(),
-                    &["/first", "/second", "/first", "/empty", "/second"],
-                    &options,
-                    |topic, message| {
+                .open_file(fixture.path())
+                .unwrap()
+                .read()
+                .topics(["/first", "/second", "/first", "/empty", "/second"])
+                .options(options.clone())
+                .decoded()
+                .for_each(|channel, message| {
+                    let Value::Struct(fields) = message.value else {
+                        panic!("expected struct")
+                    };
+                    let Value::I64(value) = fields[0] else {
+                        panic!("expected i64")
+                    };
+                    actual.entry(channel.topic.clone()).or_default().push((
+                        message.log_time,
+                        message.publish_time,
+                        value,
+                    ));
+                    Ok(())
+                })
+                .unwrap();
+            for topic in ["/first", "/second", "/empty"] {
+                let mut expected = Vec::new();
+                reader
+                    .open_file(fixture.path())
+                    .unwrap()
+                    .read()
+                    .topic(topic)
+                    .options(options.clone())
+                    .decoded()
+                    .for_each(|_, message| {
                         let Value::Struct(fields) = message.value else {
                             panic!("expected struct")
                         };
                         let Value::I64(value) = fields[0] else {
                             panic!("expected i64")
                         };
-                        actual.entry(topic.into()).or_default().push((
-                            message.log_time,
-                            message.publish_time,
-                            value,
-                        ));
+                        expected.push((message.log_time, message.publish_time, value));
                         Ok(())
-                    },
-                )
-                .unwrap();
-            for topic in ["/first", "/second", "/empty"] {
-                let mut expected = Vec::new();
-                reader
-                    .for_each_decoded_message_with_options(
-                        fixture.path(),
-                        topic,
-                        &options,
-                        |message| {
-                            let Value::Struct(fields) = message.value else {
-                                panic!("expected struct")
-                            };
-                            let Value::I64(value) = fields[0] else {
-                                panic!("expected i64")
-                            };
-                            expected.push((message.log_time, message.publish_time, value));
-                            Ok(())
-                        },
-                    )
+                    })
                     .unwrap();
                 assert_eq!(actual.get(topic).cloned().unwrap_or_default(), expected);
             }
         }
         let mut calls = 0;
         let error = reader
-            .for_each_topic_decoded_message(fixture.path(), &["/first", "/second"], |_, _| {
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .topics(["/first", "/second"])
+            .decoded()
+            .for_each(|_, _| {
                 calls += 1;
                 Err("stop reading".into())
             })
@@ -898,15 +1245,16 @@ fn repeated_single_topic_is_read_once() {
     let options = ReadOptions::default();
     let mut topics = Vec::new();
     reader
-        .for_each_topic_decoded_message_with_options(
-            fixture.path(),
-            &["/first", "/first"],
-            &options,
-            |topic, message| {
-                topics.push((topic.to_owned(), message.log_time));
-                Ok(())
-            },
-        )
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topics(["/first", "/first"])
+        .options(options)
+        .decoded()
+        .for_each(|channel, message| {
+            topics.push((channel.topic.clone(), message.log_time));
+            Ok(())
+        })
         .unwrap();
     assert_eq!(
         topics,
@@ -926,7 +1274,12 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
             .build();
         let mut times = Vec::new();
         reader
-            .for_each_decoded_message(fixture.path(), "/first", |message| {
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .topic("/first")
+            .decoded()
+            .for_each(|_, message| {
                 times.push(message.log_time);
                 Ok(())
             })
@@ -942,33 +1295,39 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
                 }),
                 ..Default::default()
             },
+            ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(4),
+                    end: Some(6),
+                }),
+                ..Default::default()
+            },
         ] {
             let mut actual = BTreeMap::<String, Vec<(u64, i64)>>::new();
             reader
-                .for_each_topic_decoded_message_with_options(
-                    fixture.path(),
-                    &["/first", "/second"],
-                    &options,
-                    |topic, message| {
-                        let Value::Struct(fields) = message.value else {
-                            panic!("expected struct")
-                        };
-                        let Value::I64(value) = fields[0] else {
-                            panic!("expected i64")
-                        };
-                        actual
-                            .entry(topic.into())
-                            .or_default()
-                            .push((message.log_time, value));
-                        Ok(())
-                    },
-                )
+                .open_file(fixture.path())
+                .unwrap()
+                .read()
+                .topics(["/first", "/second"])
+                .options(options.clone())
+                .decoded()
+                .for_each(|channel, message| {
+                    let Value::Struct(fields) = message.value else {
+                        panic!("expected struct")
+                    };
+                    let Value::I64(value) = fields[0] else {
+                        panic!("expected i64")
+                    };
+                    actual
+                        .entry(channel.topic.clone())
+                        .or_default()
+                        .push((message.log_time, value));
+                    Ok(())
+                })
                 .unwrap();
-            let range = if options.time_range.is_some() {
-                3..9
-            } else {
-                0..1024
-            };
+            let range = options.time_range.map_or(0..1024, |range| {
+                range.start.unwrap() as i64..range.end.unwrap() as i64
+            });
             for (topic, offset) in [("/first", 0), ("/second", 100)] {
                 assert_eq!(
                     actual[topic],
@@ -1016,7 +1375,12 @@ fn default_decoders_expose_json_topics_unparsed() {
 
     let mut decoded = Vec::new();
     reader
-        .for_each_decoded_message(fixture.path(), "/json", |message| {
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topic("/json")
+        .decoded()
+        .for_each(|_, message| {
             decoded.push(message.value.get("json")?.try_str()?.unwrap().to_owned());
             Ok(())
         })

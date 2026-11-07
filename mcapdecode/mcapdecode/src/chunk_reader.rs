@@ -23,6 +23,9 @@ pub(crate) fn for_each_selected_message<T: Send>(
     process: impl Fn(usize, &mcap::Message<'_>) -> Result<T, McapReaderError> + Sync,
     callback: &mut impl FnMut(usize, T) -> Result<(), McapReaderError>,
 ) -> Result<(), McapReaderError> {
+    if channel_ids.is_empty() {
+        return Ok(());
+    }
     // A single channel avoids the per-message map lookup.
     if let [channel_id] = *channel_ids {
         return for_each_message_of(

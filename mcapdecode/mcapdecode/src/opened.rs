@@ -1,20 +1,25 @@
-//! An opened MCAP file with configured decoders.
+//! File-backed reader and message selection.
 
-use std::path::Path;
+use std::{collections::HashSet, path::Path, sync::Arc};
 
-use mcapdecode_core::FieldDefs;
+use mcapdecode_core::{DecodedMessage, FieldDefs};
 
 use crate::{
-    ChannelInfo, McapReader, McapReaderError, TopicDecodeStatus, TopicInfo, TopicSchema,
+    ChannelInfo, McapReader, McapReaderError, RawMessage, ReadOptions, TopicDecodeStatus,
+    TopicInfo, TopicSchema,
+    chunk_reader::for_each_selected_message,
     internal_reader::InternalReader,
     mcap_file::McapFile,
-    summary::{channel_infos_from_summary, get_channel_by_id, topic_infos_from_summary},
+    summary::{
+        channel_info, channel_infos_from_summary, get_channel_by_id, get_channel_from_summary,
+        topic_infos_from_summary,
+    },
 };
 
 /// An opened MCAP file and its configured decoders.
 ///
-/// Reuses one memory map and summary for metadata and schema queries.
-/// Opening requires an MCAP summary; decoders are resolved only when querying schemas.
+/// Reuses one memory map and summary for metadata queries and reads.
+/// Opening requires an MCAP summary; decoders are resolved only when needed.
 pub struct OpenedMcap {
     reader: InternalReader,
     file: McapFile,
@@ -76,16 +81,20 @@ impl OpenedMcap {
     }
 
     /// Derive the Arrow batch schema for a topic before reading messages.
+    ///
+    /// This is the schema that [`ArrowRead`] emits for `topic` with the same `metadata`.
+    /// Callers that must state the schema up front, such as a Parquet writer,
+    /// should take it from here so the declared schema and the emitted batches cannot disagree.
     #[cfg(feature = "arrow")]
     pub fn topic_batch_schema(
         &self,
         topic: &str,
-        options: &crate::RecordBatchOptions,
+        metadata: &crate::MetadataColumns,
     ) -> Result<crate::MessageBatchSchema, McapReaderError> {
         let context = self
             .reader
             .resolve_topic_decode_context(&self.file.summary, topic)?;
-        crate::arrow_ext::batch_schema_for_context(&context, options)
+        crate::arrow_ext::batch_schema_for_context(&context, metadata)
     }
 
     /// List topics from the file summary.
@@ -96,5 +105,221 @@ impl OpenedMcap {
     /// List channels from the file summary.
     pub fn list_channels(&self) -> Vec<ChannelInfo> {
         channel_infos_from_summary(&self.file.summary)
+    }
+
+    /// Select messages to read. By default all topics are selected.
+    pub fn read(&self) -> Read<'_> {
+        Read {
+            file: self,
+            topics: None,
+            channel_ids: None,
+            options: ReadOptions::default(),
+        }
+    }
+}
+
+/// Message selection and traversal options shared by all output formats.
+pub struct Read<'a> {
+    file: &'a OpenedMcap,
+    topics: Option<Vec<String>>,
+    channel_ids: Option<Vec<u16>>,
+    options: ReadOptions,
+}
+
+impl<'a> Read<'a> {
+    /// Select one topic instead of channels.
+    pub fn topic(self, topic: impl AsRef<str>) -> Self {
+        self.topics([topic])
+    }
+
+    /// Select topics. Repeated names are read once.
+    pub fn topics(mut self, topics: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        self.topics = Some(topics.into_iter().map(|s| s.as_ref().to_owned()).collect());
+        self.channel_ids = None;
+        self
+    }
+
+    /// Select one channel instead of topics.
+    pub fn channel(self, channel_id: u16) -> Self {
+        self.channels([channel_id])
+    }
+
+    /// Select channels instead of topics. Repeated IDs are read once.
+    pub fn channels(mut self, channel_ids: impl IntoIterator<Item = u16>) -> Self {
+        self.channel_ids = Some(channel_ids.into_iter().collect());
+        self.topics = None;
+        self
+    }
+
+    /// Set time filtering and parallel traversal options.
+    pub fn options(mut self, options: ReadOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Read raw payloads.
+    pub fn raw(self) -> RawRead<'a> {
+        RawRead(self)
+    }
+
+    /// Read decoded values.
+    pub fn decoded(self) -> DecodedRead<'a> {
+        DecodedRead(self)
+    }
+
+    /// Read Arrow record batches.
+    #[cfg(feature = "arrow")]
+    pub fn arrow(self) -> ArrowRead<'a> {
+        ArrowRead {
+            read: self,
+            batch_size: 1024,
+            metadata: Default::default(),
+        }
+    }
+
+    fn decoded_contexts(
+        &self,
+    ) -> Result<(Vec<ChannelInfo>, Vec<crate::decode::TopicDecodeContext>), McapReaderError> {
+        let channels = self.resolve_channels()?;
+        let infos = self.channel_infos(&channels);
+        let contexts = channels
+            .iter()
+            .map(|channel| self.file.reader.resolve_channel_decode_context(channel))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((infos, contexts))
+    }
+
+    fn channel_infos(&self, channels: &[&Arc<mcap::Channel<'_>>]) -> Vec<ChannelInfo> {
+        channels
+            .iter()
+            .map(|channel| channel_info(&self.file.file.summary, channel))
+            .collect()
+    }
+
+    fn resolve_channels(&self) -> Result<Vec<&Arc<mcap::Channel<'_>>>, McapReaderError> {
+        let summary = &self.file.file.summary;
+        if let Some(ids) = &self.channel_ids {
+            let mut seen = HashSet::new();
+            return ids
+                .iter()
+                .copied()
+                .filter(|id| seen.insert(*id))
+                .map(|id| get_channel_by_id(summary, id))
+                .collect();
+        }
+        let Some(topics) = &self.topics else {
+            let mut channels: Vec<_> = summary.channels.values().collect();
+            channels.sort_unstable_by_key(|channel| channel.id);
+            return Ok(channels);
+        };
+        let mut seen = HashSet::new();
+        topics
+            .iter()
+            .filter(|topic| seen.insert(topic.as_str()))
+            .map(|topic| get_channel_from_summary(summary, topic))
+            .collect()
+    }
+}
+
+/// Raw message output.
+pub struct RawRead<'a>(Read<'a>);
+
+impl RawRead<'_> {
+    /// Visit selected messages, receiving the originating channel information.
+    pub fn for_each(
+        self,
+        mut callback: impl FnMut(
+            &ChannelInfo,
+            RawMessage,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        let read = self.0;
+        let channels = read.resolve_channels()?;
+        let infos = read.channel_infos(&channels);
+        let channel_ids: Vec<_> = channels.iter().map(|channel| channel.id).collect();
+        for_each_selected_message(
+            &read.file.file,
+            &channel_ids,
+            read.options.time_range,
+            read.options.parallel.unwrap_or(read.file.reader.parallel),
+            |_, message| {
+                Ok(RawMessage {
+                    log_time: message.log_time,
+                    publish_time: message.publish_time,
+                    data: Arc::from(message.data.as_ref()),
+                })
+            },
+            &mut |i, message| callback(&infos[i], message).map_err(McapReaderError::Callback),
+        )
+    }
+}
+
+/// Decoded message output.
+pub struct DecodedRead<'a>(Read<'a>);
+
+impl DecodedRead<'_> {
+    /// Visit selected messages, receiving the originating channel information.
+    pub fn for_each(
+        self,
+        mut callback: impl FnMut(
+            &ChannelInfo,
+            DecodedMessage,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        let read = self.0;
+        let (infos, contexts) = read.decoded_contexts()?;
+        let reader = &read.file.reader;
+        reader.for_each_topic_decoded_message_impl(
+            &read.file.file,
+            &contexts,
+            &read.options,
+            &mut |index, message| {
+                callback(&infos[index], message).map_err(McapReaderError::Callback)
+            },
+        )
+    }
+}
+
+/// Arrow record batch output.
+#[cfg(feature = "arrow")]
+pub struct ArrowRead<'a> {
+    read: Read<'a>,
+    batch_size: usize,
+    metadata: crate::MetadataColumns,
+}
+
+#[cfg(feature = "arrow")]
+impl ArrowRead<'_> {
+    /// Set the maximum number of rows per batch; zero is treated as one.
+    pub fn batch_size(mut self, size: usize) -> Self {
+        self.batch_size = size.max(1);
+        self
+    }
+
+    /// Set metadata column names and timestamp format.
+    pub fn metadata(mut self, metadata: crate::MetadataColumns) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    /// Visit selected batches, receiving the originating channel information.
+    pub fn for_each(
+        self,
+        mut callback: impl FnMut(
+            &ChannelInfo,
+            arrow::record_batch::RecordBatch,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Result<(), McapReaderError> {
+        let read = self.read;
+        let (infos, contexts) = read.decoded_contexts()?;
+        let reader = &read.file.reader;
+        reader.for_each_record_batch_impl(
+            &read.file.file,
+            &contexts,
+            &read.options,
+            self.batch_size,
+            &self.metadata,
+            &mut |i, batch| callback(&infos[i], batch),
+        )
     }
 }

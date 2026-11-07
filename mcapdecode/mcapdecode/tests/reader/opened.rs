@@ -180,22 +180,24 @@ fn open_enables_default_decoders() {
 
 #[cfg(feature = "arrow")]
 #[test]
-fn opened_batch_schema_matches_path_api_with_custom_metadata() {
+fn opened_batch_schema_uses_custom_metadata() {
     let fixture = write_chunked_fixture("opened-arrow", &[br#"{"value":42}"#]);
-    let reader = McapReader::builder()
+    let opened = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .build();
-    let options = mcapdecode::RecordBatchOptions {
-        metadata: mcapdecode::MetadataColumns::with_prefix("mcap_")
-            .with_timestamp_format(mcapdecode::MetadataTimestampFormat::UnixNanoseconds),
-        ..Default::default()
-    };
-    let expected = reader
-        .topic_batch_schema(fixture.path(), "/decoded", &options)
+        .build()
+        .open_file(fixture.path())
         .unwrap();
-    let opened = reader.open_file(fixture.path()).unwrap();
-    let actual = opened.topic_batch_schema("/decoded", &options).unwrap();
-    assert_eq!(actual.schema(), expected.schema());
+    let metadata = mcapdecode::MetadataColumns::with_prefix("mcap_")
+        .with_timestamp_format(mcapdecode::MetadataTimestampFormat::UnixNanoseconds);
+    let actual = opened.topic_batch_schema("/decoded", &metadata).unwrap();
+    let names: Vec<_> = actual
+        .schema()
+        .fields()
+        .iter()
+        .take(2)
+        .map(|field| field.name().as_str())
+        .collect();
+    assert_eq!(names, metadata.names());
     assert!(matches!(
         opened.topic_batch_schema("/unknown", &Default::default()),
         Err(McapReaderError::TopicNotFound)

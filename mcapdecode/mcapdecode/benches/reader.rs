@@ -39,7 +39,12 @@ fn bench_reader(c: &mut Criterion) {
                     .with_default_decoders()
                     .with_parallel(parallel)
                     .build()
-                    .for_each_decoded_message(&path, mcapbench::TOPIC, |_| Ok(()))
+                    .open_file(&path)
+                    .unwrap()
+                    .read()
+                    .topic(mcapbench::TOPIC)
+                    .decoded()
+                    .for_each(|_, _| Ok(()))
                     .unwrap();
             })
         });
@@ -51,7 +56,12 @@ fn bench_reader(c: &mut Criterion) {
                 McapReader::builder()
                     .with_parallel(parallel)
                     .build()
-                    .for_each_raw_message(&path, mcapbench::TOPIC, |_| Ok(()))
+                    .open_file(&path)
+                    .unwrap()
+                    .read()
+                    .topic(mcapbench::TOPIC)
+                    .raw()
+                    .for_each(|_, _| Ok(()))
                     .unwrap();
             })
         });

@@ -26,7 +26,12 @@ pub fn read_topic(path: &std::path::Path, parallel: bool) -> usize {
         .with_default_decoders()
         .with_parallel(parallel)
         .build()
-        .for_each_decoded_message(path, mcapbench::TOPIC, |_| {
+        .open_file(path)
+        .unwrap()
+        .read()
+        .topic(mcapbench::TOPIC)
+        .decoded()
+        .for_each(|_, _| {
             count += 1;
             Ok(())
         })

@@ -20,8 +20,8 @@ pub struct SchemaArgs {
 
 impl SchemaArgs {
     pub fn run(self) -> Result<()> {
-        let reader = McapReader::builder().with_default_decoders().build();
-        let field_defs = reader.topic_field_defs(&self.input, &self.topic)?;
+        let reader = McapReader::open(&self.input)?;
+        let field_defs = reader.topic_field_defs(&self.topic)?;
         let text = format_field_defs(&field_defs)?;
 
         match self.output {

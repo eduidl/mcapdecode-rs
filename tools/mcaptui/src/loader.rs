@@ -1,6 +1,5 @@
 use std::{
     io,
-    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -12,7 +11,7 @@ use std::{
 
 use anyhow::Result;
 use mcapdecode::{
-    McapReader, McapReaderError, RawMessage,
+    McapReaderError, OpenedMcap, RawMessage,
     core::{DecodedMessage, Value},
 };
 
@@ -45,31 +44,34 @@ enum LoaderEvent {
 }
 
 impl TopicLoader {
-    pub(crate) fn spawn(input: PathBuf, row: TopicRow, parallel: bool) -> Self {
+    pub(crate) fn spawn(reader: Arc<OpenedMcap>, row: TopicRow) -> Self {
         let (sender, receiver) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_thread = Arc::clone(&cancel);
         let label = row.label();
 
         let join_handle = thread::spawn(move || {
-            let reader = McapReader::builder()
-                .with_default_decoders()
-                .with_parallel(parallel)
-                .build();
-
             // Deriving the schema up front tells whether the topic can be
             // decoded, or has to be shown as raw payload bytes.
-            let field_defs = reader.field_defs_by_channel_id(&input, row.channel.id);
+            let field_defs = reader.field_defs_by_channel_id(row.channel.id);
             let load_result = match field_defs {
                 Ok(_) => load_topic(&sender, &cancel_for_thread, to_loaded_message, |callback| {
-                    reader.for_each_decoded_message_by_channel_id(&input, row.channel.id, callback)
+                    reader
+                        .read()
+                        .channel(row.channel.id)
+                        .decoded()
+                        .for_each(|_, message| callback(message))
                 }),
                 Err(error) if schema::supports_raw_fallback(&error) => load_topic(
                     &sender,
                     &cancel_for_thread,
                     to_loaded_raw_message,
                     |callback| {
-                        reader.for_each_raw_message_by_channel_id(&input, row.channel.id, callback)
+                        reader
+                            .read()
+                            .channel(row.channel.id)
+                            .raw()
+                            .for_each(|_, message| callback(message))
                     },
                 ),
                 Err(error) => Err(anyhow::Error::new(error)
