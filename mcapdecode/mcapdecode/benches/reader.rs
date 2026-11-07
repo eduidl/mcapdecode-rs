@@ -44,7 +44,7 @@ fn bench_reader(c: &mut Criterion) {
                     .read()
                     .topic(mcapbench::TOPIC)
                     .decoded()
-                    .for_each(|_, _| Ok(()))
+                    .for_each(|_, _| {})
                     .unwrap();
             })
         });
@@ -61,7 +61,7 @@ fn bench_reader(c: &mut Criterion) {
                     .read()
                     .topic(mcapbench::TOPIC)
                     .raw()
-                    .for_each(|_, _| Ok(()))
+                    .for_each(|_, _| {})
                     .unwrap();
             })
         });

@@ -1,5 +1,6 @@
 use std::{
     io,
+    ops::ControlFlow,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -20,7 +21,6 @@ use crate::{
     format, schema,
 };
 
-const CANCELLED_ERROR: &str = "__mcaptui_loader_cancelled__";
 const MAX_LOADER_EVENTS_PER_FRAME: usize = 32;
 const MESSAGE_BATCH_SIZE: usize = 64;
 const MESSAGE_BATCH_MAX_LATENCY: Duration = Duration::from_millis(40);
@@ -60,7 +60,7 @@ impl TopicLoader {
                         .read()
                         .channel(row.channel.id)
                         .decoded()
-                        .for_each(|_, message| callback(message))
+                        .try_for_each(|_, message| callback(message))
                 }),
                 Err(error) if schema::supports_raw_fallback(&error) => load_topic(
                     &sender,
@@ -71,7 +71,7 @@ impl TopicLoader {
                             .read()
                             .channel(row.channel.id)
                             .raw()
-                            .for_each(|_, message| callback(message))
+                            .try_for_each(|_, message| callback(message))
                     },
                 ),
                 Err(error) => Err(anyhow::Error::new(error)
@@ -82,7 +82,6 @@ impl TopicLoader {
                 Ok(()) => {
                     let _ = sender.send(LoaderEvent::Finished { topic: label });
                 }
-                Err(error) if error.to_string() == CANCELLED_ERROR => {}
                 Err(error) => {
                     let _ = sender.send(LoaderEvent::Failed {
                         topic: label,
@@ -179,7 +178,7 @@ fn load_topic<T>(
     cancel: &AtomicBool,
     convert: impl Fn(usize, T) -> LoadedMessage,
     read: impl FnOnce(
-        &mut dyn FnMut(T) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        &mut dyn FnMut(T) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError>,
 ) -> Result<()> {
     let mut pending = Vec::new();
@@ -187,13 +186,13 @@ fn load_topic<T>(
     let mut next_index = 0usize;
     let load_result = read(&mut |message| {
         if cancel.load(Ordering::Relaxed) {
-            return Err(CANCELLED_ERROR.into());
+            return Ok(ControlFlow::Break(()));
         }
 
         pending.push(convert(next_index, message));
         next_index += 1;
         flush_pending_messages(sender, &mut pending, &mut last_flush)?;
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     });
 
     if !pending.is_empty() {

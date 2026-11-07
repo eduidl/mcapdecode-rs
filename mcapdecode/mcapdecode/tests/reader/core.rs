@@ -49,7 +49,6 @@ fn reads_with_and_without_chunk_indexes() {
             .raw()
             .for_each(|_, _| {
                 count += 1;
-                Ok(())
             })
             .unwrap();
         assert_eq!(count, 3);
@@ -68,7 +67,6 @@ fn reads_with_and_without_chunk_indexes() {
                 .decoded()
                 .for_each(|channel, message| {
                     actual.push((channel.topic.clone(), message.log_time));
-                    Ok(())
                 })
                 .unwrap();
             assert_eq!(
@@ -119,7 +117,6 @@ fn raw_reads_include_messages_without_chunk_indexes() {
                             .entry(channel.topic.clone())
                             .or_default()
                             .push(message.log_time);
-                        Ok(())
                     })
                     .unwrap();
                 for topic in ["/first", "/second"] {
@@ -131,9 +128,9 @@ fn raw_reads_include_messages_without_chunk_indexes() {
         let error = reader
             .read()
             .raw()
-            .for_each(|_, _| {
+            .try_for_each(|_, _| {
                 calls += 1;
-                Err("stop reading".into())
+                Err::<(), _>("stop reading".into())
             })
             .unwrap_err();
         assert_eq!(calls, 1);
@@ -161,7 +158,6 @@ fn raw_reads_match_with_parallel_overrides() {
             .raw()
             .for_each(|channel, message| {
                 messages.push((channel.id, message.log_time));
-                Ok(())
             })
             .unwrap();
         results.push(messages);
@@ -180,7 +176,6 @@ fn opened_reader_default_selects_all_channels_even_with_duplicate_topics() {
         .raw()
         .for_each(|channel, _| {
             *raw.entry(channel.id).or_default() += 1;
-            Ok(())
         })
         .unwrap();
     let mut decoded = BTreeMap::<u16, usize>::new();
@@ -189,7 +184,6 @@ fn opened_reader_default_selects_all_channels_even_with_duplicate_topics() {
         .decoded()
         .for_each(|channel, _| {
             *decoded.entry(channel.id).or_default() += 1;
-            Ok(())
         })
         .unwrap();
     assert_eq!(raw, decoded);
@@ -201,15 +195,11 @@ fn opened_reader_default_selects_all_channels_even_with_duplicate_topics() {
 fn opened_reader_all_decoded_rejects_schema_less_channel() {
     let reader = McapReader::open(fixture_path("with_summary.mcap")).unwrap();
     assert!(matches!(
-        reader.read().decoded().for_each(|_, _| Ok(())),
+        reader.read().decoded().for_each(|_, _| {}),
         Err(McapReaderError::SchemaNotAvailable | McapReaderError::NoDecoder { .. })
     ));
     assert!(matches!(
-        reader
-            .read()
-            .topic("/raw")
-            .decoded()
-            .for_each(|_, _| Ok(())),
+        reader.read().topic("/raw").decoded().for_each(|_, _| {}),
         Err(McapReaderError::SchemaNotAvailable)
     ));
 }
@@ -254,7 +244,6 @@ fn opened_reader_selects_multiple_channels_and_reports_metadata() {
             assert_eq!(channel.topic, "/split");
             assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
             raw.insert(channel.id, message.log_time);
-            Ok(())
         })
         .unwrap();
     let mut decoded = BTreeMap::new();
@@ -267,7 +256,6 @@ fn opened_reader_selects_multiple_channels_and_reports_metadata() {
             assert_eq!(channel.topic, "/split");
             assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
             decoded.insert(channel.id, message.log_time);
-            Ok(())
         })
         .unwrap();
     assert_eq!(raw, decoded);
@@ -325,7 +313,6 @@ fn opened_reader_reuses_file_for_topic_and_channel_reads() {
             .for_each(|topic, message| {
                 assert_eq!(topic.topic, "/split");
                 times.push(message.log_time);
-                Ok(())
             })
             .unwrap();
         assert_eq!(times, [1, 3]);
@@ -335,7 +322,7 @@ fn opened_reader_reuses_file_for_topic_and_channel_reads() {
             .read()
             .topics(["/split"])
             .decoded()
-            .for_each(|_, _| Ok(())),
+            .for_each(|_, _| {}),
         Err(McapReaderError::MultipleChannels)
     ));
 }
@@ -353,16 +340,11 @@ fn opened_reader_selects_raw_topics_and_channel() {
         .for_each(|topic, message| {
             assert_eq!(topic.topic, "/split");
             times.push(message.log_time);
-            Ok(())
         })
         .unwrap();
     assert_eq!(times, [2, 4]);
     assert!(matches!(
-        reader
-            .read()
-            .topics(["/split"])
-            .raw()
-            .for_each(|_, _| Ok(())),
+        reader.read().topics(["/split"]).raw().for_each(|_, _| {}),
         Err(McapReaderError::MultipleChannels)
     ));
 }
@@ -389,7 +371,6 @@ fn opened_reader_decoded_topics_apply_options_and_deduplicate() {
         .decoded()
         .for_each(|topic, _| {
             topics.push(topic.topic.clone());
-            Ok(())
         })
         .unwrap();
     assert_eq!(topics, ["/first", "/second"]);
@@ -418,7 +399,6 @@ fn opened_reader_raw_and_decoded_share_filters() {
                 raw.entry(topic.topic.clone())
                     .or_default()
                     .push(message.log_time);
-                Ok(())
             })
             .unwrap();
         reader
@@ -431,7 +411,6 @@ fn opened_reader_raw_and_decoded_share_filters() {
                     .entry(topic.topic.clone())
                     .or_default()
                     .push(message.log_time);
-                Ok(())
             })
             .unwrap();
         assert_eq!(raw, decoded);
@@ -440,7 +419,7 @@ fn opened_reader_raw_and_decoded_share_filters() {
     }
 }
 
-fn split_reader(parallel: bool) -> McapReader {
+pub(super) fn split_reader(parallel: bool) -> McapReader {
     McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
         .with_parallel(parallel)
@@ -504,7 +483,6 @@ fn decoded_read_by_channel_id_returns_only_that_channel() {
                 .decoded()
                 .for_each(|_, message| {
                     log_times.push(message.log_time);
-                    Ok(())
                 })
                 .unwrap();
             per_channel.push(log_times);
@@ -540,7 +518,6 @@ fn decoded_read_by_channel_id_applies_options() {
         .decoded()
         .for_each(|_, message| {
             log_times.push(message.log_time);
-            Ok(())
         })
         .unwrap();
 
@@ -563,7 +540,6 @@ fn raw_read_by_channel_id_returns_only_that_channel() {
                 .raw()
                 .for_each(|_, message| {
                     log_times.push(message.log_time);
-                    Ok(())
                 })
                 .unwrap();
             per_channel.push(log_times);
@@ -604,7 +580,7 @@ fn channel_id_reads_report_unknown_channel() {
             .read()
             .channel(unknown)
             .decoded()
-            .for_each(|_, _| Ok(())),
+            .for_each(|_, _| {}),
         Err(McapReaderError::ChannelNotFound)
     ));
     assert!(matches!(
@@ -614,7 +590,7 @@ fn channel_id_reads_report_unknown_channel() {
             .read()
             .channel(unknown)
             .raw()
-            .for_each(|_, _| Ok(())),
+            .for_each(|_, _| {}),
         Err(McapReaderError::ChannelNotFound)
     ));
 }
@@ -635,7 +611,7 @@ fn topic_reads_reject_a_topic_with_multiple_channels() {
             .read()
             .topic("/split")
             .decoded()
-            .for_each(|_, _| Ok(())),
+            .for_each(|_, _| {}),
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
@@ -645,7 +621,7 @@ fn topic_reads_reject_a_topic_with_multiple_channels() {
             .read()
             .topic("/split")
             .raw()
-            .for_each(|_, _| Ok(())),
+            .for_each(|_, _| {}),
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
@@ -694,7 +670,7 @@ fn opened_topic_schema_enables_value_access() {
         .read()
         .topic("/decoded")
         .decoded()
-        .for_each(|_, message| {
+        .try_for_each(|_, message| {
             assert_eq!(message.value.get("value")?.try_widen_i64()?, 42);
             Ok(())
         })
@@ -841,7 +817,7 @@ fn decoded_read_unknown_topic_returns_error() {
         .read()
         .topic("/unknown")
         .decoded()
-        .for_each(|_, _message| Ok(()))
+        .for_each(|_, _message| {})
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::TopicNotFound));
@@ -858,7 +834,7 @@ fn decoded_read_errors_when_schema_is_missing() {
         .read()
         .topic("/raw")
         .decoded()
-        .for_each(|_, _message| Ok(()))
+        .for_each(|_, _message| {})
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::SchemaNotAvailable));
@@ -874,7 +850,7 @@ fn decoded_read_without_decoder_returns_error() {
         .read()
         .topic("/decoded")
         .decoded()
-        .for_each(|_, _message| Ok(()))
+        .for_each(|_, _message| {})
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::NoDecoder { .. }));
@@ -900,7 +876,7 @@ fn raw_read_unknown_topic_returns_error() {
         .read()
         .topic("/unknown")
         .raw()
-        .for_each(|_, _message| Ok(()))
+        .for_each(|_, _message| {})
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::TopicNotFound));
@@ -916,7 +892,7 @@ fn raw_read_propagates_callback_error() {
         .read()
         .topic("/raw")
         .raw()
-        .for_each(|_, _message| Err("callback failed".into()))
+        .try_for_each(|_, _message| Err::<(), _>("callback failed".into()))
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::Callback(_)));
@@ -969,7 +945,7 @@ fn decoded_read_parallel_propagates_decode_error() {
         .read()
         .topic("/decoded")
         .decoded()
-        .for_each(|_, _message| Ok(()))
+        .for_each(|_, _message| {})
         .unwrap_err();
 
     assert!(matches!(
@@ -989,7 +965,7 @@ fn decoded_read_propagates_callback_error() {
         .read()
         .topic("/decoded")
         .decoded()
-        .for_each(|_, _message| Err("callback failed".into()))
+        .try_for_each(|_, _message| Err::<(), _>("callback failed".into()))
         .unwrap_err();
 
     let McapReaderError::Callback(inner) = &err else {
@@ -1022,7 +998,6 @@ fn parallel_reader_callback_can_use_rayon() {
                     rayon::join(|| message.log_time, || message.publish_time);
                 assert_eq!(log_time, publish_time);
                 calls += 1;
-                Ok(())
             })
             .unwrap();
         assert_eq!(calls, 1024 * topics.len());
@@ -1044,7 +1019,7 @@ fn parallel_reader_stops_after_callback_error_across_windows() {
             .read()
             .topics(topics)
             .decoded()
-            .for_each(|_, _| {
+            .try_for_each(|_, _| {
                 calls += 1;
                 if calls == 500 {
                     return Err("stop reading".into());
@@ -1082,7 +1057,7 @@ fn decoded_read_parallel_stops_after_callback_error() {
         .read()
         .topic("/decoded")
         .decoded()
-        .for_each(|_, message| {
+        .try_for_each(|_, message| {
             if let Value::Struct(fields) = &message.value
                 && let Some(Value::I64(value)) = fields.first()
             {
@@ -1190,7 +1165,6 @@ fn multi_topic_decoded_reads_work_without_arrow() {
                         message.publish_time,
                         value,
                     ));
-                    Ok(())
                 })
                 .unwrap();
             for topic in ["/first", "/second", "/empty"] {
@@ -1210,7 +1184,6 @@ fn multi_topic_decoded_reads_work_without_arrow() {
                             panic!("expected i64")
                         };
                         expected.push((message.log_time, message.publish_time, value));
-                        Ok(())
                     })
                     .unwrap();
                 assert_eq!(actual.get(topic).cloned().unwrap_or_default(), expected);
@@ -1223,9 +1196,9 @@ fn multi_topic_decoded_reads_work_without_arrow() {
             .read()
             .topics(["/first", "/second"])
             .decoded()
-            .for_each(|_, _| {
+            .try_for_each(|_, _| {
                 calls += 1;
-                Err("stop reading".into())
+                Err::<(), _>("stop reading".into())
             })
             .unwrap_err();
         assert_eq!(calls, 1);
@@ -1253,7 +1226,6 @@ fn repeated_single_topic_is_read_once() {
         .decoded()
         .for_each(|channel, message| {
             topics.push((channel.topic.clone(), message.log_time));
-            Ok(())
         })
         .unwrap();
     assert_eq!(
@@ -1281,7 +1253,6 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
             .decoded()
             .for_each(|_, message| {
                 times.push(message.log_time);
-                Ok(())
             })
             .unwrap();
         assert_eq!(times, (0..1024).collect::<Vec<_>>());
@@ -1322,7 +1293,6 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
                         .entry(channel.topic.clone())
                         .or_default()
                         .push((message.log_time, value));
-                    Ok(())
                 })
                 .unwrap();
             let range = options.time_range.map_or(0..1024, |range| {
@@ -1380,7 +1350,7 @@ fn default_decoders_expose_json_topics_unparsed() {
         .read()
         .topic("/json")
         .decoded()
-        .for_each(|_, message| {
+        .try_for_each(|_, message| {
             decoded.push(message.value.get("json")?.try_str()?.unwrap().to_owned());
             Ok(())
         })
