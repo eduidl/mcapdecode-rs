@@ -261,7 +261,7 @@ impl Value {
     }
 
     /// Convert any numeric value to `f64`. Unlike [`Value::try_widen_f64`], this
-    /// also accepts integers, so `i64` and `u64` values beyond 2^53 lose precision.
+    /// also accepts integers, so `i64` and `u64` values beyond 2^53 may lose precision.
     ///
     /// Null is reported as [`ValueAccessError::NullValue`], like the `try_widen_*` methods.
     pub fn try_f64_lossy(&self) -> Result<f64, ValueAccessError> {

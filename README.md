@@ -97,7 +97,7 @@ and `try_u64()` retain their null behavior.
 For example, `try_widen_i64()` accepts `U32` but rejects `U64`, even for zero;
 `try_widen_u64()` accepts unsigned integers but rejects all signed integers.
 To read any numeric value, integers included, as `f64`, use `try_f64_lossy()`;
-`i64` and `u64` values beyond 2^53 lose precision.
+`i64` and `u64` values beyond 2^53 may lose precision.
 
 ## Multiple Topics
 
