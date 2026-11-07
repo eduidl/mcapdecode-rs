@@ -68,6 +68,18 @@ fn scalar_accessors_preserve_success_null_and_type_errors() {
         Value::Uint8List(vec![1].into()),
         &[1][..]
     );
+    check!(
+        try_shared_bytes,
+        "Bytes",
+        Value::Bytes(vec![1].into()),
+        &std::sync::Arc::<[u8]>::from([1])
+    );
+    check!(
+        try_shared_bytes,
+        "Bytes",
+        Value::Uint8List(vec![1].into()),
+        &std::sync::Arc::<[u8]>::from([1])
+    );
 }
 
 #[test]

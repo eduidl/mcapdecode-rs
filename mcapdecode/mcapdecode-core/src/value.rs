@@ -392,6 +392,19 @@ impl Value {
         }
     }
 
+    /// Borrow the shared buffer behind opaque bytes or a packed unsigned byte
+    /// sequence.
+    ///
+    /// Unlike [`Value::try_bytes`], cloning the returned `Arc` keeps the data
+    /// alive beyond the `Value` without copying it.
+    pub fn try_shared_bytes(&self) -> Result<Option<&Arc<[u8]>>, ValueTypeError> {
+        match self {
+            Value::Bytes(v) | Value::Uint8List(v) => Ok(Some(v)),
+            Value::Null => Ok(None),
+            _ => Err(ValueTypeError::for_types(TypeName::Bytes, self.type_name())),
+        }
+    }
+
     pub fn type_mismatch(&self, expected: impl Into<String>) -> ValueTypeError {
         ValueTypeError::for_value(expected, self.type_name())
     }

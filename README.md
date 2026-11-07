@@ -98,6 +98,9 @@ For example, `try_widen_i64()` accepts `U32` but rejects `U64`, even for zero;
 `try_widen_u64()` accepts unsigned integers but rejects all signed integers.
 To read any numeric value, integers included, as `f64`, use `try_f64_lossy()`;
 `i64` and `u64` values beyond 2^53 may lose precision.
+`try_bytes()` borrows `Bytes` and `Uint8List` values as `&[u8]`; to keep the
+data after the `Value` is dropped without copying it, clone the `Arc<[u8]>`
+returned by `try_shared_bytes()`.
 
 ## Multiple Topics
 

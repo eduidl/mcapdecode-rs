@@ -111,6 +111,18 @@ fn numeric_conversions_are_checked_and_null_is_explicit() {
 }
 
 #[test]
+fn shared_bytes_reuse_the_decoded_buffer() {
+    let buffer: std::sync::Arc<[u8]> = std::sync::Arc::from([1, 2]);
+    for value in [
+        Value::Bytes(buffer.clone()),
+        Value::Uint8List(buffer.clone()),
+    ] {
+        let shared = value.try_shared_bytes().unwrap().unwrap();
+        assert!(std::sync::Arc::ptr_eq(shared, &buffer));
+    }
+}
+
+#[test]
 fn exact_type_errors_convert_into_access_errors() {
     fn read(value: &Value) -> Result<Option<f64>, E> {
         Ok(value.try_f64()?)
