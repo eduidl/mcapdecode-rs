@@ -183,6 +183,7 @@ pub struct App {
     messages: MessageState,
     detail: ScrollPane,
     schema: SchemaPaneState,
+    file_info: FileInfoPaneState,
     layout: LayoutState,
 }
 
@@ -289,6 +290,13 @@ struct SchemaPaneState {
     view: Option<SchemaView>,
     return_focus: MessageFocus,
     pane: ScrollPane,
+}
+
+/// Display-only popup with file-level information.
+#[derive(Debug)]
+struct FileInfoPaneState {
+    visible: bool,
+    text: String,
 }
 
 #[derive(Debug)]

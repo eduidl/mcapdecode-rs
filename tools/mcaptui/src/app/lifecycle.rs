@@ -41,6 +41,10 @@ impl App {
                 return_focus: MessageFocus::List,
                 pane: ScrollPane::new(SCHEMA_HORIZONTAL_STEP),
             },
+            file_info: FileInfoPaneState {
+                visible: false,
+                text: "No file information".to_string(),
+            },
             layout: LayoutState {
                 topics_area: Rect::default(),
                 schema_area: Rect::default(),
@@ -136,6 +140,18 @@ impl App {
 
     pub fn detail_hscroll(&self) -> u16 {
         self.detail.hscroll
+    }
+
+    pub fn set_file_info_text(&mut self, text: impl Into<String>) {
+        self.file_info.text = text.into();
+    }
+
+    pub fn file_info_text(&self) -> &str {
+        &self.file_info.text
+    }
+
+    pub fn file_info_visible(&self) -> bool {
+        self.file_info.visible
     }
 
     pub fn select_topic_by_name(&mut self, topic: &str) -> Option<AppUpdate> {

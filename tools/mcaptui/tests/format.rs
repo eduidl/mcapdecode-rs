@@ -9,8 +9,8 @@ use mcapdecode::{
     },
 };
 use mcaptui::format::{
-    format_detail_rows, format_json_detail_rows, format_raw_detail_rows, format_raw_schema_text,
-    format_schema_text, format_timestamp,
+    format_detail_rows, format_file_info_text, format_json_detail_rows, format_raw_detail_rows,
+    format_raw_schema_text, format_schema_text, format_timestamp,
 };
 
 fn sample_schema() -> FieldDefs {
@@ -305,4 +305,62 @@ fn json_detail_rows_keep_float_values_exact() {
             .any(|row| row.text.contains("-0.0009321063815277333")),
         "{rows:?}"
     );
+}
+
+#[test]
+fn file_info_text_lists_summary_and_chunk_totals() {
+    use mcapdecode::mcap::{
+        read::Summary,
+        records::{ChunkIndex, Statistics},
+    };
+
+    let chunk = |compression: &str, compressed_size, uncompressed_size| ChunkIndex {
+        message_start_time: 0,
+        message_end_time: 0,
+        chunk_start_offset: 0,
+        chunk_length: 0,
+        message_index_offsets: Default::default(),
+        message_index_length: 0,
+        compression: compression.to_string(),
+        compressed_size,
+        uncompressed_size,
+    };
+    let summary = Summary {
+        stats: Some(Statistics {
+            message_count: 42,
+            ..Default::default()
+        }),
+        chunk_indexes: vec![chunk("zstd", 1024, 4096), chunk("", 1024, 1024)],
+        ..Default::default()
+    };
+
+    let text = format_file_info_text("a.mcap", 3 * 1024 * 1024, &summary, Some(0..=1_500_000_000));
+
+    assert_eq!(
+        text.lines().collect::<Vec<_>>(),
+        [
+            "path         a.mcap",
+            "file size    3.0 MiB (3145728 B)",
+            "start        1970-01-01 00:00:00.000 (0 ns)",
+            "end          1970-01-01 00:00:01.500 (1500000000 ns)",
+            "duration     1.500 s",
+            "messages     42",
+            "schemas      0",
+            "channels     0",
+            "attachments  0",
+            "metadata     0",
+            "chunks       2",
+            "compression  none, zstd",
+            "chunk data   5.0 KiB (5120 B) -> 2.0 KiB (2048 B)",
+        ]
+    );
+}
+
+#[test]
+fn file_info_text_without_messages_or_chunks() {
+    let summary = mcapdecode::mcap::read::Summary::default();
+    let text = format_file_info_text("a.mcap", 10, &summary, None);
+    assert!(text.contains("time range   -"));
+    assert!(text.contains("messages     -"));
+    assert!(!text.contains("compression"));
 }

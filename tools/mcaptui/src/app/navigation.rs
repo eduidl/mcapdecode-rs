@@ -19,6 +19,10 @@ impl App {
             return self.apply_navigation(navigation);
         }
 
+        if key.code == KeyCode::Char('i') {
+            return self.toggle_file_info();
+        }
+
         match self.session.screen {
             Screen::Topics => self.handle_topics_key(key.code),
             Screen::Messages => self.handle_messages_key(key.code),
@@ -360,6 +364,16 @@ impl App {
         AppUpdate::default()
     }
 
+    /// The file info popup only displays text and never takes focus. It sits where
+    /// the schema popup does, so opening either one closes the other.
+    fn toggle_file_info(&mut self) -> AppUpdate {
+        if !self.file_info.visible && self.schema_visible() {
+            self.clear_schema_view();
+        }
+        self.file_info.visible = !self.file_info.visible;
+        AppUpdate::changed()
+    }
+
     fn toggle_schema(&mut self) -> AppUpdate {
         if self.schema_visible() {
             self.clear_schema_view();
@@ -367,6 +381,7 @@ impl App {
             return AppUpdate::changed();
         }
 
+        self.file_info.visible = false;
         self.begin_schema_view();
         AppUpdate::changed_with_request(AppRequest::LoadSelectedSchema)
     }

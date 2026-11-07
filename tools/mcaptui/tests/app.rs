@@ -498,3 +498,38 @@ fn schema_horizontal_scroll_clamps_to_longest_line() {
 
     assert_eq!(app.schema_hscroll(), 8);
 }
+
+#[test]
+fn file_info_popup_leaves_keys_to_the_focused_pane() {
+    let mut app = app(vec![topic("/a", 1), topic("/b", 1)]);
+
+    app.handle_key(KeyCode::Char('i').into());
+    assert!(app.file_info_visible());
+
+    app.handle_key(KeyCode::Down.into());
+    assert_eq!(app.topic_selected(), Some(1));
+    assert_eq!(app.focus(), MessageFocus::List);
+
+    app.handle_key(KeyCode::Char('i').into());
+    assert!(!app.file_info_visible());
+}
+
+#[test]
+fn file_info_and_schema_popups_switch_to_each_other() {
+    let mut app = app(vec![topic("/a", 1)]);
+
+    app.handle_key(KeyCode::Char('s').into());
+    assert!(app.schema_visible());
+
+    app.handle_key(KeyCode::Char('i').into());
+    assert!(app.file_info_visible());
+    assert!(!app.schema_visible());
+
+    let update = app.handle_key(KeyCode::Char('s').into());
+    assert!(!app.file_info_visible());
+    assert!(app.schema_visible());
+    assert_eq!(
+        update,
+        AppUpdate::changed_with_request(AppRequest::LoadSelectedSchema)
+    );
+}

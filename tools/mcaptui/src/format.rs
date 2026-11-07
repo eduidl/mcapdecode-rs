@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
+use std::{collections::BTreeSet, ops::RangeInclusive};
+
 use mcapdecode::{
     ChannelInfo,
     core::{FieldDefs, StructValue, Value},
+    mcap::read::Summary,
 };
 
 use crate::app::DetailRow;
@@ -17,6 +20,96 @@ pub fn format_timestamp(timestamp_ns: u64) -> String {
             datetime.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
         }
         Err(_) => timestamp_ns.to_string(),
+    }
+}
+
+/// Render file-level information as aligned `label: value` lines.
+pub fn format_file_info_text(
+    path: &str,
+    file_size: u64,
+    summary: &Summary,
+    time_range: Option<RangeInclusive<u64>>,
+) -> String {
+    let stats = summary.stats.as_ref();
+    let chunks = &summary.chunk_indexes;
+    let mut rows = vec![
+        ("path", path.to_string()),
+        ("file size", format_size(file_size)),
+    ];
+    match time_range {
+        Some(range) => {
+            let (start, end) = (*range.start(), *range.end());
+            rows.push(("start", format_timestamp_with_ns(start)));
+            rows.push(("end", format_timestamp_with_ns(end)));
+            rows.push(("duration", format_duration(end.saturating_sub(start))));
+        }
+        None => rows.push(("time range", "-".to_string())),
+    }
+    rows.extend([
+        (
+            "messages",
+            stats.map_or_else(|| "-".to_string(), |stats| stats.message_count.to_string()),
+        ),
+        ("schemas", summary.schemas.len().to_string()),
+        ("channels", summary.channels.len().to_string()),
+        ("attachments", summary.attachment_indexes.len().to_string()),
+        ("metadata", summary.metadata_indexes.len().to_string()),
+        ("chunks", chunks.len().to_string()),
+    ]);
+    if !chunks.is_empty() {
+        let compressions: BTreeSet<_> = chunks
+            .iter()
+            .map(|chunk| display_or_none(&chunk.compression))
+            .collect();
+        let compressions: Vec<_> = compressions.into_iter().collect();
+        rows.push(("compression", compressions.join(", ")));
+        rows.push((
+            "chunk data",
+            format!(
+                "{} -> {}",
+                format_size(chunks.iter().map(|chunk| chunk.uncompressed_size).sum()),
+                format_size(chunks.iter().map(|chunk| chunk.compressed_size).sum())
+            ),
+        ));
+    }
+
+    let width = rows.iter().map(|(label, _)| label.len()).max().unwrap_or(0);
+    rows.iter()
+        .map(|(label, value)| format!("{label:<width$}  {value}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn display_or_none(compression: &str) -> String {
+    if compression.is_empty() {
+        "none".to_string()
+    } else {
+        compression.to_string()
+    }
+}
+
+fn format_timestamp_with_ns(timestamp_ns: u64) -> String {
+    format!("{} ({timestamp_ns} ns)", format_timestamp(timestamp_ns))
+}
+
+fn format_duration(duration_ns: u64) -> String {
+    format!("{:.3} s", duration_ns as f64 / 1e9)
+}
+
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
+    let mut size = bytes as f64;
+    let mut unit = None;
+    for next in UNITS {
+        if size < 1024.0 {
+            break;
+        }
+        size /= 1024.0;
+        unit = Some(next);
+    }
+    match unit {
+        Some(unit) => format!("{size:.1} {unit} ({bytes} B)"),
+        None => format!("{bytes} B"),
     }
 }
 

@@ -31,6 +31,7 @@ mcaptui sample.mcap --parallel
 - Topic names, message counts, and schema names in one list
 - Decoded message details for the selected record
 - The normalized `mcapdecode` field schema used during decoding
+- File-level information from the summary: time range, record counts, and chunk compression
 
 ## Walkthrough
 
@@ -70,6 +71,7 @@ The pane keeps the original total count and adds an omission row so large payloa
 ## Key Bindings
 
 - `q`: quit
-- Topic screen: `Tab`, `Up/Down`, `j/k`, `PageUp/PageDown`, `Home/End`, `s`, `Enter`
-- Message screen: `Esc`, `Tab`, `Up/Down`, `PageUp/PageDown`, `Home/End`, `s`
+- Topic screen: `Tab`, `Up/Down`, `j/k`, `PageUp/PageDown`, `Home/End`, `s`, `i`, `Enter`
+- Message screen: `Esc`, `Tab`, `Up/Down`, `PageUp/PageDown`, `Home/End`, `s`, `i`
+- `i`: toggle the file info popup (time range, counts, chunk compression)
 - Mouse wheel scrolls the pane under the pointer
