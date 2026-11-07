@@ -85,8 +85,10 @@ fn decoded_read_by_channel_id_applies_options() {
             fixture.path(),
             id,
             &ReadOptions {
-                offset: 1,
-                limit: Some(1),
+                time_range: Some(TimeRange {
+                    start: Some(4),
+                    end: None,
+                }),
                 ..ReadOptions::default()
             },
             |message| {
@@ -264,22 +266,25 @@ fn with_prepared_topic_scans_repeatedly_from_one_preparation() {
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
 
-    let (all, limited) = reader
+    let (all, filtered) = reader
         .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
             let all = collect_prepared_values(prepared, &ReadOptions::default());
-            let limited = collect_prepared_values(
+            let filtered = collect_prepared_values(
                 prepared,
                 &ReadOptions {
-                    limit: Some(2),
+                    time_range: Some(TimeRange {
+                        start: None,
+                        end: Some(3),
+                    }),
                     ..ReadOptions::default()
                 },
             );
-            Ok((all, limited))
+            Ok((all, filtered))
         })
         .unwrap();
 
     assert_eq!(all, vec![1, 2, 3]);
-    assert_eq!(limited, vec![1, 2]);
+    assert_eq!(filtered, vec![1, 2]);
 }
 
 #[test]
@@ -292,7 +297,10 @@ fn with_prepared_topic_matches_reader_level_filtered_read() {
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
     let options = ReadOptions {
-        offset: 1,
+        time_range: Some(TimeRange {
+            start: Some(2),
+            end: None,
+        }),
         ..ReadOptions::default()
     };
 
@@ -698,11 +706,6 @@ fn multi_topic_decoded_reads_work_without_arrow() {
         for options in [
             ReadOptions::default(),
             ReadOptions {
-                offset: 2,
-                limit: Some(5),
-                ..ReadOptions::default()
-            },
-            ReadOptions {
                 time_range: Some(TimeRange {
                     start: Some(3),
                     end: Some(9),
@@ -775,23 +778,25 @@ fn repeated_single_topic_is_read_once() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
-    let options = ReadOptions {
-        limit: Some(1),
-        ..Default::default()
-    };
+    let options = ReadOptions::default();
     let mut topics = Vec::new();
     reader
         .for_each_topic_decoded_message_with_options(
             fixture.path(),
             &["/first", "/first"],
             &options,
-            |topic, _| {
-                topics.push(topic.to_owned());
+            |topic, message| {
+                topics.push((topic.to_owned(), message.log_time));
                 Ok(())
             },
         )
         .unwrap();
-    assert_eq!(topics, ["/first"]);
+    assert_eq!(
+        topics,
+        (0..1024)
+            .map(|time| ("/first".to_owned(), time))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -820,15 +825,6 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
                 }),
                 ..Default::default()
             },
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(3),
-                    end: Some(9),
-                }),
-                offset: 1,
-                limit: Some(2),
-                ..Default::default()
-            },
         ] {
             let mut actual = BTreeMap::<String, Vec<(u64, i64)>>::new();
             reader
@@ -851,10 +847,10 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
                     },
                 )
                 .unwrap();
-            let range = match (options.time_range, options.limit) {
-                (None, _) => 0..1024,
-                (_, None) => 3..9,
-                _ => 4..6,
+            let range = if options.time_range.is_some() {
+                3..9
+            } else {
+                0..1024
             };
             for (topic, offset) in [("/first", 0), ("/second", 100)] {
                 assert_eq!(

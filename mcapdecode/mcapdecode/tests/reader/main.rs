@@ -326,43 +326,6 @@ impl MessageDecoder for SchemaNamedFieldDecoder {
     }
 }
 
-struct CountingTestJsonDecoder(Arc<AtomicUsize>);
-
-impl MessageDecoder for CountingTestJsonDecoder {
-    fn encoding_key(&self) -> EncodingKey {
-        EncodingKey::new(SchemaEncoding::JsonSchema, MessageEncoding::Json)
-    }
-
-    fn build_topic_decoder(
-        &self,
-        _schema_name: &str,
-        _schema_data: &[u8],
-    ) -> Result<Box<dyn TopicDecoder>, DecoderError> {
-        Ok(Box::new(CountingTestJsonTopicDecoder {
-            count: Arc::clone(&self.0),
-            field_defs: vec![FieldDef::new("value", DataTypeDef::I64, true)].into(),
-        }))
-    }
-}
-
-struct CountingTestJsonTopicDecoder {
-    count: Arc<AtomicUsize>,
-    field_defs: FieldDefs,
-}
-
-impl TopicDecoder for CountingTestJsonTopicDecoder {
-    fn decode(&self, message_data: &[u8]) -> Result<Value, DecoderError> {
-        self.count.fetch_add(1, Ordering::Relaxed);
-        Ok(Value::Struct(
-            vec![Value::I64(decode_test_value(message_data)?)].into(),
-        ))
-    }
-
-    fn field_defs(&self) -> &FieldDefs {
-        &self.field_defs
-    }
-}
-
 mod core;
 mod opened;
 mod read_options;

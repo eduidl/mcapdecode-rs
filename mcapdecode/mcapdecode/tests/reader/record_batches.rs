@@ -447,15 +447,6 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
                 }),
                 ..ReadOptions::default()
             },
-            ReadOptions {
-                offset: 3,
-                limit: Some(5),
-                ..ReadOptions::default()
-            },
-            ReadOptions {
-                limit: Some(0),
-                ..ReadOptions::default()
-            },
         ] {
             let options = RecordBatchOptions {
                 batch_size: 3,
@@ -543,13 +534,7 @@ fn repeated_single_topic_emits_one_batch() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
-    let options = RecordBatchOptions {
-        read_options: ReadOptions {
-            limit: Some(1),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let options = RecordBatchOptions::default();
     let mut topics = Vec::new();
     reader
         .for_each_topic_record_batch_with_options(
@@ -557,7 +542,14 @@ fn repeated_single_topic_emits_one_batch() {
             &["/first", "/first"],
             &options,
             |topic, batch| {
-                assert_eq!(batch.num_rows(), 1);
+                assert_eq!(batch.num_rows(), 1024);
+                let index = batch.schema().index_of("value").unwrap();
+                let values = batch
+                    .column(index)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                assert_eq!(values.values().as_ref(), &(0..1024).collect::<Vec<i64>>());
                 topics.push(topic.to_owned());
                 Ok(())
             },
