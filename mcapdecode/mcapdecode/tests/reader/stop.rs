@@ -104,6 +104,7 @@ fn decoded_prefix_is_delivered_before_decode_error() {
     writer.finish().unwrap();
     for parallel in [false, true] {
         let reader = McapReader::builder()
+            .clear_decoders()
             .with_decoder(Box::new(TestJsonDecoder))
             .with_parallel(parallel)
             .open(fixture.path())

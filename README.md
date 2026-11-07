@@ -57,8 +57,9 @@ The opened reader can be reused for multiple reads. Omit `topics` to select all
 channels. Decoded and Arrow reads fail if a selected channel cannot be decoded.
 Use `topics` or `channels` to select supported channels, for example
 `channels([id1, id2])`. Each callback receives `ChannelInfo`, including its ID,
-topic, and optional schema name. Custom decoders can be configured with
-`McapReader::builder()`, whose `open()` opens any number of files with the same
+topic, and optional schema name. `McapReader::builder()` starts with the
+built-in decoders; `with_decoder()` adds or replaces one, `clear_decoders()`
+removes them all, and `open()` opens any number of files with the same
 configuration.
 
 Decoded structs carry a shared schema, so fields can be accessed by name without

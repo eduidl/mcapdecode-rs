@@ -59,7 +59,6 @@ pub(crate) fn main() -> Result<()> {
 fn run(cli: Cli) -> Result<()> {
     let reader = Arc::new(
         McapReader::builder()
-            .with_default_decoders()
             .with_parallel(cli.parallel)
             .open(&cli.input)
             .with_context(|| format!("failed to open {}", cli.input.display()))?,

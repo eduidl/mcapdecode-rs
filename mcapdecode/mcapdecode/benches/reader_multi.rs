@@ -19,7 +19,6 @@ fn bench_reader_multi(c: &mut Criterion) {
         group.bench_function(name, |b| {
             b.iter(|| {
                 McapReader::builder()
-                    .with_default_decoders()
                     .with_parallel(parallel)
                     .open(&path)
                     .unwrap()

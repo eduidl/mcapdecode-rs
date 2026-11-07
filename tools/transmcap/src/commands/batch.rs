@@ -252,10 +252,7 @@ pub(super) fn run_conversion(
     specs: Vec<TopicSpec>,
     config_path: Option<&Path>,
 ) -> Result<()> {
-    let reader = McapReader::builder()
-        .with_default_decoders()
-        .with_parallel(parallel)
-        .open(input)?;
+    let reader = McapReader::builder().with_parallel(parallel).open(input)?;
     let mut names = HashSet::new();
     let mut outputs = HashSet::new();
     let mut topics = Vec::new();

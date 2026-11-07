@@ -86,6 +86,7 @@ mod tests {
 
     fn reader() -> McapReader {
         McapReader::builder()
+            .clear_decoders()
             .open(
                 Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../../mcapdecode/mcapdecode/tests/fixtures/with_summary.mcap"),

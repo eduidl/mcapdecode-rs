@@ -23,7 +23,6 @@ pub fn clustered_fixture() -> std::path::PathBuf {
 pub fn read_topic(path: &std::path::Path, parallel: bool) -> usize {
     let mut count = 0;
     McapReader::builder()
-        .with_default_decoders()
         .with_parallel(parallel)
         .open(path)
         .unwrap()

@@ -60,15 +60,26 @@ pub(crate) struct TopicDecodeContext {
 impl McapReader {
     /// Open a file with all decoders enabled by cargo features.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, McapReaderError> {
-        Self::builder().with_default_decoders().open(path)
+        Self::builder().open(path)
     }
 
-    /// Create a builder with no decoders registered.
+    /// Create a builder with all decoders enabled by cargo features registered.
+    ///
+    /// Use [`McapReaderBuilder::clear_decoders`] to start from no decoders.
     pub fn builder() -> McapReaderBuilder {
-        McapReaderBuilder {
+        let builder = McapReaderBuilder {
             decoders: HashMap::new(),
             parallel: true,
-        }
+        };
+        #[cfg(feature = "rawjson")]
+        let builder = builder.with_decoder(Box::new(RawJsonDecoder::new()));
+        #[cfg(feature = "protobuf")]
+        let builder = builder.with_decoder(Box::new(ProtobufDecoder::new()));
+        #[cfg(feature = "ros2idl")]
+        let builder = builder.with_decoder(Box::new(Ros2IdlDecoder::new()));
+        #[cfg(feature = "ros2msg")]
+        let builder = builder.with_decoder(Box::new(Ros2MsgDecoder::new()));
+        builder
     }
 
     /// Return topic metadata and schema IR without reading message payloads.
@@ -326,7 +337,8 @@ fn schema_name_and_encoding(channel: &mcap::Channel<'_>) -> (Option<String>, Str
 }
 
 impl McapReaderBuilder {
-    /// Register a message decoder.
+    /// Register a message decoder, replacing any decoder registered for the
+    /// same encoding pair.
     pub fn with_decoder(self, decoder: Box<dyn MessageDecoder>) -> Self {
         self.with_shared_decoder(Arc::from(decoder))
     }
@@ -346,18 +358,10 @@ impl McapReaderBuilder {
         self
     }
 
-    /// Register all built-in decoders enabled by cargo features.
-    pub fn with_default_decoders(self) -> Self {
-        let s = self;
-        #[cfg(feature = "rawjson")]
-        let s = s.with_decoder(Box::new(RawJsonDecoder::new()));
-        #[cfg(feature = "protobuf")]
-        let s = s.with_decoder(Box::new(ProtobufDecoder::new()));
-        #[cfg(feature = "ros2idl")]
-        let s = s.with_decoder(Box::new(Ros2IdlDecoder::new()));
-        #[cfg(feature = "ros2msg")]
-        let s = s.with_decoder(Box::new(Ros2MsgDecoder::new()));
-        s
+    /// Unregister all decoders, including the built-in ones.
+    pub fn clear_decoders(mut self) -> Self {
+        self.decoders.clear();
+        self
     }
 
     /// Open a file with this builder's decoders and settings.
