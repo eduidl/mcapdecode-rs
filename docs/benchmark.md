@@ -14,6 +14,9 @@ cargo run -p mcapbench -- --case bytes --encoding ros2idl --output /tmp/bytes.mc
 # All suites (about 1.5 minutes).
 cargo bench -p mcapdecode --features arrow --bench decode --bench arrow --bench reader
 
+# Multi-topic reading (requires the current multi-topic API).
+cargo bench -p mcapdecode --bench reader_multi
+
 # Run every benchmark once without measuring, to check they all still execute.
 cargo bench -p mcapdecode --features arrow --bench decode --bench arrow --bench reader -- --test
 
@@ -48,13 +51,14 @@ measured loop:
   decoding. `sequential` and `parallel` read a zstd file whose every chunk holds the
   topic; `skip_chunks` reads a 1% topic clustered in a few chunks, so the chunk index
   lets the reader skip the rest.
+- `reader_multi`: sequential and parallel reads of two interleaved topics in a zstd file.
 
-Throughput is the payload bytes handed to the function, except in `reader`, where it
-is the file size.
+Throughput is the payload bytes handed to the function, except in `reader` and
+`reader_multi`, where it is the file size.
 
-The benchmarks only use APIs unchanged since v0.6.0, so the current `benches/` and
-`dev/mcapbench` can be copied onto an older release tag to measure it with the same
-case IDs.
+The `decode`, `arrow`, and `reader` benchmarks only use APIs unchanged since v0.6.0,
+so they and `dev/mcapbench` can be copied onto an older release tag to measure it with
+the same case IDs. `reader_multi` requires the multi-topic API.
 
 ## Comparing revisions
 
