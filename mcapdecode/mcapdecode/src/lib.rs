@@ -16,6 +16,8 @@ mod summary;
 mod types;
 
 pub use error::McapReaderError;
+/// The `mcap` crate whose types [`OpenedMcap::summary`] exposes.
+pub use mcap;
 #[cfg(feature = "arrow")]
 pub use mcapdecode_arrow as arrow;
 pub use mcapdecode_core as core;

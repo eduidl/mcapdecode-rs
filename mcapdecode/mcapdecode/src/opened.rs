@@ -1,6 +1,6 @@
 //! File-backed reader and message selection.
 
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{collections::HashSet, ops::RangeInclusive, path::Path, sync::Arc};
 
 use mcapdecode_core::{DecodedMessage, FieldDefs};
 
@@ -78,6 +78,21 @@ impl OpenedMcap {
     /// Return a topic's message count from the summary statistics.
     pub fn message_count(&self, topic: &str) -> Result<u64, McapReaderError> {
         crate::summary::message_count(&self.file.summary, topic)
+    }
+
+    /// Return the inclusive `log_time` range of all messages in the file.
+    ///
+    /// Uses summary statistics when present, otherwise the chunk indexes.
+    /// Returns `None` when the file has no messages or neither source is available.
+    pub fn message_time_range(&self) -> Option<RangeInclusive<u64>> {
+        crate::summary::message_time_range(&self.file.summary)
+    }
+
+    /// Return the summary section read when the file was opened.
+    ///
+    /// Chunk indexes are sorted by `chunk_start_offset`.
+    pub fn summary(&self) -> &mcap::read::Summary {
+        &self.file.summary
     }
 
     /// Derive the Arrow batch schema for a topic before reading messages.
