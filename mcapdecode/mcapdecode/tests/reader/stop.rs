@@ -71,6 +71,84 @@ fn try_for_each_propagates_callback_error() {
     }
 }
 
+#[test]
+fn decoded_prefix_is_delivered_before_decode_error() {
+    let fixture = TempFixture {
+        path: temp_fixture_path("error-in-chunk"),
+    };
+    let mut writer = Writer::with_options(
+        File::create(fixture.path()).unwrap(),
+        WriteOptions::new().compression(None),
+    )
+    .unwrap();
+    let schema = writer.add_schema("test.Msg", "jsonschema", b"{}").unwrap();
+    let channel = writer
+        .add_channel(schema, "/decoded", "json", &BTreeMap::new())
+        .unwrap();
+    for (i, payload) in [br#"{"value":1}"#.as_slice(), br#"{"value":2}"#, b"invalid"]
+        .into_iter()
+        .enumerate()
+    {
+        writer
+            .write_to_known_channel(
+                &MessageHeader {
+                    channel_id: channel,
+                    sequence: i as u32,
+                    log_time: i as u64,
+                    publish_time: i as u64,
+                },
+                payload,
+            )
+            .unwrap();
+    }
+    writer.finish().unwrap();
+    for parallel in [false, true] {
+        let reader = McapReader::builder()
+            .with_decoder(Box::new(TestJsonDecoder))
+            .with_parallel(parallel)
+            .open(fixture.path())
+            .unwrap();
+        assert_eq!(reader.summary().chunk_indexes.len(), 1);
+        let mut times = Vec::new();
+        let error = reader
+            .read()
+            .decoded()
+            .for_each(|_, message| times.push(message.log_time))
+            .unwrap_err();
+        assert_eq!(times, [0, 1]);
+        assert!(matches!(
+            error,
+            McapReaderError::Decoder(DecoderError::MessageDecode(_))
+        ));
+
+        let mut calls = 0;
+        reader
+            .read()
+            .decoded()
+            .try_for_each(|_, _| Ok(stop_after(&mut calls, 1)))
+            .unwrap();
+        assert_eq!(calls, 1);
+        let error = reader
+            .read()
+            .decoded()
+            .try_for_each(|_, _| Err::<(), _>("callback failed".into()))
+            .unwrap_err();
+        assert!(matches!(error, McapReaderError::Callback(_)));
+
+        #[cfg(feature = "arrow")]
+        {
+            let mut calls = 0;
+            reader
+                .read()
+                .arrow()
+                .batch_size(1)
+                .try_for_each(|_, _| Ok(stop_after(&mut calls, 1)))
+                .unwrap();
+            assert_eq!(calls, 1);
+        }
+    }
+}
+
 #[cfg(feature = "arrow")]
 #[test]
 fn arrow_try_for_each_stops_without_flushing_buffered_rows() {
