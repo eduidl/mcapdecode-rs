@@ -3,12 +3,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use mcapdecode_core::{EncodingKey, MessageDecoder, MessageEncoding, SchemaEncoding};
-use memmap2::Mmap;
 
 use crate::{
     RawMessage, TopicDecodeStatus, TopicSchema,
+    chunk_reader::for_each_chunk,
     decode::TopicDecodeContext,
     error::McapReaderError,
+    mcap_file::McapFile,
     summary::{get_channel_from_summary, get_schema_from_channel, topic_infos_from_summary},
 };
 
@@ -110,23 +111,26 @@ impl InternalReader {
 }
 
 pub(crate) fn for_each_raw_message_impl(
-    mmap: &Mmap,
+    file: &McapFile,
     channel_id: u16,
+    parallel: bool,
     mut callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
 ) -> Result<(), McapReaderError> {
-    for message in mcap::MessageStream::new(mmap)? {
-        let message = message?;
-        if message.channel.id != channel_id {
-            continue;
-        }
-
-        callback(RawMessage {
-            log_time: message.log_time,
-            publish_time: message.publish_time,
-            data: Arc::from(message.data),
-        })
-        .map_err(McapReaderError::Callback)?;
-    }
-
-    Ok(())
+    let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
+        chunk.message_index_offsets.is_empty()
+            || chunk.message_index_offsets.contains_key(&channel_id)
+    });
+    for_each_chunk(
+        file,
+        chunks,
+        parallel,
+        |message| {
+            Ok((message.channel.id == channel_id).then(|| RawMessage {
+                log_time: message.log_time,
+                publish_time: message.publish_time,
+                data: Arc::from(message.data.as_ref()),
+            }))
+        },
+        &mut |message| callback(message).map_err(McapReaderError::Callback),
+    )
 }

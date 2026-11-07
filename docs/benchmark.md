@@ -47,8 +47,8 @@ measured loop:
   schema for ROS 2 IDL, ROS 2 msg and protobuf.
 - `arrow`: `to_record_batch/{payload}` times `MessageBatchSchema::to_record_batch` on
   about 4 MiB of already-decoded ROS 2 IDL rows.
-- `reader`: the read path over a generated file, for what the reader adds around
-  decoding. `sequential` and `parallel` read a zstd file whose every chunk holds the
+- `reader`: raw and decoded read paths over a generated file. `sequential` and
+  `parallel` read a zstd file whose every chunk holds the
   topic; `skip_chunks` reads a 1% topic clustered in a few chunks, so the chunk index
   lets the reader skip the rest.
 - `reader_multi`: sequential and parallel reads of two interleaved topics in a zstd file.

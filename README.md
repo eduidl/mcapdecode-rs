@@ -32,8 +32,10 @@ is exposed as a struct with a single `json` string field.
 
 ## Usage
 
-Reads require an MCAP summary with chunk indexes. Chunks without message
-indexes are scanned to find the requested topics.
+Reads require an MCAP summary. When chunk indexes are present, reads use them to
+select chunks; otherwise, they scan all messages sequentially. Chunks without
+message indexes are scanned to find the requested topics. When chunk indexes are
+present, messages outside indexed chunks are not read.
 
 ### Decoded Messages
 
