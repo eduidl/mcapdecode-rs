@@ -155,9 +155,8 @@ fn for_each_chunk<'a, T: Send>(
                                 messages.push(message);
                                 Ok(ControlFlow::Continue(()))
                             },
-                        )
-                        .map(|_| messages);
-                        sender.send((window_index * window_size + i, result))
+                        );
+                        sender.send((window_index * window_size + i, (messages, result)))
                     },
                 );
                 if sent.is_err() || ready.recv().is_err() {
@@ -174,14 +173,7 @@ fn for_each_chunk<'a, T: Send>(
                 ))
             })?;
             pending.insert(position, result);
-            while let Some(result) = pending.remove(&next) {
-                let messages = match result {
-                    Ok(messages) => messages,
-                    Err(error) => {
-                        cancelled.store(true, Ordering::Relaxed);
-                        return Err(error);
-                    }
-                };
+            while let Some((messages, result)) = pending.remove(&next) {
                 for message in messages {
                     match callback(message) {
                         Ok(ControlFlow::Continue(())) => {}
@@ -194,6 +186,10 @@ fn for_each_chunk<'a, T: Send>(
                             return Err(error);
                         }
                     }
+                }
+                if let Err(error) = result {
+                    cancelled.store(true, Ordering::Relaxed);
+                    return Err(error);
                 }
                 next += 1;
                 if next % window_size == 0 || next == chunk_count {
