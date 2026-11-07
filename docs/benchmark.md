@@ -14,6 +14,9 @@ cargo run -p mcapbench -- --case bytes --encoding ros2idl --output /tmp/bytes.mc
 # All suites (about 1.5 minutes).
 cargo bench -p mcapdecode --features arrow --bench decode --bench arrow --bench reader
 
+# Multi-topic reading (requires the current multi-topic API).
+cargo bench -p mcapdecode --bench reader_multi
+
 # Run every benchmark once without measuring, to check they all still execute.
 cargo bench -p mcapdecode --features arrow --bench decode --bench arrow --bench reader -- --test
 

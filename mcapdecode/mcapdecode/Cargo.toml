@@ -46,6 +46,11 @@ harness = false
 required-features = ["ros2idl"]
 
 [[bench]]
+name = "reader_multi"
+harness = false
+required-features = ["ros2idl"]
+
+[[bench]]
 name = "arrow"
 harness = false
 required-features = ["arrow", "ros2idl"]
