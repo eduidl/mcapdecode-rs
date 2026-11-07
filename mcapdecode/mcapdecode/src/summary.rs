@@ -1,6 +1,6 @@
 //! Lookups against the MCAP summary section.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::RangeInclusive, sync::Arc};
 
 use crate::{ChannelInfo, TopicInfo, error::McapReaderError};
 
@@ -113,4 +113,23 @@ fn channel_message_count(summary: &mcap::read::Summary, channel_id: u16) -> Opti
             .copied()
             .unwrap_or_default()
     })
+}
+
+/// Return the inclusive `log_time` range of all messages, from statistics or chunk indexes.
+pub(crate) fn message_time_range(summary: &mcap::read::Summary) -> Option<RangeInclusive<u64>> {
+    if let Some(stats) = &summary.stats {
+        return (stats.message_count > 0)
+            .then_some(stats.message_start_time..=stats.message_end_time);
+    }
+    let start = summary
+        .chunk_indexes
+        .iter()
+        .map(|chunk| chunk.message_start_time)
+        .min()?;
+    let end = summary
+        .chunk_indexes
+        .iter()
+        .map(|chunk| chunk.message_end_time)
+        .max()?;
+    Some(start..=end)
 }

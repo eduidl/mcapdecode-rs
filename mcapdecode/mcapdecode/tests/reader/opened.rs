@@ -259,3 +259,37 @@ fn opened_file_reports_zero_for_an_empty_channel_with_statistics() {
         Some(0)
     );
 }
+
+#[test]
+fn opened_message_time_range_uses_statistics() {
+    let fixture = write_chunked_fixture("time-range-stats", &[b"{}", b"{}", b"{}"]);
+    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    assert_eq!(opened.message_time_range(), Some(1..=3));
+}
+
+#[test]
+fn opened_message_time_range_falls_back_to_chunk_indexes() {
+    let fixture = multi_topic_fixture_with_options(
+        WriteOptions::new()
+            .chunk_size(Some(128))
+            .emit_statistics(false),
+    );
+    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    assert_eq!(opened.message_time_range(), Some(0..=1023));
+}
+
+#[test]
+fn opened_message_time_range_is_none_without_messages() {
+    let fixture = write_chunked_fixture("time-range-empty", &[]);
+    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    assert_eq!(opened.message_time_range(), None);
+}
+
+#[test]
+fn opened_summary_exposes_statistics() {
+    let fixture = write_chunked_fixture("summary", &[b"{}", b"{}", b"{}"]);
+    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    let stats = opened.summary().stats.as_ref().unwrap();
+    assert_eq!(stats.message_count, 3);
+    assert_eq!(opened.summary().channels.len(), 1);
+}
