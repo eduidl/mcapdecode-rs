@@ -12,13 +12,13 @@ use std::{
 
 use rayon::prelude::*;
 
-use crate::{TimeRange, error::McapReaderError, mcap_file::McapFile};
+use crate::{McapReader, McapReaderError, TimeRange};
 
 /// Process messages of the selected channels within `time_range`, skipping chunks that hold none.
 /// `process` and `callback` receive the message channel's position in `channel_ids`.
 /// Reading stops without error once `callback` returns [`ControlFlow::Break`].
 pub(crate) fn for_each_selected_message<T: Send>(
-    file: &McapFile,
+    reader: &McapReader,
     channel_ids: &[u16],
     time_range: Option<TimeRange>,
     parallel: bool,
@@ -31,7 +31,7 @@ pub(crate) fn for_each_selected_message<T: Send>(
     // A single channel avoids the per-message map lookup.
     if let [channel_id] = *channel_ids {
         return for_each_message_of(
-            file,
+            reader,
             |id| (id == channel_id).then_some(0),
             time_range,
             parallel,
@@ -45,7 +45,7 @@ pub(crate) fn for_each_selected_message<T: Send>(
         .map(|(i, &id)| (id, i))
         .collect();
     for_each_message_of(
-        file,
+        reader,
         |id| indexes.get(&id).copied(),
         time_range,
         parallel,
@@ -55,20 +55,20 @@ pub(crate) fn for_each_selected_message<T: Send>(
 }
 
 fn for_each_message_of<T: Send>(
-    file: &McapFile,
+    reader: &McapReader,
     index_of: impl Fn(u16) -> Option<usize> + Sync,
     time_range: Option<TimeRange>,
     parallel: bool,
     process: impl Fn(usize, &mcap::Message<'_>) -> Result<T, McapReaderError> + Sync,
     callback: &mut impl FnMut(usize, T) -> Result<ControlFlow<()>, McapReaderError>,
 ) -> Result<(), McapReaderError> {
-    let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
+    let chunks = reader.summary().chunk_indexes.iter().filter(|chunk| {
         let offsets = &chunk.message_index_offsets;
         (offsets.is_empty() || offsets.keys().any(|&id| index_of(id).is_some()))
             && time_range.is_none_or(|range| range.overlaps_chunk(chunk))
     });
     for_each_chunk(
-        file,
+        reader,
         chunks,
         parallel,
         |message| {
@@ -88,14 +88,14 @@ fn for_each_message_of<T: Send>(
 /// In parallel mode `process` runs on workers and `callback` runs on the calling thread.
 /// Without chunk indexes, scan the file sequentially instead.
 fn for_each_chunk<'a, T: Send>(
-    file: &McapFile,
+    reader: &McapReader,
     chunks: impl Iterator<Item = &'a mcap::records::ChunkIndex>,
     parallel: bool,
     process: impl Fn(&mcap::Message<'_>) -> Result<Option<T>, McapReaderError> + Sync,
     callback: &mut impl FnMut(T) -> Result<ControlFlow<()>, McapReaderError>,
 ) -> Result<(), McapReaderError> {
-    if file.summary.chunk_indexes.is_empty() {
-        for message in mcap::MessageStream::new(&file.mmap)? {
+    if reader.summary().chunk_indexes.is_empty() {
+        for message in mcap::MessageStream::new(reader.mmap())? {
             if let Some(result) = process(&message?)?
                 && callback(result)?.is_break()
             {
@@ -108,7 +108,7 @@ fn for_each_chunk<'a, T: Send>(
         |chunk,
          cancelled: &dyn Fn() -> bool,
          emit: &mut dyn FnMut(T) -> Result<ControlFlow<()>, McapReaderError>| {
-            for message in file.summary.stream_chunk(&file.mmap, chunk)? {
+            for message in reader.summary().stream_chunk(reader.mmap(), chunk)? {
                 if cancelled() {
                     break;
                 }
