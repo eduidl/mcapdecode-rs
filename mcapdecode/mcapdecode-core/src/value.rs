@@ -260,6 +260,26 @@ impl Value {
         }
     }
 
+    /// Convert any numeric value to `f64`. Unlike [`Value::try_widen_f64`], this
+    /// also accepts integers, so `i64` and `u64` values beyond 2^53 may lose precision.
+    ///
+    /// Null is reported as [`ValueAccessError::NullValue`], like the `try_widen_*` methods.
+    pub fn try_f64_lossy(&self) -> Result<f64, ValueAccessError> {
+        match self {
+            Self::I8(v) => Ok(f64::from(*v)),
+            Self::I16(v) => Ok(f64::from(*v)),
+            Self::I32(v) => Ok(f64::from(*v)),
+            Self::I64(v) => Ok(*v as f64),
+            Self::U8(v) => Ok(f64::from(*v)),
+            Self::U16(v) => Ok(f64::from(*v)),
+            Self::U32(v) => Ok(f64::from(*v)),
+            Self::U64(v) => Ok(*v as f64),
+            Self::F32(v) => Ok(f64::from(*v)),
+            Self::F64(v) => Ok(*v),
+            _ => Err(self.access_mismatch("number")),
+        }
+    }
+
     pub fn string(s: impl AsRef<str>) -> Self {
         Self::String(Arc::from(s.as_ref()))
     }
