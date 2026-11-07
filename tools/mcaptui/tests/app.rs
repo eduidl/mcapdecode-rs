@@ -533,3 +533,58 @@ fn file_info_and_schema_popups_switch_to_each_other() {
         AppUpdate::changed_with_request(AppRequest::LoadSelectedSchema)
     );
 }
+
+#[test]
+fn file_info_popup_scrolls_once_focused_with_tab() {
+    let mut app = app(vec![topic("/a", 1), topic("/b", 1)]);
+    app.set_file_info_text("line-0\nline-1\nline-2\nline-3\nline-4\nline-5-is-long");
+    app.handle_key(KeyCode::Char('i').into());
+    app.set_file_info_area(Rect::new(0, 0, 10, 5));
+
+    app.handle_key(KeyCode::Tab.into());
+    assert_eq!(app.focus(), MessageFocus::FileInfo);
+
+    app.handle_key(KeyCode::Down.into());
+    app.handle_key(KeyCode::Char('l').into());
+    assert_eq!(app.file_info_scroll(), 1);
+    assert_eq!(app.file_info_hscroll(), 1);
+    assert_eq!(app.topic_selected(), Some(0));
+
+    app.handle_key(KeyCode::End.into());
+    assert_eq!(app.file_info_scroll(), 3);
+
+    app.handle_key(KeyCode::Char('i').into());
+    assert!(!app.file_info_visible());
+    assert_eq!(app.focus(), MessageFocus::List);
+}
+
+#[test]
+fn file_info_popup_scrolls_via_mouse() {
+    let mut app = app(vec![topic("/a", 1), topic("/b", 1)]);
+    app.set_topics_area(Rect::new(0, 0, 80, 20));
+    app.set_file_info_text("line-0\nline-1\nline-2\nline-3");
+    app.handle_key(KeyCode::Char('i').into());
+    app.set_file_info_area(Rect::new(10, 5, 20, 4));
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: 12,
+        row: 6,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert_eq!(app.file_info_scroll(), 1);
+    assert_eq!(app.topic_selected(), Some(0));
+}
+
+#[test]
+fn opening_schema_returns_focus_from_file_info() {
+    let mut app = app(vec![topic("/a", 1)]);
+    app.handle_key(KeyCode::Char('i').into());
+    app.handle_key(KeyCode::Tab.into());
+    assert_eq!(app.focus(), MessageFocus::FileInfo);
+
+    app.handle_key(KeyCode::Char('s').into());
+    assert!(!app.file_info_visible());
+    assert!(app.schema_visible());
+    assert_eq!(app.focus(), MessageFocus::List);
+}

@@ -73,5 +73,5 @@ The pane keeps the original total count and adds an omission row so large payloa
 - `q`: quit
 - Topic screen: `Tab`, `Up/Down`, `j/k`, `PageUp/PageDown`, `Home/End`, `s`, `i`, `Enter`
 - Message screen: `Esc`, `Tab`, `Up/Down`, `PageUp/PageDown`, `Home/End`, `s`, `i`
-- `i`: toggle the file info popup (time range, counts, chunk compression)
+- `i`: toggle the file info popup (time range, message and channel counts, chunk compression); like the schema popup, `Tab` moves focus into it to scroll
 - Mouse wheel scrolls the pane under the pointer

@@ -24,6 +24,7 @@ pub enum MessageFocus {
     List,
     Detail,
     Schema,
+    FileInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +153,7 @@ pub(crate) enum NavigationTarget {
     Schema,
     MessageList,
     MessageDetail,
+    FileInfo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,17 +294,21 @@ struct SchemaPaneState {
     pane: ScrollPane,
 }
 
-/// Display-only popup with file-level information.
+/// Popup with file-level information. It sits where the schema popup does, so
+/// only one of them is visible at a time.
 #[derive(Debug)]
 struct FileInfoPaneState {
     visible: bool,
     text: String,
+    return_focus: MessageFocus,
+    pane: ScrollPane,
 }
 
 #[derive(Debug)]
 struct LayoutState {
     topics_area: Rect,
     schema_area: Rect,
+    file_info_area: Rect,
     message_list_area: Rect,
     message_detail_area: Rect,
 }

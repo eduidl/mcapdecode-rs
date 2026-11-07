@@ -52,9 +52,6 @@ pub fn format_file_info_text(
         ),
         ("schemas", summary.schemas.len().to_string()),
         ("channels", summary.channels.len().to_string()),
-        ("attachments", summary.attachment_indexes.len().to_string()),
-        ("metadata", summary.metadata_indexes.len().to_string()),
-        ("chunks", chunks.len().to_string()),
     ]);
     if !chunks.is_empty() {
         let compressions: BTreeSet<_> = chunks

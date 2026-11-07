@@ -347,9 +347,6 @@ fn file_info_text_lists_summary_and_chunk_totals() {
             "messages     42",
             "schemas      0",
             "channels     0",
-            "attachments  0",
-            "metadata     0",
-            "chunks       2",
             "compression  none, zstd",
             "chunk data   5.0 KiB (5120 B) -> 2.0 KiB (2048 B)",
         ]
@@ -360,7 +357,7 @@ fn file_info_text_lists_summary_and_chunk_totals() {
 fn file_info_text_without_messages_or_chunks() {
     let summary = mcapdecode::mcap::read::Summary::default();
     let text = format_file_info_text("a.mcap", 10, &summary, None);
-    assert!(text.contains("time range   -"));
-    assert!(text.contains("messages     -"));
+    assert!(text.contains("time range  -"));
+    assert!(text.contains("messages    -"));
     assert!(!text.contains("compression"));
 }

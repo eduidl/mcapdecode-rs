@@ -3,9 +3,8 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
 };
-use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, MessageFocus, Screen};
 
@@ -26,32 +25,29 @@ pub fn render(frame: &mut Frame<'_>, app: &mut App) {
         Screen::Messages => render_messages(frame, layout[0], app),
     }
 
-    if app.file_info_visible() {
-        render_file_info_widget(frame, layout[0], app.file_info_text());
+    let file_info_area = app
+        .file_info_visible()
+        .then(|| schema_popup_area(layout[0]));
+    app.set_file_info_area(file_info_area.unwrap_or_default());
+    if let Some(area) = file_info_area {
+        render_file_info_widget(frame, area, app);
     }
 
     render_status(frame, layout[1], app.status());
     render_help(frame, layout[2], app.screen(), app.focus());
 }
 
-/// Draw the file info popup sized to its text, centered over `area`.
-fn render_file_info_widget(frame: &mut Frame<'_>, area: Rect, text: &str) {
-    let width = text.lines().map(UnicodeWidthStr::width).max().unwrap_or(0) + 4;
-    let height = text.lines().count() + 2;
-    let width = u16::try_from(width).unwrap_or(u16::MAX).min(area.width);
-    let height = u16::try_from(height).unwrap_or(u16::MAX).min(area.height);
-    let popup = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height - height) / 2,
-        width,
-        height,
-    );
-
-    frame.render_widget(Clear, popup);
-    let paragraph = Paragraph::new(text)
-        .block(Block::default().title("File info").borders(Borders::ALL))
-        .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, popup);
+fn render_file_info_widget(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let title = if app.focus() == MessageFocus::FileInfo {
+        "File info [focus]"
+    } else {
+        "File info"
+    };
+    frame.render_widget(Clear, area);
+    let paragraph = Paragraph::new(app.file_info_text())
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .scroll((app.file_info_scroll(), app.file_info_hscroll()));
+    frame.render_widget(paragraph, area);
 }
 
 fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -271,15 +267,15 @@ fn render_help(frame: &mut Frame<'_>, area: Rect, screen: Screen, focus: Message
         Screen::Topics => Line::from(vec![
             Span::raw(format!(
                 "Focus: {}  ",
-                if focus == MessageFocus::Schema {
-                    "schema"
-                } else {
-                    "topics"
+                match focus {
+                    MessageFocus::Schema => "schema",
+                    MessageFocus::FileInfo => "file info",
+                    MessageFocus::List | MessageFocus::Detail => "topics",
                 }
             )),
             Span::raw("Tab switch  "),
             Span::raw("Up/Down j/k move  "),
-            Span::raw("Left/Right h/l schema x-scroll  "),
+            Span::raw("Left/Right h/l popup x-scroll  "),
             Span::raw("PageUp/PageDown page  "),
             Span::raw("Home/End jump  "),
             Span::raw("s toggle schema  "),
@@ -292,6 +288,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect, screen: Screen, focus: Message
                 MessageFocus::List => "list",
                 MessageFocus::Detail => "detail",
                 MessageFocus::Schema => "schema",
+                MessageFocus::FileInfo => "file info",
             };
             Line::from(vec![
                 Span::raw(format!("Focus: {focus_text}  ")),
