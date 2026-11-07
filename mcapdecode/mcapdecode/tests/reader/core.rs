@@ -613,6 +613,51 @@ fn for_each_decoded_message_propagates_callback_error() {
 }
 
 #[test]
+fn parallel_reader_callback_can_use_rayon() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_parallel(true)
+        .build();
+    for topics in [&["/first"][..], &["/first", "/second"][..]] {
+        let mut calls = 0;
+        reader
+            .for_each_topic_decoded_message(fixture.path(), topics, |_, message| {
+                let (log_time, publish_time) =
+                    rayon::join(|| message.log_time, || message.publish_time);
+                assert_eq!(log_time, publish_time);
+                calls += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(calls, 1024 * topics.len());
+    }
+}
+
+#[test]
+fn parallel_reader_stops_after_callback_error_across_windows() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(TestJsonDecoder))
+        .with_parallel(true)
+        .build();
+    for topics in [&["/first"][..], &["/first", "/second"][..]] {
+        let mut calls = 0;
+        let error = reader
+            .for_each_topic_decoded_message(fixture.path(), topics, |_, _| {
+                calls += 1;
+                if calls == 500 {
+                    return Err("stop reading".into());
+                }
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(matches!(error, McapReaderError::Callback(_)));
+        assert_eq!(calls, 500);
+    }
+}
+
+#[test]
 fn for_each_decoded_message_parallel_stops_after_callback_error() {
     let fixture = write_chunked_fixture(
         "parallel-callback-stop",
