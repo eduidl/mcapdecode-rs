@@ -1,7 +1,7 @@
 //! Message selection, chunk traversal and ordered delivery, independent of message decoding.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     io,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -34,7 +34,7 @@ pub(crate) fn for_each_selected_message<T: Send>(
             callback,
         );
     }
-    let indexes: HashMap<_, _> = channel_ids
+    let indexes: BTreeMap<_, _> = channel_ids
         .iter()
         .enumerate()
         .map(|(i, &id)| (id, i))
