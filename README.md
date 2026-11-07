@@ -30,51 +30,61 @@ The default features enable the protobuf and ROS 2 decoders. See
 The `rawjson` decoder does not parse messages or read the schema. Each message
 is exposed as a struct with a single `json` string field.
 
-## Usage
+## Decoded Message Usage
 
 Reads require an MCAP summary. When chunk indexes are present, reads use them to
 select chunks; otherwise, they scan all messages sequentially. Chunks without
 message indexes are scanned to find the requested topics. When chunk indexes are
 present, messages outside indexed chunks are not read.
 
-### Decoded Messages
-
-```rust
-use std::path::Path;
+```rust,no_run
 use mcapdecode::McapReader;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let reader = McapReader::builder().with_default_decoders().build();
-
-    reader.for_each_decoded_message(Path::new("sample.mcap"), "/topic/name", |message| {
-        println!("publish_time={}", message.publish_time);
-        Ok(())
-    })?;
-
+    let reader = McapReader::open("sample.mcap")?;
+    reader
+        .read()
+        .topic("/topic/name")
+        .decoded()
+        .for_each(|channel, message| {
+            println!("{}: publish_time={}", channel.topic, message.publish_time);
+            Ok(())
+        })?;
     Ok(())
 }
 ```
 
-### Accessing Fields
+The opened reader can be reused for multiple reads. Omit `topics` to select all
+channels. Decoded and Arrow reads fail if a selected channel cannot be decoded.
+Use `topics` or `channels` to select supported channels, for example
+`channels([id1, id2])`. Each callback receives `ChannelInfo`, including its ID,
+topic, and optional schema name. Custom decoders can be configured with `McapReader::builder()` and opened
+with `open_file()`.
 
 Decoded structs carry a shared schema, so fields can be accessed by name without
 passing a separate schema:
 
 ```rust,no_run
-use std::path::Path;
-use mcapdecode::{McapReader, ReadOptions};
+use mcapdecode::McapReader;
 
-let reader = McapReader::builder().with_default_decoders().build();
-reader.with_prepared_topic(Path::new("sample.mcap"), "/topic/name", |topic| {
-    topic.for_each_decoded_message_with_options(&ReadOptions::default(), |message| {
-        let x = message.value
-            .get("poses")?.get(0)?.get("position")?.get("x")?
-            .try_widen_f64()?;
-        println!("x={x}");
-        Ok(())
-    })
-})?;
-# Ok::<(), Box<dyn std::error::Error>>(())
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let reader = McapReader::open("sample.mcap")?;
+    reader
+        .read()
+        .topic("/topic/name")
+        .decoded()
+        .for_each(|_, message| {
+            let x = message.value
+                .get("poses")?
+                .get(0)?
+                .get("position")?
+                .get("x")?
+                .try_widen_f64()?;
+            println!("x={x}");
+            Ok(())
+        })?;
+    Ok(())
+}
 ```
 
 Name lookup is linear in the number of fields. Lists and arrays also expose
@@ -87,48 +97,52 @@ and `try_u64()` retain their null behavior.
 For example, `try_widen_i64()` accepts `U32` but rejects `U64`, even for zero;
 `try_widen_u64()` accepts unsigned integers but rejects all signed integers.
 
-### Multiple Topics
+## Multiple Topics
 
 Read multiple topics in one pass, sharing chunk reads and decompression. The
-callback receives the topic name, and repeated topic names are read only once:
+callback receives channel information, and repeated topic names are read only once:
 
 ```rust
-reader.for_each_topic_decoded_message(
-    Path::new("sample.mcap"),
-    &["/localization/pose", "/localization/status"],
-    |topic, message| {
-        println!("{topic}: {}", message.publish_time);
+reader
+    .read()
+    .topics(["/localization/pose", "/localization/status"])
+    .decoded()
+    .for_each(|topic, message| {
+        println!("{}: {}", topic.topic, message.publish_time);
         Ok(())
-    },
-)?;
+    })?;
 ```
 
-Use `for_each_topic_decoded_message_with_options` for log-time filtering and
-parallel read options.
+Use `options` to filter messages by `log_time` and configure parallel reads. The same selection and
+options apply to `raw()`, `decoded()`, and, with the `arrow` feature, `arrow()`.
 
-### Arrow Output
-
-With the `arrow` feature enabled, the same reads can produce Arrow
-`RecordBatch`es:
+## Arrow Usage
 
 ```rust
-use std::path::Path;
 use mcapdecode::McapReader;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let reader = McapReader::builder().with_default_decoders().build();
+    let reader = McapReader::open("sample.mcap")?;
 
-    reader.for_each_record_batch(Path::new("sample.mcap"), "/topic/name", |batch| {
-        println!("rows={}, cols={}", batch.num_rows(), batch.num_columns());
-        Ok(())
-    })?;
+    reader
+        .read()
+        .topic("/topic/name")
+        .arrow()
+        .for_each(|_, batch| {
+            println!("rows={}, cols={}", batch.num_rows(), batch.num_columns());
+            Ok(())
+        })?;
 
     Ok(())
 }
 ```
 
-`for_each_topic_record_batch_with_options` reads multiple topics the same way as
-`for_each_topic_decoded_message_with_options`.
+Enable the `arrow` feature for that API:
+
+```toml
+[dependencies]
+mcapdecode = { version = "0.10.0", features = ["arrow"] }
+```
 
 ## Feature Flags
 

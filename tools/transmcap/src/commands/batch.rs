@@ -12,7 +12,7 @@ use clap::{Args, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use mcapdecode::{
     McapReader, McapReaderError, MessageBatchSchema, MetadataColumns, MetadataTimestampFormat,
-    NonFiniteFloats, RecordBatchOptions,
+    NonFiniteFloats,
     arrow::{
         ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, flatten_record_batch,
         project_record_batch,
@@ -255,7 +255,8 @@ pub(super) fn run_conversion(
     let reader = McapReader::builder()
         .with_default_decoders()
         .with_parallel(parallel)
-        .build();
+        .build()
+        .open_file(input)?;
     let mut names = HashSet::new();
     let mut outputs = HashSet::new();
     let mut topics = Vec::new();
@@ -272,19 +273,12 @@ pub(super) fn run_conversion(
         } else if matches!(spec.format, OutputFormat::Parquet) {
             bail!("Parquet output requires -o <file>");
         }
-        match reader.message_count(input, &spec.name) {
+        match reader.message_count(&spec.name) {
             Ok(count) => total += count,
             Err(McapReaderError::StatsNotAvailable) if config_path.is_some() => has_stats = false,
             Err(error) => return Err(error.into()),
         }
-        let schema = reader.topic_batch_schema(
-            input,
-            &spec.name,
-            &RecordBatchOptions {
-                metadata: spec.metadata,
-                ..Default::default()
-            },
-        )?;
+        let schema = reader.topic_batch_schema(&spec.name, &spec.metadata)?;
         let topic = Topic {
             name: spec.name,
             output: spec.output,
@@ -332,15 +326,19 @@ pub(super) fn run_conversion(
         .collect();
     let names: Vec<_> = topics.iter().map(|t| t.name.clone()).collect();
     let names: Vec<_> = names.iter().map(String::as_str).collect();
-    reader.for_each_topic_decoded_message(input, &names, |name, message| {
-        let topic = &mut topics[index[name]];
-        topic.rows.push(message);
-        if topic.rows.len() >= 1024 {
-            topic.flush()?;
-            pb.inc(1024);
-        }
-        Ok(())
-    })?;
+    reader
+        .read()
+        .topics(&names)
+        .decoded()
+        .for_each(|channel, message| {
+            let topic = &mut topics[index[channel.topic.as_str()]];
+            topic.rows.push(message);
+            if topic.rows.len() >= 1024 {
+                topic.flush()?;
+                pb.inc(1024);
+            }
+            Ok(())
+        })?;
     for topic in &mut topics {
         if topic.rows.is_empty() && matches!(topic.format, OutputFormat::Parquet) && !topic.emitted
         {

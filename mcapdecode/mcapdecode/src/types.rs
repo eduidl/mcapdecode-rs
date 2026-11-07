@@ -75,7 +75,7 @@ impl TimeRange {
     }
 }
 
-/// Options shared by filtered decoded-message and RecordBatch reads.
+/// Options shared by raw, decoded-message and RecordBatch reads.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReadOptions {
     /// Restrict messages to this `log_time` range.

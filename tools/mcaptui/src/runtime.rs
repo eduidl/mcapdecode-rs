@@ -1,12 +1,9 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use crossterm::event::{self, Event};
-use mcapdecode::McapReader;
+use mcapdecode::{McapReader, OpenedMcap};
 
 use crate::{
     app::{self, App, AppRequest, AppUpdate},
@@ -50,10 +47,8 @@ struct FrameProcessingResult {
 
 struct RuntimeContext<'a> {
     loader: &'a mut Option<TopicLoader>,
-    reader: &'a McapReader,
-    input: &'a Path,
+    reader: &'a Arc<OpenedMcap>,
     schema_cache: &'a mut SchemaCache,
-    parallel: bool,
 }
 
 pub(crate) fn main() -> Result<()> {
@@ -61,17 +56,15 @@ pub(crate) fn main() -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    let reader = McapReader::builder()
-        .with_default_decoders()
-        .with_parallel(cli.parallel)
-        .build();
-    let topics = reader
-        .list_topics(&cli.input)
-        .with_context(|| format!("failed to read topics from {}", cli.input.display()))?;
-    let channels = reader
-        .list_channels(&cli.input)
-        .with_context(|| format!("failed to read channels from {}", cli.input.display()))?;
-    let mut app = App::with_channels(topics, &channels);
+    let reader = Arc::new(
+        McapReader::builder()
+            .with_default_decoders()
+            .with_parallel(cli.parallel)
+            .build()
+            .open_file(&cli.input)
+            .with_context(|| format!("failed to open {}", cli.input.display()))?,
+    );
+    let mut app = App::with_channels(reader.list_topics(), &reader.list_channels());
     let mut loader = None;
     let mut schema_cache = SchemaCache::default();
 
@@ -91,9 +84,7 @@ fn run(cli: Cli) -> Result<()> {
         RuntimeContext {
             loader: &mut loader,
             reader: &reader,
-            input: &cli.input,
             schema_cache: &mut schema_cache,
-            parallel: cli.parallel,
         }
         .apply_update(update, &mut app, &mut FrameProcessingResult::default())?;
         let selected = app.selected_topic().context("selected topic missing")?;
@@ -111,7 +102,7 @@ fn run(cli: Cli) -> Result<()> {
             .map(|row| (row.topic().to_string(), row.channel.message_count))
             .context("selected topic missing")?;
         app.start_loading(selected.0, selected.1);
-        start_topic_loader(&mut app, &mut loader, &cli.input, cli.parallel)?;
+        start_topic_loader(&mut app, &mut loader, &reader)?;
     }
 
     let mut terminal = terminal::init_terminal()?;
@@ -142,9 +133,7 @@ fn run(cli: Cli) -> Result<()> {
             &mut app,
             &mut loader,
             &reader,
-            &cli.input,
             &mut schema_cache,
-            cli.parallel,
             input_batch.events,
         )?;
 
@@ -185,10 +174,8 @@ fn collect_input_events(timeout: Duration) -> Result<FrameInputBatch> {
 fn process_input_events(
     app: &mut App,
     loader: &mut Option<TopicLoader>,
-    reader: &McapReader,
-    input: &Path,
+    reader: &Arc<OpenedMcap>,
     schema_cache: &mut SchemaCache,
-    parallel: bool,
     events: Vec<Event>,
 ) -> Result<FrameProcessingResult> {
     let mut result = FrameProcessingResult::default();
@@ -196,9 +183,7 @@ fn process_input_events(
     let mut runtime = RuntimeContext {
         loader,
         reader,
-        input,
         schema_cache,
-        parallel,
     };
 
     for event in events {
@@ -333,13 +318,12 @@ fn merge_navigation(
 fn start_topic_loader(
     app: &mut App,
     loader: &mut Option<TopicLoader>,
-    input: &Path,
-    parallel: bool,
+    reader: &Arc<OpenedMcap>,
 ) -> Result<()> {
     loader::cancel_loader(loader);
 
     let row = app.selected_topic().context("no topic selected")?.clone();
-    *loader = Some(TopicLoader::spawn(input.to_path_buf(), row, parallel));
+    *loader = Some(TopicLoader::spawn(Arc::clone(reader), row));
     Ok(())
 }
 
@@ -409,8 +393,7 @@ impl RuntimeContext<'_> {
                 Ok(false)
             }
             Some(AppRequest::StartTopicLoad) => {
-                if let Err(error) = start_topic_loader(app, self.loader, self.input, self.parallel)
-                {
+                if let Err(error) = start_topic_loader(app, self.loader, self.reader) {
                     app.set_status(error.to_string());
                     result.state_changed = true;
                 }
@@ -418,7 +401,7 @@ impl RuntimeContext<'_> {
             }
             Some(AppRequest::LoadSelectedSchema) => {
                 if let Err(error) =
-                    schema::open_selected_schema(app, self.reader, self.input, self.schema_cache)
+                    schema::open_selected_schema(app, self.reader, self.schema_cache)
                 {
                     app.clear_schema_view();
                     app.set_status(error.to_string());

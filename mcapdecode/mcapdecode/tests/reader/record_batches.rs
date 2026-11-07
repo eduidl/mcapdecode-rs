@@ -1,8 +1,128 @@
 use arrow::array::Int64Array;
-use mcapdecode::{MetadataColumns, RecordBatchOptions};
+use mcapdecode::{ArrowRead, MetadataColumns};
 use memmap2::Mmap;
 
 use super::*;
+
+#[test]
+fn raw_decoded_and_arrow_use_the_same_selection() {
+    use arrow::array::TimestampNanosecondArray;
+
+    for indexes in [false, true] {
+        let fixture = multi_topic_fixture_with_indexes(indexes);
+        for parallel in [false, true] {
+            let reader = McapReader::builder()
+                .with_decoder(Box::new(SchemaNamedFieldDecoder))
+                .with_parallel(parallel)
+                .build()
+                .open_file(fixture.path())
+                .unwrap();
+            for (start, end) in [(3, 9), (5, 9), (4, 6), (3, 3)] {
+                let options = ReadOptions {
+                    time_range: Some(TimeRange {
+                        start: Some(start),
+                        end: Some(end),
+                    }),
+                    ..Default::default()
+                };
+                let mut raw = BTreeMap::<u16, Vec<u64>>::new();
+                let mut decoded = BTreeMap::<u16, Vec<u64>>::new();
+                let mut batches = BTreeMap::<u16, Vec<u64>>::new();
+                reader
+                    .read()
+                    .topics(["/first", "/second"])
+                    .options(options.clone())
+                    .raw()
+                    .for_each(|channel, message| {
+                        raw.entry(channel.id).or_default().push(message.log_time);
+                        Ok(())
+                    })
+                    .unwrap();
+                reader
+                    .read()
+                    .topics(["/first", "/second"])
+                    .options(options.clone())
+                    .decoded()
+                    .for_each(|channel, message| {
+                        decoded
+                            .entry(channel.id)
+                            .or_default()
+                            .push(message.log_time);
+                        Ok(())
+                    })
+                    .unwrap();
+                reader
+                    .read()
+                    .topics(["/first", "/second"])
+                    .options(options)
+                    .arrow()
+                    .batch_size(2)
+                    .for_each(|channel, batch| {
+                        let times = batch
+                            .column(0)
+                            .as_any()
+                            .downcast_ref::<TimestampNanosecondArray>()
+                            .unwrap();
+                        batches
+                            .entry(channel.id)
+                            .or_default()
+                            .extend(times.values().iter().map(|&time| time as u64));
+                        Ok(())
+                    })
+                    .unwrap();
+                assert_eq!(
+                    raw, decoded,
+                    "indexes={indexes}, parallel={parallel}, start={start}, end={end}"
+                );
+                assert_eq!(
+                    raw, batches,
+                    "indexes={indexes}, parallel={parallel}, start={start}, end={end}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn opened_arrow_empty_selection_and_unsupported_channel() {
+    let reader = McapReader::open(fixture_path("with_summary.mcap")).unwrap();
+    reader
+        .read()
+        .topics([] as [&str; 0])
+        .arrow()
+        .for_each(|_, _| panic!("empty selection"))
+        .unwrap();
+    assert!(matches!(
+        reader.read().arrow().for_each(|_, _| Ok(())),
+        Err(McapReaderError::SchemaNotAvailable)
+    ));
+}
+
+#[test]
+fn opened_reader_arrow_distinguishes_channels_with_the_same_topic() {
+    let fixture = write_split_topic_fixture("opened-arrow-channels");
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .build()
+        .open_file(fixture.path())
+        .unwrap();
+    let channels = reader.list_channels();
+    let mut rows = BTreeMap::new();
+    reader
+        .read()
+        .channels([channels[0].id, channels[1].id])
+        .arrow()
+        .for_each(|channel, batch| {
+            assert_eq!(channel.topic, "/split");
+            assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
+            rows.insert(channel.id, batch.num_rows());
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[&channels[0].id], 2);
+    assert_eq!(rows[&channels[1].id], 2);
+}
 
 fn chunk_index_count(path: &Path) -> usize {
     let file = File::open(path).unwrap();
@@ -11,54 +131,35 @@ fn chunk_index_count(path: &Path) -> usize {
     summary.chunk_indexes.len()
 }
 
-fn batch_options(batch_size: usize) -> RecordBatchOptions {
-    RecordBatchOptions {
-        batch_size,
-        ..RecordBatchOptions::default()
-    }
-}
-
-fn collect_i64_values(
-    reader: &McapReader,
-    path: &Path,
-    topic: &str,
-    options: &RecordBatchOptions,
-) -> Vec<i64> {
+fn collect_i64_values(read: ArrowRead<'_>) -> Vec<i64> {
     let mut values = Vec::new();
-    reader
-        .for_each_record_batch_with_options(path, topic, options, |batch| {
-            let value_idx = batch
-                .schema()
-                .index_of("value")
-                .expect("missing 'value' column");
-            let values_col = batch
-                .column(value_idx)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .expect("expected Int64Array for 'value' column");
+    read.for_each(|_, batch| {
+        let value_idx = batch
+            .schema()
+            .index_of("value")
+            .expect("missing 'value' column");
+        let values_col = batch
+            .column(value_idx)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .expect("expected Int64Array for 'value' column");
 
-            for i in 0..values_col.len() {
-                values.push(values_col.value(i));
-            }
-            Ok(())
-        })
-        .unwrap();
+        for i in 0..values_col.len() {
+            values.push(values_col.value(i));
+        }
+        Ok(())
+    })
+    .unwrap();
     values
 }
 
-fn collect_batch_rows(
-    reader: &McapReader,
-    path: &Path,
-    topic: &str,
-    options: &RecordBatchOptions,
-) -> Vec<usize> {
+fn collect_batch_rows(read: ArrowRead<'_>) -> Vec<usize> {
     let mut batch_rows = Vec::new();
-    reader
-        .for_each_record_batch_with_options(path, topic, options, |batch| {
-            batch_rows.push(batch.num_rows());
-            Ok(())
-        })
-        .unwrap();
+    read.for_each(|_, batch| {
+        batch_rows.push(batch.num_rows());
+        Ok(())
+    })
+    .unwrap();
     batch_rows
 }
 
@@ -114,60 +215,77 @@ impl TopicDecoder for MismatchedJsonTopicDecoder {
 }
 
 #[test]
-fn for_each_record_batch_without_decoder_returns_error() {
+fn arrow_read_without_decoder_returns_error() {
     let reader = McapReader::new();
     let err = reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/decoded", |_batch| {
-            Ok(())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .arrow()
+        .for_each(|_, _batch| Ok(()))
         .unwrap_err();
     assert!(matches!(err, McapReaderError::NoDecoder { .. }));
 }
 
 #[test]
-fn for_each_record_batch_errors_when_decoder_is_missing_contains_message() {
+fn arrow_read_errors_when_decoder_is_missing_contains_message() {
     let reader = McapReader::builder().build();
 
     let err = reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/decoded", |_batch| {
-            Ok(())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .arrow()
+        .for_each(|_, _batch| Ok(()))
         .unwrap_err();
 
     assert!(err.to_string().contains("no decoder registered"));
 }
 
 #[test]
-fn for_each_record_batch_unknown_topic_returns_error() {
+fn arrow_read_unknown_topic_returns_error() {
     let mut reader = McapReader::new();
     reader.register_decoder(Box::new(TestJsonDecoder));
 
     let err = reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/unknown", |_batch| {
-            Ok(())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/unknown")
+        .arrow()
+        .for_each(|_, _batch| Ok(()))
         .unwrap_err();
     assert!(matches!(err, McapReaderError::TopicNotFound));
 }
 
 #[test]
-fn for_each_record_batch_errors_when_schema_is_missing() {
+fn arrow_read_errors_when_schema_is_missing() {
     let mut reader = McapReader::new();
     reader.register_decoder(Box::new(TestJsonDecoder));
     let err = reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/raw", |_batch| Ok(()))
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/raw")
+        .arrow()
+        .for_each(|_, _batch| Ok(()))
         .unwrap_err();
     assert!(matches!(err, McapReaderError::SchemaNotAvailable));
 }
 
 #[test]
-fn for_each_record_batch_propagates_callback_error() {
+fn arrow_read_propagates_callback_error() {
     let mut reader = McapReader::new();
     reader.register_decoder(Box::new(TestJsonDecoder));
     let err = reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/decoded", |_batch| {
-            Err("callback failed".into())
-        })
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .arrow()
+        .for_each(|_, _batch| Err("callback failed".into()))
         .unwrap_err();
     let McapReaderError::Callback(inner) = &err else {
         panic!("expected a callback error, got {err:?}");
@@ -182,60 +300,62 @@ fn for_each_record_batch_propagates_callback_error() {
 }
 
 #[test]
-fn for_each_record_batch_reports_arrow_conversion_errors_separately() {
+fn arrow_read_reports_arrow_conversion_errors_separately() {
     let fixture = write_chunked_fixture("arrow-conversion-error", &[br#"{"value":1}"#]);
     let reader = McapReader::builder()
         .with_decoder(Box::new(MismatchedJsonDecoder))
         .build();
 
     let err = reader
-        .for_each_record_batch(fixture.path(), "/decoded", |_batch| Ok(()))
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .arrow()
+        .for_each(|_, _batch| Ok(()))
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::ArrowConvert(_)));
 }
 
 #[test]
-fn for_each_record_batch_emits_batches_by_batch_size() {
+fn arrow_read_emits_batches_by_batch_size() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
 
-    let batch_rows = collect_batch_rows(
-        &reader,
-        &fixture_path("with_summary.mcap"),
-        "/decoded",
-        &batch_options(1),
-    );
+    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(1));
 
     assert_eq!(batch_rows, vec![1, 1]);
 }
 
 #[test]
-fn for_each_record_batch_treats_zero_batch_size_as_one() {
+fn arrow_read_treats_zero_batch_size_as_one() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
 
-    let batch_rows = collect_batch_rows(
-        &reader,
-        &fixture_path("with_summary.mcap"),
-        "/decoded",
-        &batch_options(0),
-    );
+    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(0));
 
     assert_eq!(batch_rows, vec![1, 1]);
 }
 
 #[test]
-fn for_each_record_batch_defaults_to_a_single_batch() {
+fn arrow_read_defaults_to_a_single_batch() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
 
     let mut batch_rows = Vec::new();
     reader
-        .for_each_record_batch(&fixture_path("with_summary.mcap"), "/decoded", |batch| {
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .arrow()
+        .for_each(|_, batch| {
             batch_rows.push(batch.num_rows());
             Ok(())
         })
@@ -245,34 +365,31 @@ fn for_each_record_batch_defaults_to_a_single_batch() {
 }
 
 #[test]
-fn for_each_record_batch_flushes_final_partial_batch() {
+fn arrow_read_flushes_final_partial_batch() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
 
-    let batch_rows = collect_batch_rows(
-        &reader,
-        &fixture_path("with_summary.mcap"),
-        "/decoded",
-        &batch_options(3),
-    );
+    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(3));
 
     assert_eq!(batch_rows, vec![2]);
 }
 
 #[test]
-fn for_each_record_batch_propagates_callback_error_with_builder_decoder() {
+fn arrow_read_propagates_callback_error_with_builder_decoder() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
 
     let err = reader
-        .for_each_record_batch_with_options(
-            &fixture_path("with_summary.mcap"),
-            "/decoded",
-            &batch_options(1),
-            |_batch| Err("callback failed".into()),
-        )
+        .open_file(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .arrow()
+        .batch_size(1)
+        .for_each(|_, _batch| Err("callback failed".into()))
         .unwrap_err();
 
     assert!(err.to_string().contains("callback failed"));
@@ -283,17 +400,13 @@ fn register_shared_decoder_decodes_messages() {
     let mut reader = McapReader::new();
     reader.register_shared_decoder(Arc::new(TestJsonDecoder));
 
-    let values = collect_i64_values(
-        &reader,
-        &fixture_path("with_summary.mcap"),
-        "/decoded",
-        &RecordBatchOptions::default(),
-    );
+    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let values = collect_i64_values(file.read().topic("/decoded").arrow());
     assert_eq!(values, vec![1, 2]);
 }
 
 #[test]
-fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
+fn arrow_read_parallel_matches_sequential_for_multi_chunk_fixture() {
     let fixture = write_chunked_fixture(
         "parallel-multi-chunk",
         &[
@@ -314,20 +427,24 @@ fn for_each_record_batch_parallel_matches_sequential_for_multi_chunk_fixture() {
         .with_decoder(Box::new(TestJsonDecoder))
         .with_parallel(false)
         .build();
-    let options = batch_options(2);
+    let parallel = parallel_reader.open_file(fixture.path()).unwrap();
+    let sequential = sequential_reader.open_file(fixture.path()).unwrap();
+    fn read(file: &mcapdecode::OpenedMcap) -> ArrowRead<'_> {
+        file.read().topic("/decoded").arrow().batch_size(2)
+    }
 
     assert_eq!(
-        collect_i64_values(&parallel_reader, fixture.path(), "/decoded", &options),
-        collect_i64_values(&sequential_reader, fixture.path(), "/decoded", &options)
+        collect_i64_values(read(&parallel)),
+        collect_i64_values(read(&sequential))
     );
     assert_eq!(
-        collect_batch_rows(&parallel_reader, fixture.path(), "/decoded", &options),
-        collect_batch_rows(&sequential_reader, fixture.path(), "/decoded", &options)
+        collect_batch_rows(read(&parallel)),
+        collect_batch_rows(read(&sequential))
     );
 }
 
 #[test]
-fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixture() {
+fn arrow_read_parallel_propagates_decode_error_for_multi_chunk_fixture() {
     let fixture = write_chunked_fixture(
         "parallel-decode-error",
         &[br#"{"value":1}"#, b"invalid", br#"{"value":3}"#],
@@ -340,7 +457,12 @@ fn for_each_record_batch_parallel_propagates_decode_error_for_multi_chunk_fixtur
         .build();
 
     let err = reader
-        .for_each_record_batch(fixture.path(), "/decoded", |_batch| Ok(()))
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .arrow()
+        .for_each(|_, _batch| Ok(()))
         .unwrap_err();
 
     assert!(matches!(
@@ -355,31 +477,24 @@ fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
     // `topic_batch_schema`. If the two ever diverge the mismatch only shows up
     // at run time deep inside the consumer, so pin it here.
     let fixture = write_chunked_fixture("batch-schema-agreement", &[br#"{"value":1}"#]);
-    let reader = McapReader::builder()
+    let file = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+        .build()
+        .open_file(fixture.path())
+        .unwrap();
 
     for metadata in [
         MetadataColumns::default(),
         MetadataColumns::with_prefix("@"),
     ] {
-        let options = RecordBatchOptions {
-            metadata: metadata.clone(),
-            ..RecordBatchOptions::default()
-        };
-        let declared = reader
-            .topic_batch_schema(fixture.path(), "/decoded", &options)
-            .unwrap();
-        let prepared_declared = reader
-            .with_prepared_topic(fixture.path(), "/decoded", |prepared| {
-                prepared.batch_schema(&options)
-            })
-            .unwrap();
-        assert_eq!(prepared_declared.schema(), declared.schema());
+        let declared = file.topic_batch_schema("/decoded", &metadata).unwrap();
 
         let mut emitted = Vec::new();
-        reader
-            .for_each_record_batch_with_options(fixture.path(), "/decoded", &options, |batch| {
+        file.read()
+            .topic("/decoded")
+            .arrow()
+            .metadata(metadata.clone())
+            .for_each(|_, batch| {
                 emitted.push(batch.schema());
                 Ok(())
             })
@@ -404,12 +519,14 @@ fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
 #[test]
 fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
     let fixture = write_chunked_fixture("batch-schema-collision", &[br#"{"value":1}"#]);
-    let reader = McapReader::builder()
+    let file = McapReader::builder()
         .with_decoder(Box::new(CollidingJsonDecoder))
-        .build();
+        .build()
+        .open_file(fixture.path())
+        .unwrap();
 
-    let err = reader
-        .topic_batch_schema(fixture.path(), "/decoded", &RecordBatchOptions::default())
+    let err = file
+        .topic_batch_schema("/decoded", &MetadataColumns::default())
         .unwrap_err();
     assert!(matches!(
         err,
@@ -419,12 +536,8 @@ fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
     ));
 
     // A prefix moves the metadata columns out of the payload's way.
-    let options = RecordBatchOptions {
-        metadata: MetadataColumns::with_prefix("_"),
-        ..RecordBatchOptions::default()
-    };
-    let schema = reader
-        .topic_batch_schema(fixture.path(), "/decoded", &options)
+    let schema = file
+        .topic_batch_schema("/decoded", &MetadataColumns::with_prefix("_"))
         .unwrap();
     assert_eq!(schema.schema().field(0).name(), "_log_time");
     assert_eq!(schema.schema().field(2).name(), "log_time");
@@ -447,38 +560,53 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
                 }),
                 ..ReadOptions::default()
             },
+            ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(3),
+                    end: Some(8),
+                }),
+                ..ReadOptions::default()
+            },
+            ReadOptions {
+                time_range: Some(TimeRange {
+                    start: Some(0),
+                    end: Some(0),
+                }),
+                ..ReadOptions::default()
+            },
         ] {
-            let options = RecordBatchOptions {
-                batch_size: 3,
-                read_options,
-                ..RecordBatchOptions::default()
-            };
+            let file = reader.open_file(fixture.path()).unwrap();
             let mut actual = BTreeMap::<String, Vec<i64>>::new();
-            reader
-                .for_each_topic_record_batch_with_options(
-                    fixture.path(),
-                    &["/first", "/second", "/first", "/empty", "/second"],
-                    &options,
-                    |topic, batch| {
-                        let index = batch.schema().index_of("value").unwrap();
-                        let array = batch
-                            .column(index)
-                            .as_any()
-                            .downcast_ref::<Int64Array>()
-                            .unwrap();
-                        assert!(batch.num_rows() <= 3);
-                        actual
-                            .entry(topic.into())
-                            .or_default()
-                            .extend(array.values());
-                        Ok(())
-                    },
-                )
+            file.read()
+                .topics(["/first", "/second", "/first", "/empty", "/second"])
+                .options(read_options.clone())
+                .arrow()
+                .batch_size(3)
+                .for_each(|channel, batch| {
+                    let index = batch.schema().index_of("value").unwrap();
+                    let array = batch
+                        .column(index)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap();
+                    assert!(batch.num_rows() <= 3);
+                    actual
+                        .entry(channel.topic.clone())
+                        .or_default()
+                        .extend(array.values());
+                    Ok(())
+                })
                 .unwrap();
             for topic in ["/first", "/second", "/empty"] {
                 assert_eq!(
                     actual.get(topic).cloned().unwrap_or_default(),
-                    collect_i64_values(&reader, fixture.path(), topic, &options)
+                    collect_i64_values(
+                        file.read()
+                            .topic(topic)
+                            .options(read_options.clone())
+                            .arrow()
+                            .batch_size(3)
+                    )
                 );
             }
         }
@@ -491,34 +619,35 @@ fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure()
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
-    let options = batch_options(1);
     {
         let mut called = false;
         let err = reader
-            .for_each_topic_record_batch_with_options(
-                fixture.path(),
-                &["/first", "/unknown"],
-                &options,
-                |_, _| {
-                    called = true;
-                    Ok(())
-                },
-            )
+            .open_file(fixture.path())
+            .unwrap()
+            .read()
+            .topics(["/first", "/unknown"])
+            .arrow()
+            .batch_size(1)
+            .for_each(|_, _| {
+                called = true;
+                Ok(())
+            })
             .unwrap_err();
         assert!(!called);
         assert!(matches!(err, McapReaderError::TopicNotFound));
     }
     let mut calls = 0;
     let err = reader
-        .for_each_topic_record_batch_with_options(
-            fixture.path(),
-            &["/first", "/second"],
-            &options,
-            |_, _| {
-                calls += 1;
-                Err("stop writing".into())
-            },
-        )
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topics(["/first", "/second"])
+        .arrow()
+        .batch_size(1)
+        .for_each(|_, _| {
+            calls += 1;
+            Err("stop writing".into())
+        })
         .unwrap_err();
     assert_eq!(calls, 1);
     let McapReaderError::Callback(inner) = err else {
@@ -534,26 +663,25 @@ fn repeated_single_topic_emits_one_batch() {
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
         .build();
-    let options = RecordBatchOptions::default();
     let mut topics = Vec::new();
     reader
-        .for_each_topic_record_batch_with_options(
-            fixture.path(),
-            &["/first", "/first"],
-            &options,
-            |topic, batch| {
-                assert_eq!(batch.num_rows(), 1024);
-                let index = batch.schema().index_of("value").unwrap();
-                let values = batch
-                    .column(index)
-                    .as_any()
-                    .downcast_ref::<Int64Array>()
-                    .unwrap();
-                assert_eq!(values.values().as_ref(), &(0..1024).collect::<Vec<i64>>());
-                topics.push(topic.to_owned());
-                Ok(())
-            },
-        )
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topics(["/first", "/first"])
+        .arrow()
+        .for_each(|channel, batch| {
+            assert_eq!(batch.num_rows(), 1024);
+            let index = batch.schema().index_of("value").unwrap();
+            let values = batch
+                .column(index)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            assert_eq!(values.values().as_ref(), &(0..1024).collect::<Vec<i64>>());
+            topics.push(channel.topic.clone());
+            Ok(())
+        })
         .unwrap();
     assert_eq!(topics, ["/first"]);
 }
@@ -566,25 +694,73 @@ fn record_batch_reads_scan_chunks_without_message_indexes() {
         .build();
     let mut actual = BTreeMap::<String, Vec<i64>>::new();
     reader
-        .for_each_topic_record_batch_with_options(
-            fixture.path(),
-            &["/first", "/second"],
-            &batch_options(256),
-            |topic, batch| {
-                let index = batch.schema().index_of("value").unwrap();
-                let values = batch
-                    .column(index)
-                    .as_any()
-                    .downcast_ref::<Int64Array>()
-                    .unwrap();
-                actual
-                    .entry(topic.into())
-                    .or_default()
-                    .extend(values.values());
-                Ok(())
-            },
-        )
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topics(["/first", "/second"])
+        .arrow()
+        .batch_size(256)
+        .for_each(|channel, batch| {
+            let index = batch.schema().index_of("value").unwrap();
+            let values = batch
+                .column(index)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            actual
+                .entry(channel.topic.clone())
+                .or_default()
+                .extend(values.values());
+            Ok(())
+        })
         .unwrap();
     assert_eq!(actual["/first"], (0..1024).collect::<Vec<_>>());
     assert_eq!(actual["/second"], (100..1124).collect::<Vec<_>>());
+}
+
+#[test]
+fn opened_reader_arrow_uses_shared_filters() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_parallel(false)
+        .build()
+        .open_file(fixture.path())
+        .unwrap();
+    let mut rows = BTreeMap::<String, usize>::new();
+    reader
+        .read()
+        .topics(["/first", "/second"])
+        .options(ReadOptions {
+            time_range: Some(TimeRange {
+                start: Some(4),
+                end: Some(6),
+            }),
+            ..ReadOptions::default()
+        })
+        .arrow()
+        .batch_size(1)
+        .for_each(|topic, batch| {
+            assert_eq!(batch.num_rows(), 1);
+            *rows.entry(topic.topic.clone()).or_default() += batch.num_rows();
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(rows["/first"], 2);
+    assert_eq!(rows["/second"], 2);
+}
+
+#[test]
+fn opened_reader_exposes_arrow_schema() {
+    let fixture = multi_topic_fixture();
+    let reader = McapReader::builder()
+        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .build()
+        .open_file(fixture.path())
+        .unwrap();
+    assert!(
+        reader
+            .topic_batch_schema("/first", &MetadataColumns::default())
+            .is_ok()
+    );
 }

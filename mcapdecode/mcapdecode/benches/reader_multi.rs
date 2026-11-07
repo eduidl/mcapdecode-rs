@@ -22,9 +22,12 @@ fn bench_reader_multi(c: &mut Criterion) {
                     .with_default_decoders()
                     .with_parallel(parallel)
                     .build()
-                    .for_each_topic_decoded_message(&path, &[mcapbench::TOPIC, "/other"], |_, _| {
-                        Ok(())
-                    })
+                    .open_file(&path)
+                    .unwrap()
+                    .read()
+                    .topics([mcapbench::TOPIC, "/other"])
+                    .decoded()
+                    .for_each(|_, _| Ok(()))
                     .unwrap();
             })
         });

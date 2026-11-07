@@ -1,15 +1,13 @@
-//! Shared decoder configuration and file-independent reading implementation.
+//! Shared decoder configuration and decode-context resolution.
 
 use std::{collections::HashMap, sync::Arc};
 
 use mcapdecode_core::{EncodingKey, MessageDecoder, MessageEncoding, SchemaEncoding};
 
 use crate::{
-    RawMessage, TopicDecodeStatus, TopicSchema,
-    chunk_reader::for_each_selected_message,
+    TopicDecodeStatus, TopicSchema,
     decode::TopicDecodeContext,
     error::McapReaderError,
-    mcap_file::McapFile,
     summary::{get_channel_from_summary, get_schema_from_channel, topic_infos_from_summary},
 };
 
@@ -66,6 +64,7 @@ impl InternalReader {
 
         Ok(TopicDecodeContext {
             channel_id: channel.id,
+            #[cfg(feature = "arrow")]
             schema_name: schema.name.clone(),
             decoder: topic_decoder,
             field_defs,
@@ -108,26 +107,4 @@ impl InternalReader {
             field_defs: context.field_defs,
         })
     }
-}
-
-pub(crate) fn for_each_raw_message_impl(
-    file: &McapFile,
-    channel_id: u16,
-    parallel: bool,
-    mut callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-) -> Result<(), McapReaderError> {
-    for_each_selected_message(
-        file,
-        &[channel_id],
-        None,
-        parallel,
-        |_, message| {
-            Ok(RawMessage {
-                log_time: message.log_time,
-                publish_time: message.publish_time,
-                data: Arc::from(message.data.as_ref()),
-            })
-        },
-        &mut |_, message| callback(message).map_err(McapReaderError::Callback),
-    )
 }

@@ -2,7 +2,7 @@
 
 use std::{path::Path, sync::Arc};
 
-use mcapdecode_core::{DecodedMessage, FieldDefs, MessageDecoder};
+use mcapdecode_core::{FieldDefs, MessageDecoder};
 #[cfg(feature = "protobuf")]
 use mcapdecode_protobuf::ProtobufDecoder;
 #[cfg(feature = "rawjson")]
@@ -13,14 +13,11 @@ use mcapdecode_ros2idl::Ros2IdlDecoder;
 use mcapdecode_ros2msg::Ros2MsgDecoder;
 
 use crate::{
-    ChannelInfo, PreparedTopic, RawMessage, ReadOptions, TopicDecodeStatus, TopicInfo, TopicSchema,
+    ChannelInfo, TopicDecodeStatus, TopicInfo, TopicSchema,
     error::McapReaderError,
-    internal_reader::{InternalReader, for_each_raw_message_impl},
+    internal_reader::InternalReader,
     mcap_file::McapFile,
-    summary::{
-        channel_infos_from_summary, get_channel_by_id, get_channel_from_summary,
-        topic_infos_from_summary,
-    },
+    summary::{channel_infos_from_summary, get_channel_by_id, topic_infos_from_summary},
 };
 
 /// Reads an MCAP file and decodes messages using registered [`MessageDecoder`]s.
@@ -59,28 +56,6 @@ impl McapReader {
         self.inner.register_shared_decoder(decoder);
     }
 
-    /// Prepare one topic for a decoder-backed output adapter.
-    ///
-    /// The callback receives a handle that reuses this operation's mapped file,
-    /// summary, and decoder context. It cannot escape the callback.
-    pub fn with_prepared_topic<T>(
-        &self,
-        path: &Path,
-        topic: &str,
-        callback: impl FnOnce(&PreparedTopic<'_>) -> Result<T, McapReaderError>,
-    ) -> Result<T, McapReaderError> {
-        let file = McapFile::open(path)?;
-        let context = self
-            .inner
-            .resolve_topic_decode_context(&file.summary, topic)?;
-        callback(&PreparedTopic {
-            reader: &self.inner,
-            file,
-            context,
-            topic: topic.to_string(),
-        })
-    }
-
     /// List topics present in the MCAP summary section.
     pub fn list_topics(&self, path: &Path) -> Result<Vec<TopicInfo>, McapReaderError> {
         let file = McapFile::open(path)?;
@@ -101,92 +76,6 @@ impl McapReader {
     ) -> Result<Vec<TopicDecodeStatus>, McapReaderError> {
         let file = McapFile::open(path)?;
         self.inner.list_topics_with_decode_status(&file.summary)
-    }
-
-    /// Read decoded messages for a topic and emit them one-by-one to callback.
-    ///
-    /// Chunks in the MCAP file are decompressed in parallel using rayon.
-    /// The callback is still invoked sequentially in file order.
-    pub fn for_each_decoded_message(
-        &self,
-        path: &Path,
-        topic: &str,
-        callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        self.for_each_decoded_message_with_options(path, topic, &ReadOptions::default(), callback)
-    }
-
-    /// Read decoded messages subject to `options` and emit them one-by-one to callback.
-    pub fn for_each_decoded_message_with_options(
-        &self,
-        path: &Path,
-        topic: &str,
-        options: &ReadOptions,
-        mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        self.for_each_topic_decoded_message_with_options(path, &[topic], options, |_, message| {
-            callback(message)
-        })
-    }
-
-    /// Read decoded messages of one channel and emit them one-by-one to callback.
-    pub fn for_each_decoded_message_by_channel_id(
-        &self,
-        path: &Path,
-        channel_id: u16,
-        callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        self.for_each_decoded_message_by_channel_id_with_options(
-            path,
-            channel_id,
-            &ReadOptions::default(),
-            callback,
-        )
-    }
-
-    /// Read decoded messages of one channel subject to `options` and emit them
-    /// one-by-one to callback.
-    pub fn for_each_decoded_message_by_channel_id_with_options(
-        &self,
-        path: &Path,
-        channel_id: u16,
-        options: &ReadOptions,
-        mut callback: impl FnMut(DecodedMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        let file = McapFile::open(path)?;
-        let context = self
-            .inner
-            .resolve_channel_decode_context(get_channel_by_id(&file.summary, channel_id)?)?;
-        self.inner
-            .for_each_decoded_message_impl(&file, &context, options, &mut |decoded| {
-                callback(decoded).map_err(McapReaderError::Callback)
-            })
-    }
-
-    /// Read raw message payloads for a topic and emit them one-by-one to callback.
-    /// When chunk indexes exist, only indexed chunks are read; otherwise all messages are scanned.
-    /// Indexed chunks are decompressed in parallel when enabled on the reader.
-    pub fn for_each_raw_message(
-        &self,
-        path: &Path,
-        topic: &str,
-        callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        let file = McapFile::open(path)?;
-        let channel = get_channel_from_summary(&file.summary, topic)?;
-        for_each_raw_message_impl(&file, channel.id, self.inner.parallel, callback)
-    }
-
-    /// Read raw message payloads of one channel and emit them one-by-one to callback.
-    pub fn for_each_raw_message_by_channel_id(
-        &self,
-        path: &Path,
-        channel_id: u16,
-        callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Result<(), McapReaderError> {
-        let file = McapFile::open(path)?;
-        get_channel_by_id(&file.summary, channel_id)?;
-        for_each_raw_message_impl(&file, channel_id, self.inner.parallel, callback)
     }
 
     /// Return the total message count from the MCAP summary section.
@@ -245,7 +134,7 @@ impl McapReaderBuilder {
     /// Enable or disable parallel chunk decompression and decoding (default: true).
     ///
     /// This is the reader-wide default; a single read can override it through
-    /// [`ReadOptions::parallel`].
+    /// [`crate::ReadOptions::parallel`].
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
         self

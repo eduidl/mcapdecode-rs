@@ -12,27 +12,28 @@ fn read_options_filter_time_range_with_exclusive_end() {
     let mut values = Vec::new();
 
     reader
-        .for_each_decoded_message_with_options(
-            fixture.path(),
-            "/decoded",
-            &ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(2),
-                    end: Some(3),
-                }),
-                ..ReadOptions::default()
-            },
-            |message| {
-                let Value::Struct(fields) = message.value else {
-                    panic!("expected struct payload");
-                };
-                let Value::I64(value) = fields[0] else {
-                    panic!("expected i64 field");
-                };
-                values.push(value);
-                Ok(())
-            },
-        )
+        .open_file(fixture.path())
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .options(ReadOptions {
+            time_range: Some(TimeRange {
+                start: Some(2),
+                end: Some(3),
+            }),
+            ..ReadOptions::default()
+        })
+        .decoded()
+        .for_each(|_, message| {
+            let Value::Struct(fields) = message.value else {
+                panic!("expected struct payload");
+            };
+            let Value::I64(value) = fields[0] else {
+                panic!("expected i64 field");
+            };
+            values.push(value);
+            Ok(())
+        })
         .unwrap();
 
     assert_eq!(values, vec![2]);
@@ -100,7 +101,13 @@ fn read_options_parallel_defaults_to_reader_setting() {
 pub(super) fn collect_values(reader: &McapReader, path: &Path, options: &ReadOptions) -> Vec<i64> {
     let mut values = Vec::new();
     reader
-        .for_each_decoded_message_with_options(path, "/decoded", options, |message| {
+        .open_file(path)
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .options(options.clone())
+        .decoded()
+        .for_each(|_, message| {
             let Value::Struct(fields) = message.value else {
                 panic!("expected struct payload");
             };

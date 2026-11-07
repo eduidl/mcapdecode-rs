@@ -10,8 +10,7 @@ use std::{
 
 use mcap::{WriteOptions, Writer, records::MessageHeader};
 use mcapdecode::{
-    McapReader, McapReaderError, PreparedTopic, ReadOptions, TimeRange, TopicDecodeStatus,
-    TopicInfo,
+    McapReader, McapReaderError, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo,
 };
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
@@ -92,14 +91,16 @@ fn multi_topic_fixture() -> TempFixture {
 }
 
 fn multi_topic_fixture_with_indexes(indexes: bool) -> TempFixture {
-    let path = temp_fixture_path("multi-topic");
-    let mut writer = Writer::with_options(
-        File::create(&path).unwrap(),
+    multi_topic_fixture_with_options(
         WriteOptions::new()
             .chunk_size(Some(128))
             .emit_message_indexes(indexes),
     )
-    .unwrap();
+}
+
+fn multi_topic_fixture_with_options(options: WriteOptions) -> TempFixture {
+    let path = temp_fixture_path("multi-topic");
+    let mut writer = Writer::with_options(File::create(&path).unwrap(), options).unwrap();
     let schema = writer
         .add_schema("test.Msg", "jsonschema", br#"{"type":"object"}"#)
         .unwrap();
@@ -227,7 +228,12 @@ fn write_split_topic_fixture(name: &str) -> TempFixture {
 fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
     let mut values = Vec::new();
     reader
-        .for_each_decoded_message(path, topic, |message| {
+        .open_file(path)
+        .unwrap()
+        .read()
+        .topic(topic)
+        .decoded()
+        .for_each(|_, message| {
             let value = match message.value {
                 Value::Struct(fields) => match fields.into_values().remove(0) {
                     Value::I64(value) => value,
@@ -245,7 +251,12 @@ fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> 
 fn collect_raw_payloads(reader: &McapReader, path: &Path, topic: &str) -> Vec<Vec<u8>> {
     let mut payloads = Vec::new();
     reader
-        .for_each_raw_message(path, topic, |message| {
+        .open_file(path)
+        .unwrap()
+        .read()
+        .topic(topic)
+        .raw()
+        .for_each(|_, message| {
             payloads.push(message.data.to_vec());
             Ok(())
         })
