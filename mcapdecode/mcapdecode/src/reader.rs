@@ -22,8 +22,8 @@ use mcapdecode_ros2msg::Ros2MsgDecoder;
 use memmap2::Mmap;
 
 use crate::{
-    ChannelInfo, McapReaderError, ReadOptions, TopicDecodeStatus, TopicInfo, TopicSchema,
-    chunk_reader::for_each_selected_message, read::Read,
+    ChannelInfo, McapReaderError, TopicDecodeStatus, TopicInfo, TopicSchema,
+    chunk_reader::for_each_selected_message, read::Read, types::ReadOptions,
 };
 
 type Decoders = HashMap<EncodingKey, Arc<dyn MessageDecoder>>;
@@ -352,7 +352,7 @@ impl McapReaderBuilder {
     /// Enable or disable parallel chunk decompression and decoding (default: true).
     ///
     /// This is the reader-wide default; a single read can override it through
-    /// [`ReadOptions::parallel`].
+    /// [`Read::parallel`](crate::Read::parallel).
     pub fn with_parallel(mut self, parallel: bool) -> Self {
         self.parallel = parallel;
         self

@@ -18,20 +18,13 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
                 .open(fixture.path())
                 .unwrap();
             for (start, end) in [(3, 9), (5, 9), (4, 6), (3, 3)] {
-                let options = ReadOptions {
-                    time_range: Some(TimeRange {
-                        start: Some(start),
-                        end: Some(end),
-                    }),
-                    ..Default::default()
-                };
                 let mut raw = BTreeMap::<u16, Vec<u64>>::new();
                 let mut decoded = BTreeMap::<u16, Vec<u64>>::new();
                 let mut batches = BTreeMap::<u16, Vec<u64>>::new();
                 reader
                     .read()
                     .topics(["/first", "/second"])
-                    .options(options.clone())
+                    .time_range(start..end)
                     .raw()
                     .for_each(|channel, message| {
                         raw.entry(channel.id).or_default().push(message.log_time);
@@ -40,7 +33,7 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
                 reader
                     .read()
                     .topics(["/first", "/second"])
-                    .options(options.clone())
+                    .time_range(start..end)
                     .decoded()
                     .for_each(|channel, message| {
                         decoded
@@ -52,7 +45,7 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
                 reader
                     .read()
                     .topics(["/first", "/second"])
-                    .options(options)
+                    .time_range(start..end)
                     .arrow()
                     .batch_size(2)
                     .for_each(|channel, batch| {
@@ -547,35 +540,17 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
             .clear_decoders()
             .with_decoder(Box::new(TestJsonDecoder))
             .with_parallel(parallel);
-        for read_options in [
-            ReadOptions::default(),
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(3),
-                    end: Some(12),
-                }),
-                ..ReadOptions::default()
-            },
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(3),
-                    end: Some(8),
-                }),
-                ..ReadOptions::default()
-            },
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(0),
-                    end: Some(0),
-                }),
-                ..ReadOptions::default()
-            },
+        for range in [
+            (Unbounded, Unbounded),
+            (Included(3), Excluded(12)),
+            (Included(3), Excluded(8)),
+            (Included(0), Excluded(0)),
         ] {
             let file = builder.open(fixture.path()).unwrap();
             let mut actual = BTreeMap::<String, Vec<i64>>::new();
             file.read()
                 .topics(["/first", "/second", "/first", "/empty", "/second"])
-                .options(read_options.clone())
+                .time_range(range)
                 .arrow()
                 .batch_size(3)
                 .for_each(|channel, batch| {
@@ -598,7 +573,7 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
                     collect_i64_values(
                         file.read()
                             .topic(topic)
-                            .options(read_options.clone())
+                            .time_range(range)
                             .arrow()
                             .batch_size(3)
                     )
@@ -723,13 +698,7 @@ fn reader_arrow_uses_shared_filters() {
     reader
         .read()
         .topics(["/first", "/second"])
-        .options(ReadOptions {
-            time_range: Some(TimeRange {
-                start: Some(4),
-                end: Some(6),
-            }),
-            ..ReadOptions::default()
-        })
+        .time_range(4..6)
         .arrow()
         .batch_size(1)
         .for_each(|topic, batch| {

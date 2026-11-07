@@ -19,6 +19,4 @@ pub use mcapdecode_core as core;
 pub use read::ArrowRead;
 pub use read::{CallbackOutcome, DecodedRead, RawRead, Read};
 pub use reader::{McapReader, McapReaderBuilder};
-pub use types::{
-    ChannelInfo, RawMessage, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo, TopicSchema,
-};
+pub use types::{ChannelInfo, RawMessage, TopicDecodeStatus, TopicInfo, TopicSchema};

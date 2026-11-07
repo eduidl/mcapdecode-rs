@@ -1,6 +1,10 @@
-//! Value types describing topics, messages, and read options.
+//! Value types describing topics and messages, and internal read options.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    ops::{Bound, RangeBounds},
+    sync::Arc,
+};
 
 use mcapdecode_core::FieldDefs;
 
@@ -52,35 +56,46 @@ pub struct RawMessage {
     pub data: Arc<[u8]>,
 }
 
-/// Inclusive/exclusive nanosecond range used to filter messages by `log_time`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct TimeRange {
-    /// Inclusive lower bound.
-    pub start: Option<u64>,
-    /// Exclusive upper bound.
-    pub end: Option<u64>,
+/// A `log_time` range in nanoseconds used to filter messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TimeRange {
+    start: Bound<u64>,
+    end: Bound<u64>,
 }
 
 impl TimeRange {
-    pub fn contains(self, time: u64) -> bool {
-        self.start.is_none_or(|start| time >= start) && self.end.is_none_or(|end| time < end)
+    /// Copy the bounds of `range`, or return `None` when it is unbounded on both sides.
+    pub(crate) fn new(range: impl RangeBounds<u64>) -> Option<Self> {
+        let start = range.start_bound().cloned();
+        let end = range.end_bound().cloned();
+        (start != Bound::Unbounded || end != Bound::Unbounded).then_some(Self { start, end })
     }
 
+    pub(crate) fn contains(self, time: u64) -> bool {
+        (self.start, self.end).contains(&time)
+    }
+
+    /// Whether a chunk whose messages span `message_start_time..=message_end_time`
+    /// may hold a message in this range.
     pub(crate) fn overlaps_chunk(self, chunk_index: &mcap::records::ChunkIndex) -> bool {
-        self.start
-            .is_none_or(|start| chunk_index.message_end_time >= start)
-            && self
-                .end
-                .is_none_or(|end| chunk_index.message_start_time < end)
+        let after_start = match self.start {
+            Bound::Included(start) => chunk_index.message_end_time >= start,
+            Bound::Excluded(start) => chunk_index.message_end_time > start,
+            Bound::Unbounded => true,
+        };
+        let before_end = match self.end {
+            Bound::Included(end) => chunk_index.message_start_time <= end,
+            Bound::Excluded(end) => chunk_index.message_start_time < end,
+            Bound::Unbounded => true,
+        };
+        after_start && before_end
     }
 }
 
 /// Options shared by raw, decoded-message and RecordBatch reads.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ReadOptions {
-    /// Restrict messages to this `log_time` range.
-    pub time_range: Option<TimeRange>,
-    /// Override parallel chunk decompression for this read. `None` keeps the
-    /// reader's setting from [`crate::McapReaderBuilder::with_parallel`].
-    pub parallel: Option<bool>,
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ReadOptions {
+    pub(crate) time_range: Option<TimeRange>,
+    /// `None` keeps the reader's setting.
+    pub(crate) parallel: Option<bool>,
 }

@@ -1,6 +1,10 @@
 use std::{
     collections::BTreeMap,
     fs::{self, File},
+    ops::{
+        Bound::{Excluded, Included, Unbounded},
+        RangeBounds,
+    },
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -10,8 +14,7 @@ use std::{
 
 use mcap::{WriteOptions, Writer, records::MessageHeader};
 use mcapdecode::{
-    McapReader, McapReaderBuilder, McapReaderError, ReadOptions, TimeRange, TopicDecodeStatus,
-    TopicInfo,
+    McapReader, McapReaderBuilder, McapReaderError, Read, TopicDecodeStatus, TopicInfo,
 };
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,

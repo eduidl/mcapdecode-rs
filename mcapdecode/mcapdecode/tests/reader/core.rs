@@ -57,13 +57,8 @@ fn reads_with_and_without_chunk_indexes() {
             reader
                 .read()
                 .topics(["/decoded", "/other"])
-                .options(ReadOptions {
-                    parallel: Some(parallel),
-                    time_range: Some(TimeRange {
-                        start: Some(2),
-                        end: Some(3),
-                    }),
-                })
+                .time_range(2..3)
+                .parallel(parallel)
                 .decoded()
                 .for_each(|channel, message| {
                     actual.push((channel.topic.clone(), message.log_time));
@@ -97,13 +92,8 @@ fn raw_reads_include_messages_without_chunk_indexes() {
                 reader
                     .read()
                     .topics(["/first", "/second"])
-                    .options(ReadOptions {
-                        time_range: Some(TimeRange {
-                            start: Some(start),
-                            end: Some(end),
-                        }),
-                        parallel: Some(parallel),
-                    })
+                    .time_range(start..end)
+                    .parallel(parallel)
                     .raw()
                     .for_each(|channel, message| {
                         assert_eq!(message.publish_time, message.log_time);
@@ -148,13 +138,8 @@ fn raw_reads_match_with_parallel_overrides() {
         reader
             .read()
             .topics(["/first", "/second"])
-            .options(ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(4),
-                    end: Some(8),
-                }),
-                parallel: Some(parallel),
-            })
+            .time_range(4..8)
+            .parallel(parallel)
             .raw()
             .for_each(|channel, message| {
                 messages.push((channel.id, message.log_time));
@@ -227,18 +212,11 @@ fn reader_selects_multiple_channels_and_reports_metadata() {
     let reader = split_builder(false).open(fixture.path()).unwrap();
     let channels = reader.list_channels();
     let ids = [channels[0].id, channels[1].id, channels[0].id];
-    let options = ReadOptions {
-        time_range: Some(TimeRange {
-            start: Some(3),
-            end: None,
-        }),
-        ..ReadOptions::default()
-    };
     let mut raw = BTreeMap::new();
     reader
         .read()
         .channels(ids)
-        .options(options.clone())
+        .time_range(3..)
         .raw()
         .for_each(|channel, message| {
             assert_eq!(channel.topic, "/split");
@@ -250,7 +228,7 @@ fn reader_selects_multiple_channels_and_reports_metadata() {
     reader
         .read()
         .channels(ids)
-        .options(options)
+        .time_range(3..)
         .decoded()
         .for_each(|channel, message| {
             assert_eq!(channel.topic, "/split");
@@ -361,13 +339,7 @@ fn reader_decoded_topics_apply_options_and_deduplicate() {
     reader
         .read()
         .topics(["/first", "/first", "/second"])
-        .options(ReadOptions {
-            time_range: Some(TimeRange {
-                start: None,
-                end: Some(1),
-            }),
-            ..ReadOptions::default()
-        })
+        .time_range(..1)
         .decoded()
         .for_each(|topic, _| {
             topics.push(topic.topic.clone());
@@ -381,19 +353,12 @@ fn reader_raw_and_decoded_share_filters() {
     for indexes in [false, true] {
         let fixture = multi_topic_fixture_with_indexes(indexes);
         let reader = split_builder(false).open(fixture.path()).unwrap();
-        let options = ReadOptions {
-            time_range: Some(TimeRange {
-                start: Some(4),
-                end: Some(6),
-            }),
-            ..ReadOptions::default()
-        };
         let mut raw = BTreeMap::<String, Vec<u64>>::new();
         let mut decoded = BTreeMap::<String, Vec<u64>>::new();
         reader
             .read()
             .topics(["/first", "/second"])
-            .options(options.clone())
+            .time_range(4..6)
             .raw()
             .for_each(|topic, message| {
                 raw.entry(topic.topic.clone())
@@ -404,7 +369,7 @@ fn reader_raw_and_decoded_share_filters() {
         reader
             .read()
             .topics(["/first", "/second"])
-            .options(options)
+            .time_range(4..6)
             .decoded()
             .for_each(|topic, message| {
                 decoded
@@ -500,13 +465,7 @@ fn decoded_read_by_channel_id_applies_options() {
         .unwrap()
         .read()
         .channel(id)
-        .options(ReadOptions {
-            time_range: Some(TimeRange {
-                start: Some(3),
-                end: None,
-            }),
-            ..ReadOptions::default()
-        })
+        .time_range(3..)
         .decoded()
         .for_each(|_, message| {
             log_times.push(message.log_time);
@@ -1122,22 +1081,10 @@ fn multi_topic_decoded_reads_work_without_arrow() {
             .clear_decoders()
             .with_decoder(Box::new(TestJsonDecoder))
             .with_parallel(parallel);
-        for options in [
-            ReadOptions::default(),
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(2),
-                    end: Some(7),
-                }),
-                ..ReadOptions::default()
-            },
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(3),
-                    end: Some(9),
-                }),
-                ..ReadOptions::default()
-            },
+        for range in [
+            (Unbounded, Unbounded),
+            (Included(2), Excluded(7)),
+            (Included(3), Excluded(9)),
         ] {
             let mut actual = BTreeMap::<String, Vec<(u64, u64, i64)>>::new();
             builder
@@ -1145,7 +1092,7 @@ fn multi_topic_decoded_reads_work_without_arrow() {
                 .unwrap()
                 .read()
                 .topics(["/first", "/second", "/first", "/empty", "/second"])
-                .options(options.clone())
+                .time_range(range)
                 .decoded()
                 .for_each(|channel, message| {
                     let Value::Struct(fields) = message.value else {
@@ -1168,7 +1115,7 @@ fn multi_topic_decoded_reads_work_without_arrow() {
                     .unwrap()
                     .read()
                     .topic(topic)
-                    .options(options.clone())
+                    .time_range(range)
                     .decoded()
                     .for_each(|_, message| {
                         let Value::Struct(fields) = message.value else {
@@ -1209,14 +1156,12 @@ fn repeated_single_topic_is_read_once() {
     let builder = McapReader::builder()
         .clear_decoders()
         .with_decoder(Box::new(TestJsonDecoder));
-    let options = ReadOptions::default();
     let mut topics = Vec::new();
     builder
         .open(fixture.path())
         .unwrap()
         .read()
         .topics(["/first", "/first"])
-        .options(options)
         .decoded()
         .for_each(|channel, message| {
             topics.push((channel.topic.clone(), message.log_time));
@@ -1251,22 +1196,10 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
             .unwrap();
         assert_eq!(times, (0..1024).collect::<Vec<_>>());
 
-        for options in [
-            ReadOptions::default(),
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(3),
-                    end: Some(9),
-                }),
-                ..Default::default()
-            },
-            ReadOptions {
-                time_range: Some(TimeRange {
-                    start: Some(4),
-                    end: Some(6),
-                }),
-                ..Default::default()
-            },
+        for range in [
+            (Unbounded, Unbounded),
+            (Included(3), Excluded(9)),
+            (Included(4), Excluded(6)),
         ] {
             let mut actual = BTreeMap::<String, Vec<(u64, i64)>>::new();
             builder
@@ -1274,7 +1207,7 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
                 .unwrap()
                 .read()
                 .topics(["/first", "/second"])
-                .options(options.clone())
+                .time_range(range)
                 .decoded()
                 .for_each(|channel, message| {
                     let Value::Struct(fields) = message.value else {
@@ -1289,15 +1222,12 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
                         .push((message.log_time, value));
                 })
                 .unwrap();
-            let range = options.time_range.map_or(0..1024, |range| {
-                range.start.unwrap() as i64..range.end.unwrap() as i64
-            });
             for (topic, offset) in [("/first", 0), ("/second", 100)] {
                 assert_eq!(
                     actual[topic],
-                    range
-                        .clone()
-                        .map(|i| (i as u64, i + offset))
+                    (0..1024)
+                        .filter(|time| range.contains(time))
+                        .map(|time| (time, time as i64 + offset))
                         .collect::<Vec<_>>()
                 );
             }

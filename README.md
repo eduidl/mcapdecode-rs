@@ -147,8 +147,11 @@ reader
     })?;
 ```
 
-Use `options` to filter messages by `log_time` and configure parallel reads. The same selection and
-options apply to `raw()`, `decoded()`, and, with the `arrow` feature, `arrow()`.
+Use `time_range` to filter messages by `log_time` in nanoseconds, with any Rust
+range such as `start..end`, `start..`, or the inclusive range returned by
+`message_time_range()`, and `parallel` to override the reader's parallel setting
+for one read. The same selection and settings apply to `raw()`, `decoded()`,
+and, with the `arrow` feature, `arrow()`.
 
 As with `Iterator`, `for_each` callbacks return nothing, while `try_for_each`
 callbacks can stop the read: returning `Err` fails it with

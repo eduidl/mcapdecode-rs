@@ -1,6 +1,10 @@
 //! Message selection and output formats.
 
-use std::{collections::HashSet, ops::ControlFlow, sync::Arc};
+use std::{
+    collections::HashSet,
+    ops::{ControlFlow, RangeBounds},
+    sync::Arc,
+};
 
 #[cfg(feature = "arrow")]
 use arrow::record_batch::RecordBatch;
@@ -9,7 +13,9 @@ use mcapdecode_arrow::{MessageBatchSchema, MetadataColumns};
 use mcapdecode_core::DecodedMessage;
 
 use crate::{
-    ChannelInfo, McapReader, McapReaderError, RawMessage, ReadOptions, reader::TopicDecodeContext,
+    ChannelInfo, McapReader, McapReaderError, RawMessage,
+    reader::TopicDecodeContext,
+    types::{ReadOptions, TimeRange},
 };
 
 /// Message selection and traversal options shared by all output formats.
@@ -54,9 +60,19 @@ impl<'a> Read<'a> {
         self
     }
 
-    /// Set time filtering and parallel traversal options.
-    pub fn options(mut self, options: ReadOptions) -> Self {
-        self.options = options;
+    /// Select messages whose `log_time` falls in `range`, in nanoseconds.
+    ///
+    /// Accepts any range, such as `start..end`, `start..` or the inclusive range
+    /// from [`McapReader::message_time_range`]. Later calls replace earlier ones.
+    pub fn time_range(mut self, range: impl RangeBounds<u64>) -> Self {
+        self.options.time_range = TimeRange::new(range);
+        self
+    }
+
+    /// Enable or disable parallel chunk decompression and decoding for this read,
+    /// overriding [`McapReaderBuilder::with_parallel`](crate::McapReaderBuilder::with_parallel).
+    pub fn parallel(mut self, parallel: bool) -> Self {
+        self.options.parallel = Some(parallel);
         self
     }
 

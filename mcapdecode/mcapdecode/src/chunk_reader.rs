@@ -12,7 +12,7 @@ use std::{
 
 use rayon::prelude::*;
 
-use crate::{McapReader, McapReaderError, TimeRange};
+use crate::{McapReader, McapReaderError, types::TimeRange};
 
 /// Process messages of the selected channels within `time_range`, skipping chunks that hold none.
 /// `process` and `callback` receive the message channel's position in `channel_ids`.
