@@ -45,3 +45,38 @@ fn packed_uint8_lists_are_distinct_from_bytes() {
         );
     }
 }
+
+#[test]
+fn numeric_types_match_values_accepted_by_f64_lossy() {
+    let numeric = [
+        (DataTypeDef::I8, Value::I8(-1)),
+        (DataTypeDef::I16, Value::I16(-1)),
+        (DataTypeDef::I32, Value::I32(-1)),
+        (DataTypeDef::I64, Value::I64(-1)),
+        (DataTypeDef::U8, Value::U8(1)),
+        (DataTypeDef::U16, Value::U16(1)),
+        (DataTypeDef::U32, Value::U32(1)),
+        (DataTypeDef::U64, Value::U64(1)),
+        (DataTypeDef::F32, Value::F32(1.5)),
+        (DataTypeDef::F64, Value::F64(1.5)),
+    ];
+    for (ty, value) in numeric {
+        assert!(ty.is_numeric(), "{ty} should be numeric");
+        assert!(value.try_f64_lossy().is_ok());
+    }
+
+    let non_numeric = [
+        (DataTypeDef::Null, Value::Null),
+        (DataTypeDef::Bool, Value::Bool(true)),
+        (DataTypeDef::String, Value::string("1")),
+        (DataTypeDef::Enum(Default::default()), Value::string("A")),
+        (
+            DataTypeDef::Uint8List,
+            Value::Uint8List(std::sync::Arc::from([1])),
+        ),
+    ];
+    for (ty, value) in non_numeric {
+        assert!(!ty.is_numeric(), "{ty} should not be numeric");
+        assert!(value.try_f64_lossy().is_err());
+    }
+}

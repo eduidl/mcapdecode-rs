@@ -60,6 +60,27 @@ impl DataTypeDef {
         )
     }
 
+    /// Whether this is an integer or floating-point type.
+    ///
+    /// Covers exactly the types whose non-null values
+    /// [`Value::try_f64_lossy`](crate::Value::try_f64_lossy) accepts.
+    /// `Bool` and `Enum` are not numeric.
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            DataTypeDef::I8
+                | DataTypeDef::I16
+                | DataTypeDef::I32
+                | DataTypeDef::I64
+                | DataTypeDef::U8
+                | DataTypeDef::U16
+                | DataTypeDef::U32
+                | DataTypeDef::U64
+                | DataTypeDef::F32
+                | DataTypeDef::F64
+        )
+    }
+
     /// Category name, independent of qualified names, bounds, and nullability.
     pub fn type_name(&self) -> &'static str {
         match self {
