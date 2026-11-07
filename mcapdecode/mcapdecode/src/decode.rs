@@ -70,10 +70,8 @@ impl InternalReader {
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        // TODO(P2a): Use message indexes to bound the chunks needed for a limit
-        // and decode that bounded set in parallel.
         let parallel = options.parallel.unwrap_or(self.parallel);
-        if parallel && options.limit.is_none() {
+        if parallel {
             self.for_each_decoded_message_parallel(file, context, options, callback)
         } else {
             self.for_each_decoded_message_sequential(file, context, options, callback)
@@ -116,7 +114,6 @@ impl InternalReader {
             drop(sender);
 
             let mut next_position = 0usize;
-            let mut skipped = 0usize;
             let mut pending = BTreeMap::new();
             while next_position < chunk_count {
                 let (position, result) = receiver.recv().map_err(|_| {
@@ -135,12 +132,6 @@ impl InternalReader {
                         }
                     };
                     for decoded in chunk_messages {
-                        // Chunks are decoded before their position in the topic
-                        // is known, so the offset can only be applied here.
-                        if skipped < options.offset {
-                            skipped += 1;
-                            continue;
-                        }
                         if let Err(error) = callback(decoded) {
                             cancelled.store(true, Ordering::Relaxed);
                             return Err(error);
@@ -205,30 +196,15 @@ impl InternalReader {
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        if options.limit == Some(0) {
-            return Ok(());
-        }
         let filter = MessageFilter::new(context, options);
-        let mut skipped = 0usize;
-        let mut emitted = 0usize;
         for chunk_index in Self::matching_chunk_indexes(&file.summary, filter) {
             for message in file.summary.stream_chunk(&file.mmap, chunk_index)? {
                 let message = message?;
                 if !filter.accepts_message(&message) {
                     continue;
                 }
-                // Skipping here keeps the offset messages out of the decoder.
-                if skipped < options.offset {
-                    skipped += 1;
-                    continue;
-                }
-
                 let decoded = self.decode_message(context, &message)?;
                 callback(decoded)?;
-                emitted += 1;
-                if options.limit.is_some_and(|limit| emitted >= limit) {
-                    return Ok(());
-                }
             }
         }
 
@@ -256,7 +232,7 @@ impl InternalReader {
         options: &ReadOptions,
         callback: &mut impl FnMut(usize, DecodedMessage) -> Result<(), McapReaderError>,
     ) -> Result<(), McapReaderError> {
-        if options.limit.is_some() || options.offset != 0 || contexts.len() == 1 {
+        if contexts.len() == 1 {
             for (i, context) in contexts.iter().enumerate() {
                 self.for_each_decoded_message_impl(file, context, options, &mut |message| {
                     callback(i, message)
@@ -364,8 +340,7 @@ impl McapReader {
         )
     }
 
-    /// Read selected topics with per-topic filtering, offset, and limit.
-    /// Bounded reads reuse the single-topic path so decoding stops at the limit.
+    /// Read selected topics with log-time filtering and parallel read options.
     /// Duplicate topics are read once.
     pub fn for_each_topic_decoded_message_with_options(
         &self,

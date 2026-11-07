@@ -92,7 +92,7 @@ impl McapReader {
 
     /// Read selected topics as Arrow batches, sharing chunk decompression.
     /// Rows remain in file order within each topic; empty topics emit no batches.
-    /// Filtering, offset and limit apply independently to each topic.
+    /// Log-time filtering applies independently to each topic.
     /// Duplicate topics are read once.
     pub fn for_each_topic_record_batch_with_options(
         &self,

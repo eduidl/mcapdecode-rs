@@ -101,8 +101,8 @@ reader.for_each_topic_decoded_message(
 )?;
 ```
 
-Use `for_each_topic_decoded_message_with_options` for per-topic filtering, offset,
-and limit.
+Use `for_each_topic_decoded_message_with_options` for log-time filtering and
+parallel read options.
 
 ### Arrow Output
 
