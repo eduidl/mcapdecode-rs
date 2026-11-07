@@ -7,6 +7,7 @@ mod decoder;
 mod error;
 mod message;
 mod message_encoding;
+mod path;
 mod schema;
 mod schema_encoding;
 mod value;
@@ -16,6 +17,7 @@ pub use decoder::{EncodingKey, MessageDecoder, TopicDecoder};
 pub use error::{DecoderError, ValueAccessError, ValueTypeError};
 pub use message::DecodedMessage;
 pub use message_encoding::MessageEncoding;
+pub use path::FieldPath;
 pub use schema::{
     DataTypeDef, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef,
     format_field_defs,
