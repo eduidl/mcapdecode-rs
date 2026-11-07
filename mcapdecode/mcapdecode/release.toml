@@ -1,11 +1,11 @@
 [[pre-release-replacements]]
-file = "README.md"
+file = "../../README.md"
 search = "(mcapdecode.*) = \\{ version = \"[0-9\\.]+\"(.*) }"
 replace = "$1 = { version = \"{{version}}\"$2 }"
 min = 0
 
 [[pre-release-replacements]]
-file = "README.md"
+file = "../../README.md"
 search = "(mcapdecode.*) = \"[0-9\\.]+\""
 replace = "$1 = \"{{version}}\""
 min = 0
