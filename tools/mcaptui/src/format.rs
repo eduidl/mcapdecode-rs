@@ -1,6 +1,6 @@
-use chrono::{DateTime, Utc};
 use std::{collections::BTreeSet, ops::RangeInclusive};
 
+use chrono::{DateTime, Utc};
 use mcapdecode::{
     ChannelInfo,
     core::{FieldDefs, StructValue, Value},

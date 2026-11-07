@@ -5,7 +5,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState, Wrap},
 };
-
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, MessageFocus, Screen};
