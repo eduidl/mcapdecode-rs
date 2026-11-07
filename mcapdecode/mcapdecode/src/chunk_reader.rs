@@ -1,4 +1,4 @@
-//! Chunk traversal and ordered delivery, independent of message decoding.
+//! Message selection, chunk traversal and ordered delivery, independent of message decoding.
 
 use std::{
     collections::BTreeMap,
@@ -11,12 +11,78 @@ use std::{
 
 use rayon::prelude::*;
 
-use crate::{error::McapReaderError, mcap_file::McapFile};
+use crate::{TimeRange, error::McapReaderError, mcap_file::McapFile};
+
+/// Process messages of the selected channels within `time_range`, skipping chunks that hold none.
+/// `process` and `callback` receive the message channel's position in `channel_ids`.
+pub(crate) fn for_each_selected_message<T: Send>(
+    file: &McapFile,
+    channel_ids: &[u16],
+    time_range: Option<TimeRange>,
+    parallel: bool,
+    process: impl Fn(usize, &mcap::Message<'_>) -> Result<T, McapReaderError> + Sync,
+    callback: &mut impl FnMut(usize, T) -> Result<(), McapReaderError>,
+) -> Result<(), McapReaderError> {
+    // A single channel avoids the per-message map lookup.
+    if let [channel_id] = *channel_ids {
+        return for_each_message_of(
+            file,
+            |id| (id == channel_id).then_some(0),
+            time_range,
+            parallel,
+            process,
+            callback,
+        );
+    }
+    let indexes: BTreeMap<_, _> = channel_ids
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i))
+        .collect();
+    for_each_message_of(
+        file,
+        |id| indexes.get(&id).copied(),
+        time_range,
+        parallel,
+        process,
+        callback,
+    )
+}
+
+fn for_each_message_of<T: Send>(
+    file: &McapFile,
+    index_of: impl Fn(u16) -> Option<usize> + Sync,
+    time_range: Option<TimeRange>,
+    parallel: bool,
+    process: impl Fn(usize, &mcap::Message<'_>) -> Result<T, McapReaderError> + Sync,
+    callback: &mut impl FnMut(usize, T) -> Result<(), McapReaderError>,
+) -> Result<(), McapReaderError> {
+    let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
+        let offsets = &chunk.message_index_offsets;
+        (offsets.is_empty() || offsets.keys().any(|&id| index_of(id).is_some()))
+            && time_range.is_none_or(|range| range.overlaps_chunk(chunk))
+    });
+    for_each_chunk(
+        file,
+        chunks,
+        parallel,
+        |message| {
+            let Some(i) = index_of(message.channel.id) else {
+                return Ok(None);
+            };
+            if time_range.is_some_and(|range| !range.contains(message.log_time)) {
+                return Ok(None);
+            }
+            Ok(Some((i, process(i, message)?)))
+        },
+        &mut |(i, result)| callback(i, result),
+    )
+}
 
 /// Process each message while its chunk is being read, then deliver results in chunk order.
 /// In parallel mode `process` runs on workers and `callback` runs on the calling thread.
 /// Without chunk indexes, scan the file sequentially instead.
-pub(crate) fn for_each_chunk<'a, T: Send>(
+fn for_each_chunk<'a, T: Send>(
     file: &McapFile,
     chunks: impl Iterator<Item = &'a mcap::records::ChunkIndex>,
     parallel: bool,
