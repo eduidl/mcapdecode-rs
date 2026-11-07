@@ -24,7 +24,7 @@ Commands:
 
 ## Supported Schema Encodings
 
-`transmcap` uses `McapReader::with_default_decoders()`. Supported encoding pairs:
+`transmcap` uses `McapReaderBuilder::with_default_decoders()`. Supported encoding pairs:
 
 | Schema encoding | Message encoding | Required `mcapdecode` feature | Notes |
 | --- | --- | --- | --- |

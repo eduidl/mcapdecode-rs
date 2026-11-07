@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use crossterm::event::{self, Event};
-use mcapdecode::{McapReader, OpenedMcap};
+use mcapdecode::McapReader;
 
 use crate::{
     app::{self, App, AppRequest, AppUpdate},
@@ -48,7 +48,7 @@ struct FrameProcessingResult {
 
 struct RuntimeContext<'a> {
     loader: &'a mut Option<TopicLoader>,
-    reader: &'a Arc<OpenedMcap>,
+    reader: &'a Arc<McapReader>,
     schema_cache: &'a mut SchemaCache,
 }
 
@@ -61,8 +61,7 @@ fn run(cli: Cli) -> Result<()> {
         McapReader::builder()
             .with_default_decoders()
             .with_parallel(cli.parallel)
-            .build()
-            .open_file(&cli.input)
+            .open(&cli.input)
             .with_context(|| format!("failed to open {}", cli.input.display()))?,
     );
     let mut app = App::with_channels(reader.list_topics(), &reader.list_channels());
@@ -184,7 +183,7 @@ fn collect_input_events(timeout: Duration) -> Result<FrameInputBatch> {
 fn process_input_events(
     app: &mut App,
     loader: &mut Option<TopicLoader>,
-    reader: &Arc<OpenedMcap>,
+    reader: &Arc<McapReader>,
     schema_cache: &mut SchemaCache,
     events: Vec<Event>,
 ) -> Result<FrameProcessingResult> {
@@ -328,7 +327,7 @@ fn merge_navigation(
 fn start_topic_loader(
     app: &mut App,
     loader: &mut Option<TopicLoader>,
-    reader: &Arc<OpenedMcap>,
+    reader: &Arc<McapReader>,
 ) -> Result<()> {
     loader::cancel_loader(loader);
 

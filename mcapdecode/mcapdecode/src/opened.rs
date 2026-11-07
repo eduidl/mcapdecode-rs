@@ -10,7 +10,7 @@ use std::{
 use mcapdecode_core::{DecodedMessage, FieldDefs};
 
 use crate::{
-    ChannelInfo, McapReader, McapReaderError, RawMessage, ReadOptions, TopicDecodeStatus,
+    ChannelInfo, McapReaderBuilder, McapReaderError, RawMessage, ReadOptions, TopicDecodeStatus,
     TopicInfo, TopicSchema,
     chunk_reader::for_each_selected_message,
     internal_reader::InternalReader,
@@ -21,44 +21,39 @@ use crate::{
     },
 };
 
-/// An opened MCAP file and its configured decoders.
+/// An opened MCAP file that decodes messages using registered decoders.
 ///
 /// Reuses one memory map and summary for metadata queries and reads.
 /// Opening requires an MCAP summary; decoders are resolved only when needed.
-pub struct OpenedMcap {
+pub struct McapReader {
     reader: InternalReader,
     file: McapFile,
 }
 
 impl McapReader {
     /// Open a file with all decoders enabled by cargo features.
-    pub fn open(path: impl AsRef<Path>) -> Result<OpenedMcap, McapReaderError> {
-        Self::builder()
-            .with_default_decoders()
-            .build()
-            .open_file(path)
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, McapReaderError> {
+        Self::builder().with_default_decoders().open(path)
     }
 
-    /// Open a file with a snapshot of this reader's decoder registrations and settings.
-    /// Later registration changes do not affect files that are already open.
-    pub fn open_file(&self, path: impl AsRef<Path>) -> Result<OpenedMcap, McapReaderError> {
-        Ok(OpenedMcap {
-            reader: self.inner.clone(),
-            file: McapFile::open(path.as_ref())?,
+    /// Create a builder with no decoders registered.
+    pub fn builder() -> McapReaderBuilder {
+        McapReaderBuilder::new()
+    }
+
+    pub(crate) fn from_parts(reader: InternalReader, path: &Path) -> Result<Self, McapReaderError> {
+        Ok(Self {
+            reader,
+            file: McapFile::open(path)?,
         })
     }
-}
-
-impl OpenedMcap {
     /// Return topic metadata and schema IR without reading message payloads.
     pub fn topic_schema(&self, topic: &str) -> Result<TopicSchema, McapReaderError> {
         self.reader.topic_schema(&self.file.summary, topic)
     }
 
     /// List topics and report whether their schemas can be derived by the configured decoders.
-    pub fn list_topics_with_decode_status(
-        &self,
-    ) -> Result<Vec<TopicDecodeStatus>, McapReaderError> {
+    pub fn list_topics_with_decode_status(&self) -> Vec<TopicDecodeStatus> {
         self.reader
             .list_topics_with_decode_status(&self.file.summary)
     }
@@ -140,7 +135,7 @@ impl OpenedMcap {
 
 /// Message selection and traversal options shared by all output formats.
 pub struct Read<'a> {
-    file: &'a OpenedMcap,
+    file: &'a McapReader,
     topics: Option<Vec<String>>,
     channel_ids: Option<Vec<u16>>,
     options: ReadOptions,

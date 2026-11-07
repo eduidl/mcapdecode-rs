@@ -6,13 +6,11 @@ fn read_options_filter_time_range_with_exclusive_end() {
         "time-range",
         &[br#"{"value":1}"#, br#"{"value":2}"#, br#"{"value":3}"#],
     );
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
     let mut values = Vec::new();
 
-    reader
-        .open_file(fixture.path())
+    builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topic("/decoded")
@@ -50,17 +48,15 @@ fn read_options_parallel_overrides_reader_setting_in_both_directions() {
     let parallel_fixture = write_chunked_fixture("parallel-override-on", payloads);
 
     // A parallel reader forced onto the sequential path, and vice versa.
-    let parallel_reader = McapReader::builder()
+    let parallel_builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
-    let sequential_reader = McapReader::builder()
+        .with_parallel(true);
+    let sequential_builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(false)
-        .build();
+        .with_parallel(false);
 
     let forced_sequential = collect_values(
-        &parallel_reader,
+        &parallel_builder,
         sequential_fixture.path(),
         &ReadOptions {
             parallel: Some(false),
@@ -68,7 +64,7 @@ fn read_options_parallel_overrides_reader_setting_in_both_directions() {
         },
     );
     let forced_parallel = collect_values(
-        &sequential_reader,
+        &sequential_builder,
         parallel_fixture.path(),
         &ReadOptions {
             parallel: Some(true),
@@ -86,21 +82,24 @@ fn read_options_parallel_defaults_to_reader_setting() {
         "parallel-default",
         &[br#"{"value":1}"#, br#"{"value":2}"#, br#"{"value":3}"#],
     );
-    let reader = McapReader::builder()
+    let builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(false)
-        .build();
+        .with_parallel(false);
 
-    let values = collect_values(&reader, fixture.path(), &ReadOptions::default());
+    let values = collect_values(&builder, fixture.path(), &ReadOptions::default());
 
     assert_eq!(values, vec![1, 2, 3]);
     assert_eq!(ReadOptions::default().parallel, None);
 }
 
-pub(super) fn collect_values(reader: &McapReader, path: &Path, options: &ReadOptions) -> Vec<i64> {
+pub(super) fn collect_values(
+    builder: &McapReaderBuilder,
+    path: &Path,
+    options: &ReadOptions,
+) -> Vec<i64> {
     let mut values = Vec::new();
-    reader
-        .open_file(path)
+    builder
+        .open(path)
         .unwrap()
         .read()
         .topic("/decoded")

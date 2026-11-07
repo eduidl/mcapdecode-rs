@@ -10,7 +10,8 @@ use std::{
 
 use mcap::{WriteOptions, Writer, records::MessageHeader};
 use mcapdecode::{
-    McapReader, McapReaderError, OpenedMcap, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo,
+    McapReader, McapReaderBuilder, McapReaderError, ReadOptions, TimeRange, TopicDecodeStatus,
+    TopicInfo,
 };
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
@@ -225,10 +226,10 @@ fn write_split_topic_fixture(name: &str) -> TempFixture {
     TempFixture { path }
 }
 
-fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> Vec<i64> {
+fn collect_decoded_i64_values(builder: &McapReaderBuilder, path: &Path, topic: &str) -> Vec<i64> {
     let mut values = Vec::new();
-    reader
-        .open_file(path)
+    builder
+        .open(path)
         .unwrap()
         .read()
         .topic(topic)
@@ -248,10 +249,10 @@ fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> 
     values
 }
 
-fn collect_raw_payloads(reader: &McapReader, path: &Path, topic: &str) -> Vec<Vec<u8>> {
+fn collect_raw_payloads(builder: &McapReaderBuilder, path: &Path, topic: &str) -> Vec<Vec<u8>> {
     let mut payloads = Vec::new();
-    reader
-        .open_file(path)
+    builder
+        .open(path)
         .unwrap()
         .read()
         .topic(topic)
@@ -337,7 +338,7 @@ impl MessageDecoder for SchemaNamedFieldDecoder {
 }
 
 mod core;
-mod opened;
+mod metadata;
 mod read_options;
 mod stop;
 

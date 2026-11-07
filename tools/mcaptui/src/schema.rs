@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use mcapdecode::{McapReaderError, OpenedMcap, core::DecoderError};
+use mcapdecode::{McapReader, McapReaderError, core::DecoderError};
 
 use crate::{app, format};
 
@@ -10,7 +10,7 @@ pub(crate) type SchemaCache = HashMap<u16, app::SchemaView>;
 
 pub(crate) fn open_selected_schema(
     app: &mut app::App,
-    reader: &OpenedMcap,
+    reader: &McapReader,
     schema_cache: &mut SchemaCache,
 ) -> Result<()> {
     let row = app.selected_topic().context("no topic selected")?.clone();
@@ -25,7 +25,7 @@ pub(crate) fn open_selected_schema(
 }
 
 pub(crate) fn load_schema_view(
-    reader: &OpenedMcap,
+    reader: &McapReader,
     schema_cache: &mut SchemaCache,
     row: &app::TopicRow,
 ) -> Result<app::SchemaView> {
@@ -84,9 +84,9 @@ mod tests {
 
     use mcapdecode::{ChannelInfo, McapReader};
 
-    fn reader() -> OpenedMcap {
-        McapReader::new()
-            .open_file(
+    fn reader() -> McapReader {
+        McapReader::builder()
+            .open(
                 Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../../mcapdecode/mcapdecode/tests/fixtures/with_summary.mcap"),
             )
