@@ -16,8 +16,11 @@ impl McapFile {
     pub(crate) fn open(path: &Path) -> Result<Self, McapReaderError> {
         let file = fs::File::open(path)?;
         let mmap = unsafe { Mmap::map(&file) }?;
-        let summary =
+        let mut summary =
             mcap::read::Summary::read(&mmap)?.ok_or(McapReaderError::SummaryNotAvailable)?;
+        summary
+            .chunk_indexes
+            .sort_by_key(|index| index.chunk_start_offset);
         Ok(Self { mmap, summary })
     }
 }

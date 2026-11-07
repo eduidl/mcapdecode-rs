@@ -15,6 +15,7 @@ use crate::{error::McapReaderError, mcap_file::McapFile};
 
 /// Process each message while its chunk is being read, then deliver results in chunk order.
 /// In parallel mode `process` runs on workers and `callback` runs on the calling thread.
+/// Without chunk indexes, scan the file sequentially instead.
 pub(crate) fn for_each_chunk<'a, T: Send>(
     file: &McapFile,
     chunks: impl Iterator<Item = &'a mcap::records::ChunkIndex>,
@@ -22,6 +23,14 @@ pub(crate) fn for_each_chunk<'a, T: Send>(
     process: impl Fn(&mcap::Message<'_>) -> Result<Option<T>, McapReaderError> + Sync,
     callback: &mut impl FnMut(T) -> Result<(), McapReaderError>,
 ) -> Result<(), McapReaderError> {
+    if file.summary.chunk_indexes.is_empty() {
+        for message in mcap::MessageStream::new(&file.mmap)? {
+            if let Some(result) = process(&message?)? {
+                callback(result)?;
+            }
+        }
+        return Ok(());
+    }
     let read_chunk = |chunk,
                       cancelled: &dyn Fn() -> bool,
                       emit: &mut dyn FnMut(T) -> Result<(), McapReaderError>| {

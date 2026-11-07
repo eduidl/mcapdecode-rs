@@ -1,5 +1,76 @@
 use super::*;
 
+#[test]
+fn reads_with_and_without_chunk_indexes() {
+    for (use_chunks, indexes) in [(true, true), (true, false), (false, false)] {
+        let path = temp_fixture_path("chunk-index-fallback");
+        let fixture = TempFixture { path };
+        let mut writer = Writer::with_options(
+            File::create(fixture.path()).unwrap(),
+            WriteOptions::new()
+                .use_chunks(use_chunks)
+                .emit_chunk_indexes(indexes),
+        )
+        .unwrap();
+        let schema = writer.add_schema("test.Msg", "jsonschema", b"{}").unwrap();
+        let channels: Vec<_> = ["/decoded", "/other"]
+            .iter()
+            .map(|topic| {
+                writer
+                    .add_channel(schema, topic, "json", &BTreeMap::new())
+                    .unwrap()
+            })
+            .collect();
+        for time in 1..=3 {
+            for &channel_id in &channels {
+                writer
+                    .write_to_known_channel(
+                        &MessageHeader {
+                            channel_id,
+                            sequence: 0,
+                            log_time: time,
+                            publish_time: time,
+                        },
+                        format!("{{\"value\":{time}}}").as_bytes(),
+                    )
+                    .unwrap();
+            }
+        }
+        writer.finish().unwrap();
+        let reader = McapReader::builder()
+            .with_decoder(Box::new(TestJsonDecoder))
+            .build();
+        assert_eq!(
+            collect_raw_payloads(&reader, fixture.path(), "/decoded").len(),
+            3
+        );
+        for parallel in [false, true] {
+            let mut actual = Vec::new();
+            reader
+                .for_each_topic_decoded_message_with_options(
+                    fixture.path(),
+                    &["/decoded", "/other"],
+                    &ReadOptions {
+                        parallel: Some(parallel),
+                        time_range: Some(TimeRange {
+                            start: Some(2),
+                            end: Some(3),
+                        }),
+                    },
+                    |topic, message| {
+                        actual.push((topic.to_owned(), message.log_time));
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                actual,
+                [("/decoded".to_owned(), 2), ("/other".to_owned(), 2)]
+            );
+        }
+    }
+}
+
 fn split_reader(parallel: bool) -> McapReader {
     McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
