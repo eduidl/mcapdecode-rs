@@ -14,8 +14,7 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
             let reader = McapReader::builder()
                 .with_decoder(Box::new(SchemaNamedFieldDecoder))
                 .with_parallel(parallel)
-                .build()
-                .open_file(fixture.path())
+                .open(fixture.path())
                 .unwrap();
             for (start, end) in [(3, 9), (5, 9), (4, 6), (3, 3)] {
                 let options = ReadOptions {
@@ -81,7 +80,7 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
 }
 
 #[test]
-fn opened_arrow_empty_selection_and_unsupported_channel() {
+fn reader_arrow_empty_selection_and_unsupported_channel() {
     let reader = McapReader::open(fixture_path("with_summary.mcap")).unwrap();
     reader
         .read()
@@ -96,12 +95,11 @@ fn opened_arrow_empty_selection_and_unsupported_channel() {
 }
 
 #[test]
-fn opened_reader_arrow_distinguishes_channels_with_the_same_topic() {
+fn reader_arrow_distinguishes_channels_with_the_same_topic() {
     let fixture = write_split_topic_fixture("opened-arrow-channels");
     let reader = McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
     let channels = reader.list_channels();
     let mut rows = BTreeMap::new();
@@ -210,9 +208,9 @@ impl TopicDecoder for MismatchedJsonTopicDecoder {
 
 #[test]
 fn arrow_read_without_decoder_returns_error() {
-    let reader = McapReader::new();
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let builder = McapReader::builder();
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/decoded")
@@ -224,10 +222,10 @@ fn arrow_read_without_decoder_returns_error() {
 
 #[test]
 fn arrow_read_errors_when_decoder_is_missing_contains_message() {
-    let reader = McapReader::builder().build();
+    let builder = McapReader::builder();
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/decoded")
@@ -240,11 +238,10 @@ fn arrow_read_errors_when_decoder_is_missing_contains_message() {
 
 #[test]
 fn arrow_read_unknown_topic_returns_error() {
-    let mut reader = McapReader::new();
-    reader.register_decoder(Box::new(TestJsonDecoder));
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/unknown")
@@ -256,10 +253,9 @@ fn arrow_read_unknown_topic_returns_error() {
 
 #[test]
 fn arrow_read_errors_when_schema_is_missing() {
-    let mut reader = McapReader::new();
-    reader.register_decoder(Box::new(TestJsonDecoder));
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/raw")
@@ -271,10 +267,9 @@ fn arrow_read_errors_when_schema_is_missing() {
 
 #[test]
 fn arrow_read_propagates_callback_error() {
-    let mut reader = McapReader::new();
-    reader.register_decoder(Box::new(TestJsonDecoder));
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/decoded")
@@ -296,12 +291,10 @@ fn arrow_read_propagates_callback_error() {
 #[test]
 fn arrow_read_reports_arrow_conversion_errors_separately() {
     let fixture = write_chunked_fixture("arrow-conversion-error", &[br#"{"value":1}"#]);
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(MismatchedJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(MismatchedJsonDecoder));
 
-    let err = reader
-        .open_file(fixture.path())
+    let err = builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topic("/decoded")
@@ -314,11 +307,9 @@ fn arrow_read_reports_arrow_conversion_errors_separately() {
 
 #[test]
 fn arrow_read_emits_batches_by_batch_size() {
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let file = builder.open(fixture_path("with_summary.mcap")).unwrap();
     let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(1));
 
     assert_eq!(batch_rows, vec![1, 1]);
@@ -326,11 +317,9 @@ fn arrow_read_emits_batches_by_batch_size() {
 
 #[test]
 fn arrow_read_treats_zero_batch_size_as_one() {
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let file = builder.open(fixture_path("with_summary.mcap")).unwrap();
     let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(0));
 
     assert_eq!(batch_rows, vec![1, 1]);
@@ -338,13 +327,11 @@ fn arrow_read_treats_zero_batch_size_as_one() {
 
 #[test]
 fn arrow_read_defaults_to_a_single_batch() {
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
     let mut batch_rows = Vec::new();
-    reader
-        .open_file(fixture_path("with_summary.mcap"))
+    builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/decoded")
@@ -359,11 +346,9 @@ fn arrow_read_defaults_to_a_single_batch() {
 
 #[test]
 fn arrow_read_flushes_final_partial_batch() {
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let file = builder.open(fixture_path("with_summary.mcap")).unwrap();
     let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(3));
 
     assert_eq!(batch_rows, vec![2]);
@@ -371,12 +356,10 @@ fn arrow_read_flushes_final_partial_batch() {
 
 #[test]
 fn arrow_read_propagates_callback_error_with_builder_decoder() {
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/decoded")
@@ -389,11 +372,10 @@ fn arrow_read_propagates_callback_error_with_builder_decoder() {
 }
 
 #[test]
-fn register_shared_decoder_decodes_messages() {
-    let mut reader = McapReader::new();
-    reader.register_shared_decoder(Arc::new(TestJsonDecoder));
+fn shared_decoder_decodes_messages() {
+    let builder = McapReader::builder().with_shared_decoder(Arc::new(TestJsonDecoder));
 
-    let file = reader.open_file(fixture_path("with_summary.mcap")).unwrap();
+    let file = builder.open(fixture_path("with_summary.mcap")).unwrap();
     let values = collect_i64_values(file.read().topic("/decoded").arrow());
     assert_eq!(values, vec![1, 2]);
 }
@@ -412,17 +394,15 @@ fn arrow_read_parallel_matches_sequential_for_multi_chunk_fixture() {
     );
     assert!(chunk_index_count(fixture.path()) > 1);
 
-    let parallel_reader = McapReader::builder()
+    let parallel_builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
-    let sequential_reader = McapReader::builder()
+        .with_parallel(true);
+    let sequential_builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(false)
-        .build();
-    let parallel = parallel_reader.open_file(fixture.path()).unwrap();
-    let sequential = sequential_reader.open_file(fixture.path()).unwrap();
-    fn read(file: &mcapdecode::OpenedMcap) -> ArrowRead<'_> {
+        .with_parallel(false);
+    let parallel = parallel_builder.open(fixture.path()).unwrap();
+    let sequential = sequential_builder.open(fixture.path()).unwrap();
+    fn read(file: &mcapdecode::McapReader) -> ArrowRead<'_> {
         file.read().topic("/decoded").arrow().batch_size(2)
     }
 
@@ -444,13 +424,12 @@ fn arrow_read_parallel_propagates_decode_error_for_multi_chunk_fixture() {
     );
     assert!(chunk_index_count(fixture.path()) > 1);
 
-    let reader = McapReader::builder()
+    let builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
+        .with_parallel(true);
 
-    let err = reader
-        .open_file(fixture.path())
+    let err = builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topic("/decoded")
@@ -472,8 +451,7 @@ fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
     let fixture = write_chunked_fixture("batch-schema-agreement", &[br#"{"value":1}"#]);
     let file = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
 
     for metadata in [
@@ -513,8 +491,7 @@ fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
     let fixture = write_chunked_fixture("batch-schema-collision", &[br#"{"value":1}"#]);
     let file = McapReader::builder()
         .with_decoder(Box::new(CollidingJsonDecoder))
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
 
     let err = file
@@ -539,10 +516,9 @@ fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
 fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
     let fixture = multi_topic_fixture();
     for parallel in [false, true] {
-        let reader = McapReader::builder()
+        let builder = McapReader::builder()
             .with_decoder(Box::new(TestJsonDecoder))
-            .with_parallel(parallel)
-            .build();
+            .with_parallel(parallel);
         for read_options in [
             ReadOptions::default(),
             ReadOptions {
@@ -567,7 +543,7 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
                 ..ReadOptions::default()
             },
         ] {
-            let file = reader.open_file(fixture.path()).unwrap();
+            let file = builder.open(fixture.path()).unwrap();
             let mut actual = BTreeMap::<String, Vec<i64>>::new();
             file.read()
                 .topics(["/first", "/second", "/first", "/empty", "/second"])
@@ -607,13 +583,11 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
 #[test]
 fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure() {
     let fixture = multi_topic_fixture();
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
     {
         let mut called = false;
-        let err = reader
-            .open_file(fixture.path())
+        let err = builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .topics(["/first", "/unknown"])
@@ -627,8 +601,8 @@ fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure()
         assert!(matches!(err, McapReaderError::TopicNotFound));
     }
     let mut calls = 0;
-    let err = reader
-        .open_file(fixture.path())
+    let err = builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topics(["/first", "/second"])
@@ -650,12 +624,10 @@ fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure()
 #[test]
 fn repeated_single_topic_emits_one_batch() {
     let fixture = multi_topic_fixture();
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
     let mut topics = Vec::new();
-    reader
-        .open_file(fixture.path())
+    builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topics(["/first", "/first"])
@@ -678,12 +650,10 @@ fn repeated_single_topic_emits_one_batch() {
 #[test]
 fn record_batch_reads_scan_chunks_without_message_indexes() {
     let fixture = multi_topic_fixture_with_indexes(false);
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
     let mut actual = BTreeMap::<String, Vec<i64>>::new();
-    reader
-        .open_file(fixture.path())
+    builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topics(["/first", "/second"])
@@ -707,13 +677,12 @@ fn record_batch_reads_scan_chunks_without_message_indexes() {
 }
 
 #[test]
-fn opened_reader_arrow_uses_shared_filters() {
+fn reader_arrow_uses_shared_filters() {
     let fixture = multi_topic_fixture();
     let reader = McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
         .with_parallel(false)
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
     let mut rows = BTreeMap::<String, usize>::new();
     reader
@@ -738,12 +707,11 @@ fn opened_reader_arrow_uses_shared_filters() {
 }
 
 #[test]
-fn opened_reader_exposes_arrow_schema() {
+fn reader_exposes_arrow_schema() {
     let fixture = multi_topic_fixture();
     let reader = McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
     assert!(
         reader

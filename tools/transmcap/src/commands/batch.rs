@@ -255,8 +255,7 @@ pub(super) fn run_conversion(
     let reader = McapReader::builder()
         .with_default_decoders()
         .with_parallel(parallel)
-        .build()
-        .open_file(input)?;
+        .open(input)?;
     let mut names = HashSet::new();
     let mut outputs = HashSet::new();
     let mut topics = Vec::new();

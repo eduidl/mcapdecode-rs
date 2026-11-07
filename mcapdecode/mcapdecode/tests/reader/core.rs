@@ -39,8 +39,7 @@ fn reads_with_and_without_chunk_indexes() {
         writer.finish().unwrap();
         let reader = McapReader::builder()
             .with_decoder(Box::new(TestJsonDecoder))
-            .build()
-            .open_file(fixture.path())
+            .open(fixture.path())
             .unwrap();
         let mut count = 0;
         reader
@@ -141,7 +140,7 @@ fn raw_reads_include_messages_without_chunk_indexes() {
 #[test]
 fn raw_reads_match_with_parallel_overrides() {
     let fixture = multi_topic_fixture_with_indexes(false);
-    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let reader = split_builder(false).open(fixture.path()).unwrap();
     let mut results = Vec::new();
     for parallel in [false, true] {
         let mut messages = Vec::new();
@@ -167,9 +166,9 @@ fn raw_reads_match_with_parallel_overrides() {
 }
 
 #[test]
-fn opened_reader_default_selects_all_channels_even_with_duplicate_topics() {
+fn reader_default_selects_all_channels_even_with_duplicate_topics() {
     let fixture = write_split_topic_fixture("opened-all-channels");
-    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let reader = split_builder(false).open(fixture.path()).unwrap();
     let mut raw = BTreeMap::<u16, usize>::new();
     reader
         .read()
@@ -192,7 +191,7 @@ fn opened_reader_default_selects_all_channels_even_with_duplicate_topics() {
 }
 
 #[test]
-fn opened_reader_all_decoded_rejects_schema_less_channel() {
+fn reader_all_decoded_rejects_schema_less_channel() {
     let reader = McapReader::open(fixture_path("with_summary.mcap")).unwrap();
     assert!(matches!(
         reader.read().decoded().for_each(|_, _| {}),
@@ -205,7 +204,7 @@ fn opened_reader_all_decoded_rejects_schema_less_channel() {
 }
 
 #[test]
-fn opened_reader_empty_selection_emits_no_messages() {
+fn reader_empty_selection_emits_no_messages() {
     let reader = McapReader::open(fixture_path("with_summary.mcap")).unwrap();
     reader
         .read()
@@ -222,9 +221,9 @@ fn opened_reader_empty_selection_emits_no_messages() {
 }
 
 #[test]
-fn opened_reader_selects_multiple_channels_and_reports_metadata() {
+fn reader_selects_multiple_channels_and_reports_metadata() {
     let fixture = write_split_topic_fixture("opened-multiple-channels");
-    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let reader = split_builder(false).open(fixture.path()).unwrap();
     let channels = reader.list_channels();
     let ids = [channels[0].id, channels[1].id, channels[0].id];
     let options = ReadOptions {
@@ -273,9 +272,9 @@ fn opened_reader_selects_multiple_channels_and_reports_metadata() {
 }
 
 #[test]
-fn opened_reader_exposes_schemas_and_counts() {
+fn reader_exposes_schemas_and_counts() {
     let fixture = write_split_topic_fixture("opened-schema");
-    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let reader = split_builder(false).open(fixture.path()).unwrap();
     let channels = reader.list_channels();
     assert!(
         !reader
@@ -292,15 +291,15 @@ fn opened_reader_exposes_schemas_and_counts() {
         Err(McapReaderError::MultipleChannels)
     ));
     let fixture = multi_topic_fixture();
-    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let reader = split_builder(false).open(fixture.path()).unwrap();
     assert_eq!(reader.message_count("/first").unwrap(), 1024);
     assert!(!reader.topic_field_defs("/first").unwrap().is_empty());
 }
 
 #[test]
-fn opened_reader_reuses_file_for_topic_and_channel_reads() {
+fn reader_reuses_file_for_topic_and_channel_reads() {
     let fixture = write_split_topic_fixture("opened-reader");
-    let reader = split_reader(false).open_file(fixture.path()).unwrap();
+    let reader = split_builder(false).open(fixture.path()).unwrap();
     let channels = reader.list_channels();
     assert_eq!(reader.list_topics().len(), 1);
 
@@ -328,7 +327,7 @@ fn opened_reader_reuses_file_for_topic_and_channel_reads() {
 }
 
 #[test]
-fn opened_reader_selects_raw_topics_and_channel() {
+fn reader_selects_raw_topics_and_channel() {
     let fixture = write_split_topic_fixture("opened-raw");
     let reader = McapReader::open(fixture.path()).unwrap();
     let channel = reader.list_channels()[1].id;
@@ -350,12 +349,11 @@ fn opened_reader_selects_raw_topics_and_channel() {
 }
 
 #[test]
-fn opened_reader_decoded_topics_apply_options_and_deduplicate() {
+fn reader_decoded_topics_apply_options_and_deduplicate() {
     let fixture = multi_topic_fixture();
     let reader = McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
     let mut topics = Vec::new();
     reader
@@ -377,10 +375,10 @@ fn opened_reader_decoded_topics_apply_options_and_deduplicate() {
 }
 
 #[test]
-fn opened_reader_raw_and_decoded_share_filters() {
+fn reader_raw_and_decoded_share_filters() {
     for indexes in [false, true] {
         let fixture = multi_topic_fixture_with_indexes(indexes);
-        let reader = split_reader(false).open_file(fixture.path()).unwrap();
+        let reader = split_builder(false).open(fixture.path()).unwrap();
         let options = ReadOptions {
             time_range: Some(TimeRange {
                 start: Some(4),
@@ -419,17 +417,17 @@ fn opened_reader_raw_and_decoded_share_filters() {
     }
 }
 
-pub(super) fn split_reader(parallel: bool) -> McapReader {
+pub(super) fn split_builder(parallel: bool) -> McapReaderBuilder {
     McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
         .with_parallel(parallel)
-        .build()
 }
 
-fn split_channel_ids(reader: &McapReader, path: &Path) -> Vec<u16> {
-    reader
-        .list_channels(path)
+fn split_channel_ids(builder: &McapReaderBuilder, path: &Path) -> Vec<u16> {
+    builder
+        .open(path)
         .unwrap()
+        .list_channels()
         .into_iter()
         .map(|channel| channel.id)
         .collect()
@@ -437,10 +435,10 @@ fn split_channel_ids(reader: &McapReader, path: &Path) -> Vec<u16> {
 
 #[test]
 fn list_channels_reports_each_channel_in_id_order() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
     let fixture = write_split_topic_fixture("list-channels");
 
-    let channels = reader.list_channels(fixture.path()).unwrap();
+    let channels = builder.open(fixture.path()).unwrap().list_channels();
 
     assert!(channels.is_sorted_by_key(|channel| channel.id));
     assert_eq!(
@@ -459,24 +457,15 @@ fn list_channels_reports_each_channel_in_id_order() {
 }
 
 #[test]
-fn list_channels_no_summary_returns_error() {
-    let reader = McapReader::new();
-    assert!(matches!(
-        reader.list_channels(&fixture_path("no_summary.mcap")),
-        Err(McapReaderError::SummaryNotAvailable)
-    ));
-}
-
-#[test]
 fn decoded_read_by_channel_id_returns_only_that_channel() {
     let fixture = write_split_topic_fixture("decoded-by-channel");
     for parallel in [false, true] {
-        let reader = split_reader(parallel);
+        let builder = split_builder(parallel);
         let mut per_channel = Vec::new();
-        for id in split_channel_ids(&reader, fixture.path()) {
+        for id in split_channel_ids(&builder, fixture.path()) {
             let mut log_times = Vec::new();
-            reader
-                .open_file(fixture.path())
+            builder
+                .open(fixture.path())
                 .unwrap()
                 .read()
                 .channel(id)
@@ -499,12 +488,12 @@ fn decoded_read_by_channel_id_returns_only_that_channel() {
 #[test]
 fn decoded_read_by_channel_id_applies_options() {
     let fixture = write_split_topic_fixture("decoded-by-channel-options");
-    let reader = split_reader(false);
-    let id = split_channel_ids(&reader, fixture.path())[1];
+    let builder = split_builder(false);
+    let id = split_channel_ids(&builder, fixture.path())[1];
     let mut log_times = Vec::new();
 
-    reader
-        .open_file(fixture.path())
+    builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .channel(id)
@@ -528,12 +517,12 @@ fn decoded_read_by_channel_id_applies_options() {
 fn raw_read_by_channel_id_returns_only_that_channel() {
     let fixture = write_split_topic_fixture("raw-by-channel");
     for parallel in [false, true] {
-        let reader = McapReader::builder().with_parallel(parallel).build();
+        let builder = McapReader::builder().with_parallel(parallel);
         let mut per_channel = Vec::new();
-        for id in split_channel_ids(&reader, fixture.path()) {
+        for id in split_channel_ids(&builder, fixture.path()) {
             let mut log_times = Vec::new();
-            reader
-                .open_file(fixture.path())
+            builder
+                .open(fixture.path())
                 .unwrap()
                 .read()
                 .channel(id)
@@ -551,11 +540,15 @@ fn raw_read_by_channel_id_returns_only_that_channel() {
 #[test]
 fn field_defs_by_channel_id_uses_that_channels_schema() {
     let fixture = write_split_topic_fixture("field-defs-by-channel");
-    let reader = split_reader(true);
-    let names: Vec<_> = split_channel_ids(&reader, fixture.path())
+    let builder = split_builder(true);
+    let names: Vec<_> = split_channel_ids(&builder, fixture.path())
         .into_iter()
         .map(|id| {
-            let field_defs = reader.field_defs_by_channel_id(fixture.path(), id).unwrap();
+            let field_defs = builder
+                .open(fixture.path())
+                .unwrap()
+                .field_defs_by_channel_id(id)
+                .unwrap();
             field_defs[0].name.clone()
         })
         .collect();
@@ -566,16 +559,19 @@ fn field_defs_by_channel_id_uses_that_channels_schema() {
 #[test]
 fn channel_id_reads_report_unknown_channel() {
     let fixture = write_split_topic_fixture("unknown-channel");
-    let reader = split_reader(true);
+    let builder = split_builder(true);
     let unknown = u16::MAX;
 
     assert!(matches!(
-        reader.field_defs_by_channel_id(fixture.path(), unknown),
+        builder
+            .open(fixture.path())
+            .unwrap()
+            .field_defs_by_channel_id(unknown),
         Err(McapReaderError::ChannelNotFound)
     ));
     assert!(matches!(
-        reader
-            .open_file(fixture.path())
+        builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .channel(unknown)
@@ -584,8 +580,8 @@ fn channel_id_reads_report_unknown_channel() {
         Err(McapReaderError::ChannelNotFound)
     ));
     assert!(matches!(
-        reader
-            .open_file(fixture.path())
+        builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .channel(unknown)
@@ -598,15 +594,18 @@ fn channel_id_reads_report_unknown_channel() {
 #[test]
 fn topic_reads_reject_a_topic_with_multiple_channels() {
     let fixture = write_split_topic_fixture("topic-multiple-channels");
-    let reader = split_reader(true);
+    let builder = split_builder(true);
 
     assert!(matches!(
-        reader.topic_field_defs(fixture.path(), "/split"),
+        builder
+            .open(fixture.path())
+            .unwrap()
+            .topic_field_defs("/split"),
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
-        reader
-            .open_file(fixture.path())
+        builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .topic("/split")
@@ -615,8 +614,8 @@ fn topic_reads_reject_a_topic_with_multiple_channels() {
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
-        reader
-            .open_file(fixture.path())
+        builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .topic("/split")
@@ -625,46 +624,45 @@ fn topic_reads_reject_a_topic_with_multiple_channels() {
         Err(McapReaderError::MultipleChannels)
     ));
     assert!(matches!(
-        reader.message_count(fixture.path(), "/split"),
+        builder
+            .open(fixture.path())
+            .unwrap()
+            .message_count("/split"),
         Err(McapReaderError::MultipleChannels)
     ));
 }
 
 #[test]
 fn message_count_with_summary() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
     let path = fixture_path("with_summary.mcap");
 
-    assert_eq!(reader.message_count(&path, "/decoded").unwrap(), 2);
-}
-
-#[test]
-fn message_count_no_summary_returns_error() {
-    let reader = McapReader::new();
-    let path = fixture_path("no_summary.mcap");
-    assert!(matches!(
-        reader.message_count(&path, "/decoded"),
-        Err(McapReaderError::SummaryNotAvailable)
-    ));
+    assert_eq!(
+        builder
+            .open(&path)
+            .unwrap()
+            .message_count("/decoded")
+            .unwrap(),
+        2
+    );
 }
 
 #[test]
 fn message_count_unknown_topic_returns_error() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
     let path = fixture_path("with_summary.mcap");
     assert!(matches!(
-        reader.message_count(&path, "/unknown"),
+        builder.open(&path).unwrap().message_count("/unknown"),
         Err(McapReaderError::TopicNotFound)
     ));
 }
 
 #[test]
-fn opened_topic_schema_enables_value_access() {
+fn reader_topic_schema_enables_value_access() {
     let fixture = write_chunked_fixture("opened-value-view", &[br#"{"value":42}"#]);
     let reader = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
     reader
         .read()
@@ -678,23 +676,12 @@ fn opened_topic_schema_enables_value_access() {
 }
 
 #[test]
-fn builder_default_matches_new_without_decoders() {
-    let new_reader = McapReader::new();
-    let built_reader = McapReader::builder().build();
-    let path = fixture_path("with_summary.mcap");
-
-    assert_eq!(
-        new_reader.message_count(&path, "/decoded").unwrap(),
-        built_reader.message_count(&path, "/decoded").unwrap()
-    );
-}
-
-#[test]
 fn list_topics_returns_topic_metadata() {
-    let reader = McapReader::new();
-    let topics = reader
-        .list_topics(&fixture_path("with_summary.mcap"))
-        .unwrap();
+    let builder = McapReader::builder();
+    let topics = builder
+        .open(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .list_topics();
 
     assert_eq!(
         topics,
@@ -721,11 +708,12 @@ fn list_topics_returns_topic_metadata() {
 
 #[test]
 fn topic_schema_returns_metadata_and_field_defs_together() {
-    let mut reader = McapReader::new();
-    reader.register_decoder(Box::new(TestJsonDecoder));
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let topic_schema = reader
-        .topic_schema(&fixture_path("with_summary.mcap"), "/decoded")
+    let topic_schema = builder
+        .open(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .topic_schema("/decoded")
         .unwrap();
 
     assert_eq!(topic_schema.info.topic, "/decoded");
@@ -738,10 +726,11 @@ fn topic_schema_returns_metadata_and_field_defs_together() {
 
 #[test]
 fn list_topics_with_decode_status_reads_topic_metadata_and_decode_errors() {
-    let reader = McapReader::new();
-    let statuses = reader
-        .list_topics_with_decode_status(&fixture_path("with_summary.mcap"))
-        .unwrap();
+    let builder = McapReader::builder();
+    let statuses = builder
+        .open(fixture_path("with_summary.mcap"))
+        .unwrap()
+        .list_topics_with_decode_status();
 
     assert_eq!(
         statuses,
@@ -778,20 +767,10 @@ fn list_topics_with_decode_status_reads_topic_metadata_and_decode_errors() {
 }
 
 #[test]
-fn list_topics_no_summary_returns_error() {
-    let reader = McapReader::new();
-
-    assert!(matches!(
-        reader.list_topics(&fixture_path("no_summary.mcap")),
-        Err(McapReaderError::SummaryNotAvailable)
-    ));
-}
-
-#[test]
 fn list_topics_aggregates_duplicate_channels() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
     let fixture = write_duplicate_topic_fixture("duplicate-topic");
-    let topics = reader.list_topics(fixture.path()).unwrap();
+    let topics = builder.open(fixture.path()).unwrap().list_topics();
 
     assert_eq!(
         topics,
@@ -808,11 +787,10 @@ fn list_topics_aggregates_duplicate_channels() {
 
 #[test]
 fn decoded_read_unknown_topic_returns_error() {
-    let mut reader = McapReader::new();
-    reader.register_decoder(Box::new(TestJsonDecoder));
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/unknown")
@@ -825,11 +803,10 @@ fn decoded_read_unknown_topic_returns_error() {
 
 #[test]
 fn decoded_read_errors_when_schema_is_missing() {
-    let mut reader = McapReader::new();
-    reader.register_decoder(Box::new(TestJsonDecoder));
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/raw")
@@ -842,10 +819,10 @@ fn decoded_read_errors_when_schema_is_missing() {
 
 #[test]
 fn decoded_read_without_decoder_returns_error() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/decoded")
@@ -858,20 +835,20 @@ fn decoded_read_without_decoder_returns_error() {
 
 #[test]
 fn raw_read_reads_schema_less_topic_payloads() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
 
     assert_eq!(
-        collect_raw_payloads(&reader, &fixture_path("with_summary.mcap"), "/raw"),
+        collect_raw_payloads(&builder, &fixture_path("with_summary.mcap"), "/raw"),
         vec![vec![0x01, 0x02, 0x03]]
     );
 }
 
 #[test]
 fn raw_read_unknown_topic_returns_error() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/unknown")
@@ -884,10 +861,10 @@ fn raw_read_unknown_topic_returns_error() {
 
 #[test]
 fn raw_read_propagates_callback_error() {
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/raw")
@@ -912,18 +889,16 @@ fn decoded_read_parallel_matches_sequential_for_multi_chunk_fixture() {
         ],
     );
 
-    let parallel_reader = McapReader::builder()
+    let parallel_builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
-    let sequential_reader = McapReader::builder()
+        .with_parallel(true);
+    let sequential_builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(false)
-        .build();
+        .with_parallel(false);
 
     assert_eq!(
-        collect_decoded_i64_values(&parallel_reader, fixture.path(), "/decoded"),
-        collect_decoded_i64_values(&sequential_reader, fixture.path(), "/decoded")
+        collect_decoded_i64_values(&parallel_builder, fixture.path(), "/decoded"),
+        collect_decoded_i64_values(&sequential_builder, fixture.path(), "/decoded")
     );
 }
 
@@ -934,13 +909,12 @@ fn decoded_read_parallel_propagates_decode_error() {
         &[br#"{"value":1}"#, b"invalid", br#"{"value":3}"#],
     );
 
-    let reader = McapReader::builder()
+    let builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
+        .with_parallel(true);
 
-    let err = reader
-        .open_file(fixture.path())
+    let err = builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topic("/decoded")
@@ -956,11 +930,10 @@ fn decoded_read_parallel_propagates_decode_error() {
 
 #[test]
 fn decoded_read_propagates_callback_error() {
-    let mut reader = McapReader::new();
-    reader.register_decoder(Box::new(TestJsonDecoder));
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
 
-    let err = reader
-        .open_file(fixture_path("with_summary.mcap"))
+    let err = builder
+        .open(fixture_path("with_summary.mcap"))
         .unwrap()
         .read()
         .topic("/decoded")
@@ -981,14 +954,13 @@ fn decoded_read_propagates_callback_error() {
 #[test]
 fn parallel_reader_callback_can_use_rayon() {
     let fixture = multi_topic_fixture();
-    let reader = McapReader::builder()
+    let builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
+        .with_parallel(true);
     for topics in [&["/first"][..], &["/first", "/second"][..]] {
         let mut calls = 0;
-        reader
-            .open_file(fixture.path())
+        builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .topics(topics)
@@ -1007,14 +979,13 @@ fn parallel_reader_callback_can_use_rayon() {
 #[test]
 fn parallel_reader_stops_after_callback_error_across_windows() {
     let fixture = multi_topic_fixture();
-    let reader = McapReader::builder()
+    let builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
+        .with_parallel(true);
     for topics in [&["/first"][..], &["/first", "/second"][..]] {
         let mut calls = 0;
-        let error = reader
-            .open_file(fixture.path())
+        let error = builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .topics(topics)
@@ -1045,14 +1016,13 @@ fn decoded_read_parallel_stops_after_callback_error() {
         ],
     );
 
-    let reader = McapReader::builder()
+    let builder = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .with_parallel(true)
-        .build();
+        .with_parallel(true);
     let mut visited = Vec::new();
 
-    let err = reader
-        .open_file(fixture.path())
+    let err = builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topic("/decoded")
@@ -1099,8 +1069,12 @@ fn topic_schema_exposes_named_ros_types_without_message_payloads() {
             .add_channel(id, "/types", "cdr", &BTreeMap::new())
             .unwrap();
         writer.finish().unwrap();
-        let reader = McapReader::builder().with_default_decoders().build();
-        let metadata = reader.topic_schema(fixture.path(), "/types").unwrap();
+        let builder = McapReader::builder().with_default_decoders();
+        let metadata = builder
+            .open(fixture.path())
+            .unwrap()
+            .topic_schema("/types")
+            .unwrap();
         let displayed: Vec<_> = metadata
             .field_defs
             .iter()
@@ -1124,10 +1098,9 @@ fn topic_schema_exposes_named_ros_types_without_message_payloads() {
 fn multi_topic_decoded_reads_work_without_arrow() {
     let fixture = multi_topic_fixture();
     for parallel in [false, true] {
-        let reader = McapReader::builder()
+        let builder = McapReader::builder()
             .with_decoder(Box::new(TestJsonDecoder))
-            .with_parallel(parallel)
-            .build();
+            .with_parallel(parallel);
         for options in [
             ReadOptions::default(),
             ReadOptions {
@@ -1146,8 +1119,8 @@ fn multi_topic_decoded_reads_work_without_arrow() {
             },
         ] {
             let mut actual = BTreeMap::<String, Vec<(u64, u64, i64)>>::new();
-            reader
-                .open_file(fixture.path())
+            builder
+                .open(fixture.path())
                 .unwrap()
                 .read()
                 .topics(["/first", "/second", "/first", "/empty", "/second"])
@@ -1169,8 +1142,8 @@ fn multi_topic_decoded_reads_work_without_arrow() {
                 .unwrap();
             for topic in ["/first", "/second", "/empty"] {
                 let mut expected = Vec::new();
-                reader
-                    .open_file(fixture.path())
+                builder
+                    .open(fixture.path())
                     .unwrap()
                     .read()
                     .topic(topic)
@@ -1190,8 +1163,8 @@ fn multi_topic_decoded_reads_work_without_arrow() {
             }
         }
         let mut calls = 0;
-        let error = reader
-            .open_file(fixture.path())
+        let error = builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .topics(["/first", "/second"])
@@ -1212,13 +1185,11 @@ fn multi_topic_decoded_reads_work_without_arrow() {
 #[test]
 fn repeated_single_topic_is_read_once() {
     let fixture = multi_topic_fixture();
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
     let options = ReadOptions::default();
     let mut topics = Vec::new();
-    reader
-        .open_file(fixture.path())
+    builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topics(["/first", "/first"])
@@ -1240,13 +1211,12 @@ fn repeated_single_topic_is_read_once() {
 fn decoded_reads_scan_chunks_without_message_indexes() {
     let fixture = multi_topic_fixture_with_indexes(false);
     for parallel in [false, true] {
-        let reader = McapReader::builder()
+        let builder = McapReader::builder()
             .with_decoder(Box::new(TestJsonDecoder))
-            .with_parallel(parallel)
-            .build();
+            .with_parallel(parallel);
         let mut times = Vec::new();
-        reader
-            .open_file(fixture.path())
+        builder
+            .open(fixture.path())
             .unwrap()
             .read()
             .topic("/first")
@@ -1275,8 +1245,8 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
             },
         ] {
             let mut actual = BTreeMap::<String, Vec<(u64, i64)>>::new();
-            reader
-                .open_file(fixture.path())
+            builder
+                .open(fixture.path())
                 .unwrap()
                 .read()
                 .topics(["/first", "/second"])
@@ -1335,8 +1305,12 @@ fn default_decoders_expose_json_topics_unparsed() {
         .unwrap();
     writer.finish().unwrap();
 
-    let reader = McapReader::builder().with_default_decoders().build();
-    let metadata = reader.topic_schema(fixture.path(), "/json").unwrap();
+    let builder = McapReader::builder().with_default_decoders();
+    let metadata = builder
+        .open(fixture.path())
+        .unwrap()
+        .topic_schema("/json")
+        .unwrap();
     assert_eq!(metadata.field_defs[0].name, "json");
     assert_eq!(
         metadata.field_defs[0].element.data_type,
@@ -1344,8 +1318,8 @@ fn default_decoders_expose_json_topics_unparsed() {
     );
 
     let mut decoded = Vec::new();
-    reader
-        .open_file(fixture.path())
+    builder
+        .open(fixture.path())
         .unwrap()
         .read()
         .topic("/json")

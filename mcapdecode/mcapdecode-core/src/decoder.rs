@@ -35,7 +35,7 @@ pub trait TopicDecoder: Send + Sync {
 
 /// Factory trait that builds topic-local decoders from MCAP schema metadata.
 ///
-/// Implementations are registered with `mcapdecode::McapReader` and
+/// Implementations are registered with `mcapdecode::McapReaderBuilder` and
 /// dispatched based on [`EncodingKey`].
 pub trait MessageDecoder: Send + Sync {
     /// Returns the encoding pair this decoder handles.

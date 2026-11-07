@@ -1,9 +1,9 @@
 use std::ops::ControlFlow;
 
-use super::{core::split_reader, *};
+use super::{core::split_builder, *};
 
 /// The multi-topic fixture without chunks, with sequential chunk reads, and with parallel chunk reads.
-fn stop_cases() -> Vec<(TempFixture, OpenedMcap)> {
+fn stop_cases() -> Vec<(TempFixture, McapReader)> {
     [(false, false), (true, false), (true, true)]
         .into_iter()
         .map(|(use_chunks, parallel)| {
@@ -12,7 +12,7 @@ fn stop_cases() -> Vec<(TempFixture, OpenedMcap)> {
                     .use_chunks(use_chunks)
                     .chunk_size(Some(128)),
             );
-            let file = split_reader(parallel).open_file(fixture.path()).unwrap();
+            let file = split_builder(parallel).open(fixture.path()).unwrap();
             (fixture, file)
         })
         .collect()

@@ -16,15 +16,15 @@ mod summary;
 mod types;
 
 pub use error::McapReaderError;
-/// The `mcap` crate whose types [`OpenedMcap::summary`] exposes.
+/// The `mcap` crate whose types [`McapReader::summary`] exposes.
 pub use mcap;
 #[cfg(feature = "arrow")]
 pub use mcapdecode_arrow as arrow;
 pub use mcapdecode_core as core;
 #[cfg(feature = "arrow")]
 pub use opened::ArrowRead;
-pub use opened::{CallbackOutcome, DecodedRead, OpenedMcap, RawRead, Read};
-pub use reader::{McapReader, McapReaderBuilder};
+pub use opened::{CallbackOutcome, DecodedRead, McapReader, RawRead, Read};
+pub use reader::McapReaderBuilder;
 pub use types::{
     ChannelInfo, RawMessage, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo, TopicSchema,
 };

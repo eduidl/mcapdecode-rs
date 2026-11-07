@@ -12,7 +12,7 @@ use std::{
 
 use anyhow::Result;
 use mcapdecode::{
-    McapReaderError, OpenedMcap, RawMessage,
+    McapReader, McapReaderError, RawMessage,
     core::{DecodedMessage, Value},
 };
 
@@ -44,7 +44,7 @@ enum LoaderEvent {
 }
 
 impl TopicLoader {
-    pub(crate) fn spawn(reader: Arc<OpenedMcap>, row: TopicRow) -> Self {
+    pub(crate) fn spawn(reader: Arc<McapReader>, row: TopicRow) -> Self {
         let (sender, receiver) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_thread = Arc::clone(&cancel);

@@ -1,32 +1,27 @@
 use super::*;
 
 #[test]
-fn opened_file_reuses_metadata_and_custom_decoders_without_reopening() {
+fn reader_reuses_metadata_and_custom_decoders_without_reopening() {
     let fixture = write_chunked_fixture("opened-reuse", &[br#"{"value":42}"#]);
-    let reader = McapReader::builder()
-        .with_decoder(Box::new(TestJsonDecoder))
-        .build();
-    let topics = reader.list_topics(fixture.path()).unwrap();
-    let channels = reader.list_channels(fixture.path()).unwrap();
-    let count = reader.message_count(fixture.path(), "/decoded").unwrap();
-    let fields = reader.topic_field_defs(fixture.path(), "/decoded").unwrap();
+    let builder = McapReader::builder().with_decoder(Box::new(TestJsonDecoder));
+    let opened = builder.open(fixture.path()).unwrap();
+    let topics = opened.list_topics();
+    let channels = opened.list_channels();
+    let count = opened.message_count("/decoded").unwrap();
+    let fields = opened.topic_field_defs("/decoded").unwrap();
+    let schema = opened.topic_schema("/decoded").unwrap();
+    let statuses = opened.list_topics_with_decode_status();
+    assert_eq!(count, 1);
     assert_eq!(
-        reader
-            .field_defs_by_channel_id(fixture.path(), channels[0].id)
-            .unwrap(),
-        fields
+        fields,
+        vec![FieldDef::new("value", DataTypeDef::I64, true)].into()
     );
-    let schema = reader.topic_schema(fixture.path(), "/decoded").unwrap();
-    let statuses = reader
-        .list_topics_with_decode_status(fixture.path())
-        .unwrap();
-    let opened = reader.open_file(fixture.path()).unwrap();
     #[cfg(unix)]
     fs::remove_file(fixture.path()).unwrap();
 
     for _ in 0..2 {
         assert_eq!(opened.topic_schema("/decoded").unwrap(), schema);
-        assert_eq!(opened.list_topics_with_decode_status().unwrap(), statuses);
+        assert_eq!(opened.list_topics_with_decode_status(), statuses);
         assert_eq!(opened.list_topics(), topics);
         assert_eq!(opened.list_channels(), channels);
         assert_eq!(opened.message_count("/decoded").unwrap(), count);
@@ -39,15 +34,9 @@ fn opened_file_reuses_metadata_and_custom_decoders_without_reopening() {
 }
 
 #[test]
-fn opened_file_preserves_lookup_and_decoder_errors() {
+fn reader_preserves_lookup_and_decoder_errors() {
     let path = fixture_path("with_summary.mcap");
-    let reader = McapReader::new();
-    let expected_statuses = reader.list_topics_with_decode_status(&path).unwrap();
-    let opened = reader.open_file(&path).unwrap();
-    assert_eq!(
-        opened.list_topics_with_decode_status().unwrap(),
-        expected_statuses
-    );
+    let opened = McapReader::builder().open(&path).unwrap();
     assert!(matches!(
         opened.topic_schema("/unknown"),
         Err(McapReaderError::TopicNotFound)
@@ -87,33 +76,17 @@ fn opened_file_preserves_lookup_and_decoder_errors() {
 }
 
 #[test]
-fn opened_file_requires_a_channel_for_ambiguous_topics() {
+fn reader_requires_a_channel_for_ambiguous_topics() {
     let fixture = write_split_topic_fixture("opened-split");
-    let reader = McapReader::builder()
+    let opened = McapReader::builder()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
-        .build();
-    let expected: Vec<_> = reader
-        .list_channels(fixture.path())
-        .unwrap()
-        .iter()
-        .map(|channel| {
-            reader
-                .field_defs_by_channel_id(fixture.path(), channel.id)
-                .unwrap()
-        })
-        .collect();
-    let opened = reader.open_file(fixture.path()).unwrap();
+        .open(fixture.path())
+        .unwrap();
     assert_eq!(opened.list_topics()[0].channel_count, 3);
     assert!(matches!(
         opened.topic_schema("/split"),
         Err(McapReaderError::MultipleChannels)
     ));
-    assert_eq!(
-        opened.list_topics_with_decode_status().unwrap(),
-        reader
-            .list_topics_with_decode_status(fixture.path())
-            .unwrap()
-    );
     assert!(matches!(
         opened.message_count("/split"),
         Err(McapReaderError::MultipleChannels)
@@ -122,13 +95,20 @@ fn opened_file_requires_a_channel_for_ambiguous_topics() {
         opened.topic_field_defs("/split"),
         Err(McapReaderError::MultipleChannels)
     ));
-    for (channel, fields) in opened.list_channels().iter().zip(expected) {
-        assert_eq!(opened.field_defs_by_channel_id(channel.id).unwrap(), fields);
-    }
+    let names: Vec<_> = opened
+        .list_channels()
+        .iter()
+        .map(|channel| {
+            opened.field_defs_by_channel_id(channel.id).unwrap()[0]
+                .name
+                .clone()
+        })
+        .collect();
+    assert_eq!(names, ["first", "second", "empty"]);
 }
 
 #[test]
-fn opened_file_preserves_missing_statistics() {
+fn reader_preserves_missing_statistics() {
     let fixture = TempFixture {
         path: temp_fixture_path("opened-no-stats"),
     };
@@ -141,12 +121,12 @@ fn opened_file_preserves_missing_statistics() {
         .add_channel(0, "/raw", "json", &BTreeMap::new())
         .unwrap();
     writer.finish().unwrap();
-    let reader = McapReader::new();
+    let builder = McapReader::builder();
     assert!(matches!(
-        reader.message_count(fixture.path(), "/raw"),
+        builder.open(fixture.path()).unwrap().message_count("/raw"),
         Err(McapReaderError::StatsNotAvailable)
     ));
-    let opened = reader.open_file(fixture.path()).unwrap();
+    let opened = builder.open(fixture.path()).unwrap();
     assert_eq!(opened.list_topics()[0].message_count, None);
     assert_eq!(opened.list_channels()[0].message_count, None);
     assert!(matches!(
@@ -171,8 +151,9 @@ fn open_enables_default_decoders() {
     writer.finish().unwrap();
     let expected = McapReader::builder()
         .with_default_decoders()
-        .build()
-        .topic_field_defs(fixture.path(), "/decoded")
+        .open(fixture.path())
+        .unwrap()
+        .topic_field_defs("/decoded")
         .unwrap();
     let opened = McapReader::open(fixture.path()).unwrap();
     assert_eq!(opened.topic_field_defs("/decoded").unwrap(), expected);
@@ -180,12 +161,11 @@ fn open_enables_default_decoders() {
 
 #[cfg(feature = "arrow")]
 #[test]
-fn opened_batch_schema_uses_custom_metadata() {
+fn reader_batch_schema_uses_custom_metadata() {
     let fixture = write_chunked_fixture("opened-arrow", &[br#"{"value":42}"#]);
     let opened = McapReader::builder()
         .with_decoder(Box::new(TestJsonDecoder))
-        .build()
-        .open_file(fixture.path())
+        .open(fixture.path())
         .unwrap();
     let metadata = mcapdecode::MetadataColumns::with_prefix("mcap_")
         .with_timestamp_format(mcapdecode::MetadataTimestampFormat::UnixNanoseconds);
@@ -205,15 +185,15 @@ fn opened_batch_schema_uses_custom_metadata() {
 }
 
 #[test]
-fn reader_opens_multiple_files_with_independent_registration_snapshots() {
+fn builder_opens_multiple_files_with_the_same_decoders() {
     let first_fixture = write_chunked_fixture("opened-first", &[br#"{"value":1}"#]);
     let second_fixture =
         write_chunked_fixture("opened-second", &[br#"{"value":2}"#, br#"{"value":3}"#]);
-    let mut reader = McapReader::new();
-    let unconfigured = reader.open_file(first_fixture.path()).unwrap();
-    reader.register_decoder(Box::new(TestJsonDecoder));
-    let first = reader.open_file(first_fixture.path()).unwrap();
-    let second = reader.open_file(second_fixture.path()).unwrap();
+    let builder = McapReader::builder();
+    let unconfigured = builder.open(first_fixture.path()).unwrap();
+    let builder = builder.with_decoder(Box::new(TestJsonDecoder));
+    let first = builder.open(first_fixture.path()).unwrap();
+    let second = builder.open(second_fixture.path()).unwrap();
     let fields: FieldDefs = vec![FieldDef::new("value", DataTypeDef::I64, true)].into();
     assert_eq!(first.topic_field_defs("/decoded").unwrap(), fields);
     assert_eq!(second.topic_field_defs("/decoded").unwrap(), fields);
@@ -223,20 +203,10 @@ fn reader_opens_multiple_files_with_independent_registration_snapshots() {
         unconfigured.topic_field_defs("/decoded"),
         Err(McapReaderError::NoDecoder { .. })
     ));
-
-    reader.register_decoder(Box::new(SchemaNamedFieldDecoder));
-    assert_ne!(
-        reader
-            .topic_field_defs(first_fixture.path(), "/decoded")
-            .unwrap(),
-        fields
-    );
-    assert_eq!(first.topic_field_defs("/decoded").unwrap(), fields);
-    assert_eq!(second.topic_field_defs("/decoded").unwrap(), fields);
 }
 
 #[test]
-fn opened_file_reports_zero_for_an_empty_channel_with_statistics() {
+fn reader_reports_zero_for_an_empty_channel_with_statistics() {
     let fixture = multi_topic_fixture();
     let opened = McapReader::open(fixture.path()).unwrap();
     assert_eq!(opened.message_count("/empty").unwrap(), 0);
@@ -261,34 +231,34 @@ fn opened_file_reports_zero_for_an_empty_channel_with_statistics() {
 }
 
 #[test]
-fn opened_message_time_range_uses_statistics() {
+fn reader_message_time_range_uses_statistics() {
     let fixture = write_chunked_fixture("time-range-stats", &[b"{}", b"{}", b"{}"]);
-    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    let opened = McapReader::builder().open(fixture.path()).unwrap();
     assert_eq!(opened.message_time_range(), Some(1..=3));
 }
 
 #[test]
-fn opened_message_time_range_falls_back_to_chunk_indexes() {
+fn reader_message_time_range_falls_back_to_chunk_indexes() {
     let fixture = multi_topic_fixture_with_options(
         WriteOptions::new()
             .chunk_size(Some(128))
             .emit_statistics(false),
     );
-    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    let opened = McapReader::builder().open(fixture.path()).unwrap();
     assert_eq!(opened.message_time_range(), Some(0..=1023));
 }
 
 #[test]
-fn opened_message_time_range_is_none_without_messages() {
+fn reader_message_time_range_is_none_without_messages() {
     let fixture = write_chunked_fixture("time-range-empty", &[]);
-    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    let opened = McapReader::builder().open(fixture.path()).unwrap();
     assert_eq!(opened.message_time_range(), None);
 }
 
 #[test]
-fn opened_summary_exposes_statistics() {
+fn reader_summary_exposes_statistics() {
     let fixture = write_chunked_fixture("summary", &[b"{}", b"{}", b"{}"]);
-    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    let opened = McapReader::builder().open(fixture.path()).unwrap();
     let stats = opened.summary().stats.as_ref().unwrap();
     assert_eq!(stats.message_count, 3);
     assert_eq!(opened.summary().channels.len(), 1);
@@ -321,13 +291,13 @@ fn write_leading_empty_chunk_fixture(log_times: &[u64]) -> TempFixture {
 }
 
 #[test]
-fn opened_message_time_range_ignores_chunks_without_messages() {
+fn reader_message_time_range_ignores_chunks_without_messages() {
     let fixture = write_leading_empty_chunk_fixture(&[100, 200]);
-    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    let opened = McapReader::builder().open(fixture.path()).unwrap();
     assert_eq!(opened.summary().chunk_indexes.len(), 2);
     assert_eq!(opened.message_time_range(), Some(100..=200));
 
     let fixture = write_leading_empty_chunk_fixture(&[]);
-    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    let opened = McapReader::builder().open(fixture.path()).unwrap();
     assert_eq!(opened.message_time_range(), None);
 }

@@ -74,8 +74,8 @@ impl InternalReader {
     pub(crate) fn list_topics_with_decode_status(
         &self,
         summary: &mcap::read::Summary,
-    ) -> Result<Vec<TopicDecodeStatus>, McapReaderError> {
-        Ok(topic_infos_from_summary(summary)
+    ) -> Vec<TopicDecodeStatus> {
+        topic_infos_from_summary(summary)
             .into_iter()
             .map(|topic| {
                 let decode_error = self
@@ -88,7 +88,7 @@ impl InternalReader {
                     decode_error,
                 }
             })
-            .collect())
+            .collect()
     }
 
     pub(crate) fn topic_schema(
