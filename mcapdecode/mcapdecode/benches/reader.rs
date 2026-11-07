@@ -31,15 +31,27 @@ fn bench_reader(c: &mut Criterion) {
         ("skip_chunks", SPARSE, false),
     ] {
         let path = ensure_generated(PayloadCase::Flat, Encoding::Ros2idl, shape).unwrap();
-        let mut group = c.benchmark_group(format!("reader/{name}"));
+        let mut group = c.benchmark_group("reader/decoded");
         group.throughput(Throughput::Bytes(std::fs::metadata(&path).unwrap().len()));
-        group.bench_function("decoded", |b| {
+        group.bench_function(name, |b| {
             b.iter(|| {
                 McapReader::builder()
                     .with_default_decoders()
                     .with_parallel(parallel)
                     .build()
                     .for_each_decoded_message(&path, mcapbench::TOPIC, |_| Ok(()))
+                    .unwrap();
+            })
+        });
+        group.finish();
+        let mut group = c.benchmark_group("reader/raw");
+        group.throughput(Throughput::Bytes(std::fs::metadata(&path).unwrap().len()));
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                McapReader::builder()
+                    .with_parallel(parallel)
+                    .build()
+                    .for_each_raw_message(&path, mcapbench::TOPIC, |_| Ok(()))
                     .unwrap();
             })
         });

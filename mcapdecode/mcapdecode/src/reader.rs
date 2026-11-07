@@ -165,6 +165,7 @@ impl McapReader {
 
     /// Read raw message payloads for a topic and emit them one-by-one to callback.
     /// When chunk indexes exist, only indexed chunks are read; otherwise all messages are scanned.
+    /// Indexed chunks are decompressed in parallel when enabled on the reader.
     pub fn for_each_raw_message(
         &self,
         path: &Path,
@@ -173,7 +174,7 @@ impl McapReader {
     ) -> Result<(), McapReaderError> {
         let file = McapFile::open(path)?;
         let channel = get_channel_from_summary(&file.summary, topic)?;
-        for_each_raw_message_impl(&file, channel.id, callback)
+        for_each_raw_message_impl(&file, channel.id, self.inner.parallel, callback)
     }
 
     /// Read raw message payloads of one channel and emit them one-by-one to callback.
@@ -185,7 +186,7 @@ impl McapReader {
     ) -> Result<(), McapReaderError> {
         let file = McapFile::open(path)?;
         get_channel_by_id(&file.summary, channel_id)?;
-        for_each_raw_message_impl(&file, channel_id, callback)
+        for_each_raw_message_impl(&file, channel_id, self.inner.parallel, callback)
     }
 
     /// Return the total message count from the MCAP summary section.

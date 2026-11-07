@@ -174,21 +174,22 @@ fn decoded_read_by_channel_id_applies_options() {
 
 #[test]
 fn raw_read_by_channel_id_returns_only_that_channel() {
-    let reader = McapReader::new();
     let fixture = write_split_topic_fixture("raw-by-channel");
-    let mut per_channel = Vec::new();
-    for id in split_channel_ids(&reader, fixture.path()) {
-        let mut log_times = Vec::new();
-        reader
-            .for_each_raw_message_by_channel_id(fixture.path(), id, |message| {
-                log_times.push(message.log_time);
-                Ok(())
-            })
-            .unwrap();
-        per_channel.push(log_times);
+    for parallel in [false, true] {
+        let reader = McapReader::builder().with_parallel(parallel).build();
+        let mut per_channel = Vec::new();
+        for id in split_channel_ids(&reader, fixture.path()) {
+            let mut log_times = Vec::new();
+            reader
+                .for_each_raw_message_by_channel_id(fixture.path(), id, |message| {
+                    log_times.push(message.log_time);
+                    Ok(())
+                })
+                .unwrap();
+            per_channel.push(log_times);
+        }
+        assert_eq!(per_channel, [vec![1, 3], vec![2, 4], vec![]]);
     }
-
-    assert_eq!(per_channel, [vec![1, 3], vec![2, 4], vec![]]);
 }
 
 #[test]

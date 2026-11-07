@@ -113,6 +113,7 @@ impl InternalReader {
 pub(crate) fn for_each_raw_message_impl(
     file: &McapFile,
     channel_id: u16,
+    parallel: bool,
     mut callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
 ) -> Result<(), McapReaderError> {
     let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
@@ -122,7 +123,7 @@ pub(crate) fn for_each_raw_message_impl(
     for_each_chunk(
         file,
         chunks,
-        false,
+        parallel,
         |message| {
             Ok((message.channel.id == channel_id).then(|| RawMessage {
                 log_time: message.log_time,
