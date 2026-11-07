@@ -48,7 +48,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .decoded()
         .for_each(|channel, message| {
             println!("{}: publish_time={}", channel.topic, message.publish_time);
-            Ok(())
         })?;
     Ok(())
 }
@@ -73,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .read()
         .topic("/topic/name")
         .decoded()
-        .for_each(|_, message| {
+        .try_for_each(|_, message| {
             let x = message.value
                 .get("poses")?
                 .get(0)?
@@ -111,12 +110,16 @@ reader
     .decoded()
     .for_each(|topic, message| {
         println!("{}: {}", topic.topic, message.publish_time);
-        Ok(())
     })?;
 ```
 
 Use `options` to filter messages by `log_time` and configure parallel reads. The same selection and
 options apply to `raw()`, `decoded()`, and, with the `arrow` feature, `arrow()`.
+
+As with `Iterator`, `for_each` callbacks return nothing, while `try_for_each`
+callbacks can stop the read: returning `Err` fails it with
+`McapReaderError::Callback`, and returning `ControlFlow::Break(())` (also as
+`Ok(ControlFlow::Break(()))`) ends it with `Ok(())`.
 
 ## Arrow Usage
 
@@ -132,7 +135,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arrow()
         .for_each(|_, batch| {
             println!("rows={}, cols={}", batch.num_rows(), batch.num_columns());
-            Ok(())
         })?;
 
     Ok(())

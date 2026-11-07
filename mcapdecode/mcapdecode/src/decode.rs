@@ -1,5 +1,7 @@
 //! Message decoding over the selected channels of a file.
 
+use std::ops::ControlFlow;
+
 use mcapdecode_core::{DecodedMessage, FieldDefs, TopicDecoder};
 
 use crate::{
@@ -13,7 +15,7 @@ impl InternalReader {
         file: &McapFile,
         contexts: &[TopicDecodeContext],
         options: &ReadOptions,
-        callback: &mut impl FnMut(usize, DecodedMessage) -> Result<(), McapReaderError>,
+        callback: &mut impl FnMut(usize, DecodedMessage) -> Result<ControlFlow<()>, McapReaderError>,
     ) -> Result<(), McapReaderError> {
         let channel_ids: Vec<_> = contexts.iter().map(|context| context.channel_id).collect();
         for_each_selected_message(

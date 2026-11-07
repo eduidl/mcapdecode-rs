@@ -1,3 +1,5 @@
+use std::ops::ControlFlow;
+
 use arrow::record_batch::RecordBatch;
 use mcapdecode_arrow::{MessageBatchSchema, MetadataColumns};
 use mcapdecode_core::DecodedMessage;
@@ -15,7 +17,8 @@ impl crate::internal_reader::InternalReader {
         callback: &mut impl FnMut(
             usize,
             RecordBatch,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        )
+            -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>>,
     ) -> Result<(), McapReaderError> {
         let schemas = contexts
             .iter()
@@ -25,20 +28,28 @@ impl crate::internal_reader::InternalReader {
             .iter()
             .map(|_| Vec::with_capacity(batch_size))
             .collect();
+        let mut stopped = false;
         self.for_each_topic_decoded_message_impl(
             file,
             contexts,
             read_options,
             &mut |i, message| {
                 rows[i].push(message);
-                if rows[i].len() >= batch_size {
-                    flush_batch(&schemas[i], &mut rows[i], &mut |batch| callback(i, batch))?;
+                if rows[i].len() < batch_size {
+                    return Ok(ControlFlow::Continue(()));
                 }
-                Ok(())
+                let flow = flush_batch(&schemas[i], &mut rows[i], &mut |batch| callback(i, batch))?;
+                stopped = flow.is_break();
+                Ok(flow)
             },
         )?;
+        if stopped {
+            return Ok(());
+        }
         for (i, rows) in rows.iter_mut().enumerate() {
-            flush_batch(&schemas[i], rows, &mut |batch| callback(i, batch))?;
+            if flush_batch(&schemas[i], rows, &mut |batch| callback(i, batch))?.is_break() {
+                break;
+            }
         }
         Ok(())
     }
@@ -63,12 +74,12 @@ fn flush_batch<F>(
     batch_schema: &MessageBatchSchema,
     rows: &mut Vec<DecodedMessage>,
     callback: &mut F,
-) -> Result<(), McapReaderError>
+) -> Result<ControlFlow<()>, McapReaderError>
 where
-    F: FnMut(RecordBatch) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+    F: FnMut(RecordBatch) -> Result<ControlFlow<()>, Box<dyn std::error::Error + Send + Sync>>,
 {
     if rows.is_empty() {
-        return Ok(());
+        return Ok(ControlFlow::Continue(()));
     }
 
     let batch = batch_schema.to_record_batch(rows.as_slice())?;

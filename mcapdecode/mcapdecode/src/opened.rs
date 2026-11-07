@@ -1,6 +1,11 @@
 //! File-backed reader and message selection.
 
-use std::{collections::HashSet, ops::RangeInclusive, path::Path, sync::Arc};
+use std::{
+    collections::HashSet,
+    ops::{ControlFlow, RangeInclusive},
+    path::Path,
+    sync::Arc,
+};
 
 use mcapdecode_core::{DecodedMessage, FieldDefs};
 
@@ -236,6 +241,44 @@ impl<'a> Read<'a> {
     }
 }
 
+type CallbackError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Return types accepted by `try_for_each` callbacks.
+///
+/// An `Err` stops the read and is reported as [`McapReaderError::Callback`];
+/// [`ControlFlow::Break`] stops the read without error.
+pub trait CallbackOutcome: sealed::Sealed {
+    #[doc(hidden)]
+    fn into_flow(self) -> Result<ControlFlow<()>, CallbackError>;
+}
+
+impl CallbackOutcome for Result<(), CallbackError> {
+    fn into_flow(self) -> Result<ControlFlow<()>, CallbackError> {
+        self.map(ControlFlow::Continue)
+    }
+}
+
+impl CallbackOutcome for ControlFlow<()> {
+    fn into_flow(self) -> Result<ControlFlow<()>, CallbackError> {
+        Ok(self)
+    }
+}
+
+impl CallbackOutcome for Result<ControlFlow<()>, CallbackError> {
+    fn into_flow(self) -> Result<ControlFlow<()>, CallbackError> {
+        self
+    }
+}
+
+mod sealed {
+    use std::ops::ControlFlow;
+
+    pub trait Sealed {}
+    impl Sealed for Result<(), super::CallbackError> {}
+    impl Sealed for ControlFlow<()> {}
+    impl Sealed for Result<ControlFlow<()>, super::CallbackError> {}
+}
+
 /// Raw message output.
 pub struct RawRead<'a>(Read<'a>);
 
@@ -243,10 +286,19 @@ impl RawRead<'_> {
     /// Visit selected messages, receiving the originating channel information.
     pub fn for_each(
         self,
-        mut callback: impl FnMut(
-            &ChannelInfo,
-            RawMessage,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        mut callback: impl FnMut(&ChannelInfo, RawMessage),
+    ) -> Result<(), McapReaderError> {
+        self.try_for_each(|info, message| {
+            callback(info, message);
+            ControlFlow::Continue(())
+        })
+    }
+
+    /// Visit selected messages until the callback fails or breaks.
+    /// See [`CallbackOutcome`] for the accepted return types.
+    pub fn try_for_each<R: CallbackOutcome>(
+        self,
+        mut callback: impl FnMut(&ChannelInfo, RawMessage) -> R,
     ) -> Result<(), McapReaderError> {
         let read = self.0;
         let channels = read.resolve_channels()?;
@@ -264,7 +316,11 @@ impl RawRead<'_> {
                     data: Arc::from(message.data.as_ref()),
                 })
             },
-            &mut |i, message| callback(&infos[i], message).map_err(McapReaderError::Callback),
+            &mut |i, message| {
+                callback(&infos[i], message)
+                    .into_flow()
+                    .map_err(McapReaderError::Callback)
+            },
         )
     }
 }
@@ -276,10 +332,19 @@ impl DecodedRead<'_> {
     /// Visit selected messages, receiving the originating channel information.
     pub fn for_each(
         self,
-        mut callback: impl FnMut(
-            &ChannelInfo,
-            DecodedMessage,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        mut callback: impl FnMut(&ChannelInfo, DecodedMessage),
+    ) -> Result<(), McapReaderError> {
+        self.try_for_each(|info, message| {
+            callback(info, message);
+            ControlFlow::Continue(())
+        })
+    }
+
+    /// Visit selected messages until the callback fails or breaks.
+    /// See [`CallbackOutcome`] for the accepted return types.
+    pub fn try_for_each<R: CallbackOutcome>(
+        self,
+        mut callback: impl FnMut(&ChannelInfo, DecodedMessage) -> R,
     ) -> Result<(), McapReaderError> {
         let read = self.0;
         let (infos, contexts) = read.decoded_contexts()?;
@@ -289,7 +354,9 @@ impl DecodedRead<'_> {
             &contexts,
             &read.options,
             &mut |index, message| {
-                callback(&infos[index], message).map_err(McapReaderError::Callback)
+                callback(&infos[index], message)
+                    .into_flow()
+                    .map_err(McapReaderError::Callback)
             },
         )
     }
@@ -320,10 +387,20 @@ impl ArrowRead<'_> {
     /// Visit selected batches, receiving the originating channel information.
     pub fn for_each(
         self,
-        mut callback: impl FnMut(
-            &ChannelInfo,
-            arrow::record_batch::RecordBatch,
-        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
+        mut callback: impl FnMut(&ChannelInfo, arrow::record_batch::RecordBatch),
+    ) -> Result<(), McapReaderError> {
+        self.try_for_each(|info, batch| {
+            callback(info, batch);
+            ControlFlow::Continue(())
+        })
+    }
+
+    /// Visit selected batches until the callback fails or breaks.
+    /// See [`CallbackOutcome`] for the accepted return types.
+    /// After a break, rows buffered for batches not yet delivered are discarded.
+    pub fn try_for_each<R: CallbackOutcome>(
+        self,
+        mut callback: impl FnMut(&ChannelInfo, arrow::record_batch::RecordBatch) -> R,
     ) -> Result<(), McapReaderError> {
         let read = self.read;
         let (infos, contexts) = read.decoded_contexts()?;
@@ -334,7 +411,7 @@ impl ArrowRead<'_> {
             &read.options,
             self.batch_size,
             &self.metadata,
-            &mut |i, batch| callback(&infos[i], batch),
+            &mut |i, batch| callback(&infos[i], batch).into_flow(),
         )
     }
 }

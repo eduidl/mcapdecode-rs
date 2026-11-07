@@ -330,7 +330,7 @@ pub(super) fn run_conversion(
         .read()
         .topics(&names)
         .decoded()
-        .for_each(|channel, message| {
+        .try_for_each(|channel, message| {
             let topic = &mut topics[index[channel.topic.as_str()]];
             topic.rows.push(message);
             if topic.rows.len() >= 1024 {

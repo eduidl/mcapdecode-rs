@@ -3,6 +3,7 @@
 use std::{
     collections::BTreeMap,
     io,
+    ops::ControlFlow,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc,
@@ -15,13 +16,14 @@ use crate::{TimeRange, error::McapReaderError, mcap_file::McapFile};
 
 /// Process messages of the selected channels within `time_range`, skipping chunks that hold none.
 /// `process` and `callback` receive the message channel's position in `channel_ids`.
+/// Reading stops without error once `callback` returns [`ControlFlow::Break`].
 pub(crate) fn for_each_selected_message<T: Send>(
     file: &McapFile,
     channel_ids: &[u16],
     time_range: Option<TimeRange>,
     parallel: bool,
     process: impl Fn(usize, &mcap::Message<'_>) -> Result<T, McapReaderError> + Sync,
-    callback: &mut impl FnMut(usize, T) -> Result<(), McapReaderError>,
+    callback: &mut impl FnMut(usize, T) -> Result<ControlFlow<()>, McapReaderError>,
 ) -> Result<(), McapReaderError> {
     if channel_ids.is_empty() {
         return Ok(());
@@ -58,7 +60,7 @@ fn for_each_message_of<T: Send>(
     time_range: Option<TimeRange>,
     parallel: bool,
     process: impl Fn(usize, &mcap::Message<'_>) -> Result<T, McapReaderError> + Sync,
-    callback: &mut impl FnMut(usize, T) -> Result<(), McapReaderError>,
+    callback: &mut impl FnMut(usize, T) -> Result<ControlFlow<()>, McapReaderError>,
 ) -> Result<(), McapReaderError> {
     let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
         let offsets = &chunk.message_index_offsets;
@@ -90,32 +92,39 @@ fn for_each_chunk<'a, T: Send>(
     chunks: impl Iterator<Item = &'a mcap::records::ChunkIndex>,
     parallel: bool,
     process: impl Fn(&mcap::Message<'_>) -> Result<Option<T>, McapReaderError> + Sync,
-    callback: &mut impl FnMut(T) -> Result<(), McapReaderError>,
+    callback: &mut impl FnMut(T) -> Result<ControlFlow<()>, McapReaderError>,
 ) -> Result<(), McapReaderError> {
     if file.summary.chunk_indexes.is_empty() {
         for message in mcap::MessageStream::new(&file.mmap)? {
-            if let Some(result) = process(&message?)? {
-                callback(result)?;
+            if let Some(result) = process(&message?)?
+                && callback(result)?.is_break()
+            {
+                break;
             }
         }
         return Ok(());
     }
-    let read_chunk = |chunk,
-                      cancelled: &dyn Fn() -> bool,
-                      emit: &mut dyn FnMut(T) -> Result<(), McapReaderError>| {
-        for message in file.summary.stream_chunk(&file.mmap, chunk)? {
-            if cancelled() {
-                break;
+    let read_chunk =
+        |chunk,
+         cancelled: &dyn Fn() -> bool,
+         emit: &mut dyn FnMut(T) -> Result<ControlFlow<()>, McapReaderError>| {
+            for message in file.summary.stream_chunk(&file.mmap, chunk)? {
+                if cancelled() {
+                    break;
+                }
+                if let Some(result) = process(&message?)?
+                    && emit(result)?.is_break()
+                {
+                    return Ok(ControlFlow::Break(()));
+                }
             }
-            if let Some(result) = process(&message?)? {
-                emit(result)?;
-            }
-        }
-        Ok::<_, McapReaderError>(())
-    };
+            Ok::<_, McapReaderError>(ControlFlow::Continue(()))
+        };
     if !parallel {
         for chunk in chunks {
-            read_chunk(chunk, &|| false, callback)?;
+            if read_chunk(chunk, &|| false, callback)?.is_break() {
+                break;
+            }
         }
         return Ok(());
     }
@@ -144,10 +153,10 @@ fn for_each_chunk<'a, T: Send>(
                             &|| cancelled_ref.load(Ordering::Relaxed),
                             &mut |message| {
                                 messages.push(message);
-                                Ok(())
+                                Ok(ControlFlow::Continue(()))
                             },
                         )
-                        .map(|()| messages);
+                        .map(|_| messages);
                         sender.send((window_index * window_size + i, result))
                     },
                 );
@@ -174,9 +183,16 @@ fn for_each_chunk<'a, T: Send>(
                     }
                 };
                 for message in messages {
-                    if let Err(error) = callback(message) {
-                        cancelled.store(true, Ordering::Relaxed);
-                        return Err(error);
+                    match callback(message) {
+                        Ok(ControlFlow::Continue(())) => {}
+                        Ok(ControlFlow::Break(())) => {
+                            cancelled.store(true, Ordering::Relaxed);
+                            return Ok(());
+                        }
+                        Err(error) => {
+                            cancelled.store(true, Ordering::Relaxed);
+                            return Err(error);
+                        }
                     }
                 }
                 next += 1;

@@ -10,7 +10,7 @@ use std::{
 
 use mcap::{WriteOptions, Writer, records::MessageHeader};
 use mcapdecode::{
-    McapReader, McapReaderError, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo,
+    McapReader, McapReaderError, OpenedMcap, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo,
 };
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
@@ -233,7 +233,7 @@ fn collect_decoded_i64_values(reader: &McapReader, path: &Path, topic: &str) -> 
         .read()
         .topic(topic)
         .decoded()
-        .for_each(|_, message| {
+        .try_for_each(|_, message| {
             let value = match message.value {
                 Value::Struct(fields) => match fields.into_values().remove(0) {
                     Value::I64(value) => value,
@@ -258,7 +258,6 @@ fn collect_raw_payloads(reader: &McapReader, path: &Path, topic: &str) -> Vec<Ve
         .raw()
         .for_each(|_, message| {
             payloads.push(message.data.to_vec());
-            Ok(())
         })
         .unwrap();
     payloads
@@ -340,6 +339,7 @@ impl MessageDecoder for SchemaNamedFieldDecoder {
 mod core;
 mod opened;
 mod read_options;
+mod stop;
 
 #[cfg(feature = "arrow")]
 mod record_batches;

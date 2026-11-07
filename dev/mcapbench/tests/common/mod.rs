@@ -33,7 +33,6 @@ pub fn read_topic(path: &std::path::Path, parallel: bool) -> usize {
         .decoded()
         .for_each(|_, _| {
             count += 1;
-            Ok(())
         })
         .unwrap();
     count

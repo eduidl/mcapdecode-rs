@@ -32,7 +32,6 @@ fn read_options_filter_time_range_with_exclusive_end() {
                 panic!("expected i64 field");
             };
             values.push(value);
-            Ok(())
         })
         .unwrap();
 
@@ -115,7 +114,6 @@ pub(super) fn collect_values(reader: &McapReader, path: &Path, options: &ReadOpt
                 panic!("expected i64 field");
             };
             values.push(value);
-            Ok(())
         })
         .unwrap();
     values

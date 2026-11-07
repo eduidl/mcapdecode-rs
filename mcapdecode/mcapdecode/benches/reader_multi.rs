@@ -27,7 +27,7 @@ fn bench_reader_multi(c: &mut Criterion) {
                     .read()
                     .topics([mcapbench::TOPIC, "/other"])
                     .decoded()
-                    .for_each(|_, _| Ok(()))
+                    .for_each(|_, _| {})
                     .unwrap();
             })
         });

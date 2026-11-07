@@ -35,7 +35,6 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
                     .raw()
                     .for_each(|channel, message| {
                         raw.entry(channel.id).or_default().push(message.log_time);
-                        Ok(())
                     })
                     .unwrap();
                 reader
@@ -48,7 +47,6 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
                             .entry(channel.id)
                             .or_default()
                             .push(message.log_time);
-                        Ok(())
                     })
                     .unwrap();
                 reader
@@ -67,7 +65,6 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
                             .entry(channel.id)
                             .or_default()
                             .extend(times.values().iter().map(|&time| time as u64));
-                        Ok(())
                     })
                     .unwrap();
                 assert_eq!(
@@ -93,7 +90,7 @@ fn opened_arrow_empty_selection_and_unsupported_channel() {
         .for_each(|_, _| panic!("empty selection"))
         .unwrap();
     assert!(matches!(
-        reader.read().arrow().for_each(|_, _| Ok(())),
+        reader.read().arrow().for_each(|_, _| {}),
         Err(McapReaderError::SchemaNotAvailable)
     ));
 }
@@ -116,7 +113,6 @@ fn opened_reader_arrow_distinguishes_channels_with_the_same_topic() {
             assert_eq!(channel.topic, "/split");
             assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
             rows.insert(channel.id, batch.num_rows());
-            Ok(())
         })
         .unwrap();
     assert_eq!(rows.len(), 2);
@@ -147,7 +143,6 @@ fn collect_i64_values(read: ArrowRead<'_>) -> Vec<i64> {
         for i in 0..values_col.len() {
             values.push(values_col.value(i));
         }
-        Ok(())
     })
     .unwrap();
     values
@@ -157,7 +152,6 @@ fn collect_batch_rows(read: ArrowRead<'_>) -> Vec<usize> {
     let mut batch_rows = Vec::new();
     read.for_each(|_, batch| {
         batch_rows.push(batch.num_rows());
-        Ok(())
     })
     .unwrap();
     batch_rows
@@ -223,7 +217,7 @@ fn arrow_read_without_decoder_returns_error() {
         .read()
         .topic("/decoded")
         .arrow()
-        .for_each(|_, _batch| Ok(()))
+        .for_each(|_, _batch| {})
         .unwrap_err();
     assert!(matches!(err, McapReaderError::NoDecoder { .. }));
 }
@@ -238,7 +232,7 @@ fn arrow_read_errors_when_decoder_is_missing_contains_message() {
         .read()
         .topic("/decoded")
         .arrow()
-        .for_each(|_, _batch| Ok(()))
+        .for_each(|_, _batch| {})
         .unwrap_err();
 
     assert!(err.to_string().contains("no decoder registered"));
@@ -255,7 +249,7 @@ fn arrow_read_unknown_topic_returns_error() {
         .read()
         .topic("/unknown")
         .arrow()
-        .for_each(|_, _batch| Ok(()))
+        .for_each(|_, _batch| {})
         .unwrap_err();
     assert!(matches!(err, McapReaderError::TopicNotFound));
 }
@@ -270,7 +264,7 @@ fn arrow_read_errors_when_schema_is_missing() {
         .read()
         .topic("/raw")
         .arrow()
-        .for_each(|_, _batch| Ok(()))
+        .for_each(|_, _batch| {})
         .unwrap_err();
     assert!(matches!(err, McapReaderError::SchemaNotAvailable));
 }
@@ -285,7 +279,7 @@ fn arrow_read_propagates_callback_error() {
         .read()
         .topic("/decoded")
         .arrow()
-        .for_each(|_, _batch| Err("callback failed".into()))
+        .try_for_each(|_, _batch| Err::<(), _>("callback failed".into()))
         .unwrap_err();
     let McapReaderError::Callback(inner) = &err else {
         panic!("expected a callback error, got {err:?}");
@@ -312,7 +306,7 @@ fn arrow_read_reports_arrow_conversion_errors_separately() {
         .read()
         .topic("/decoded")
         .arrow()
-        .for_each(|_, _batch| Ok(()))
+        .for_each(|_, _batch| {})
         .unwrap_err();
 
     assert!(matches!(err, McapReaderError::ArrowConvert(_)));
@@ -357,7 +351,6 @@ fn arrow_read_defaults_to_a_single_batch() {
         .arrow()
         .for_each(|_, batch| {
             batch_rows.push(batch.num_rows());
-            Ok(())
         })
         .unwrap();
 
@@ -389,7 +382,7 @@ fn arrow_read_propagates_callback_error_with_builder_decoder() {
         .topic("/decoded")
         .arrow()
         .batch_size(1)
-        .for_each(|_, _batch| Err("callback failed".into()))
+        .try_for_each(|_, _batch| Err::<(), _>("callback failed".into()))
         .unwrap_err();
 
     assert!(err.to_string().contains("callback failed"));
@@ -462,7 +455,7 @@ fn arrow_read_parallel_propagates_decode_error_for_multi_chunk_fixture() {
         .read()
         .topic("/decoded")
         .arrow()
-        .for_each(|_, _batch| Ok(()))
+        .for_each(|_, _batch| {})
         .unwrap_err();
 
     assert!(matches!(
@@ -496,7 +489,6 @@ fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
             .metadata(metadata.clone())
             .for_each(|_, batch| {
                 emitted.push(batch.schema());
-                Ok(())
             })
             .unwrap();
 
@@ -594,7 +586,6 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
                         .entry(channel.topic.clone())
                         .or_default()
                         .extend(array.values());
-                    Ok(())
                 })
                 .unwrap();
             for topic in ["/first", "/second", "/empty"] {
@@ -630,7 +621,6 @@ fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure()
             .batch_size(1)
             .for_each(|_, _| {
                 called = true;
-                Ok(())
             })
             .unwrap_err();
         assert!(!called);
@@ -644,9 +634,9 @@ fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure()
         .topics(["/first", "/second"])
         .arrow()
         .batch_size(1)
-        .for_each(|_, _| {
+        .try_for_each(|_, _| {
             calls += 1;
-            Err("stop writing".into())
+            Err::<(), _>("stop writing".into())
         })
         .unwrap_err();
     assert_eq!(calls, 1);
@@ -680,7 +670,6 @@ fn repeated_single_topic_emits_one_batch() {
                 .unwrap();
             assert_eq!(values.values().as_ref(), &(0..1024).collect::<Vec<i64>>());
             topics.push(channel.topic.clone());
-            Ok(())
         })
         .unwrap();
     assert_eq!(topics, ["/first"]);
@@ -711,7 +700,6 @@ fn record_batch_reads_scan_chunks_without_message_indexes() {
                 .entry(channel.topic.clone())
                 .or_default()
                 .extend(values.values());
-            Ok(())
         })
         .unwrap();
     assert_eq!(actual["/first"], (0..1024).collect::<Vec<_>>());
@@ -743,7 +731,6 @@ fn opened_reader_arrow_uses_shared_filters() {
         .for_each(|topic, batch| {
             assert_eq!(batch.num_rows(), 1);
             *rows.entry(topic.topic.clone()).or_default() += batch.num_rows();
-            Ok(())
         })
         .unwrap();
     assert_eq!(rows["/first"], 2);

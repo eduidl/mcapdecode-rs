@@ -23,7 +23,7 @@ pub use mcapdecode_arrow as arrow;
 pub use mcapdecode_core as core;
 #[cfg(feature = "arrow")]
 pub use opened::ArrowRead;
-pub use opened::{DecodedRead, OpenedMcap, RawRead, Read};
+pub use opened::{CallbackOutcome, DecodedRead, OpenedMcap, RawRead, Read};
 pub use reader::{McapReader, McapReaderBuilder};
 pub use types::{
     ChannelInfo, RawMessage, ReadOptions, TimeRange, TopicDecodeStatus, TopicInfo, TopicSchema,
