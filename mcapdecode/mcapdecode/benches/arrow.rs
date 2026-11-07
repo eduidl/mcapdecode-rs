@@ -5,11 +5,7 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mcapbench::{Encoding, PayloadCase, fixture};
-use mcapdecode::{
-    DecodedMessage,
-    arrow::{MessageBatchSchema, MetadataColumns},
-    decoder::MessageDecoder,
-};
+use mcapdecode::{DecodedMessage, MessageBatchSchema, MetadataColumns, decoder::MessageDecoder};
 use mcapdecode_ros2idl::Ros2IdlDecoder;
 
 /// Payload volume converted per iteration, so small and large payloads do

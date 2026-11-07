@@ -178,6 +178,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+`mcapdecode::arrow` re-exports the `arrow` crate that batches are built with, so
+no separate `arrow` dependency of a matching version is needed. Utilities for
+flattening, projecting, and writing batches as JSON Lines live in
+`mcapdecode::batch`.
+
 Enable the `arrow` feature for that API:
 
 ```toml

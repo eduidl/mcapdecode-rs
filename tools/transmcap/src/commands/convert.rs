@@ -2,7 +2,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use anyhow::Result;
 use clap::Args;
-use mcapdecode::arrow::{ArrayPolicy, ListPolicy, MapPolicy};
+use mcapdecode::batch::{ArrayPolicy, ListPolicy, MapPolicy};
 
 use crate::{
     commands::batch::{TopicSettings, TopicSpec, run_conversion},

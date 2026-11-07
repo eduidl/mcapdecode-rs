@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use arrow::record_batch::RecordBatch;
-use mcapdecode::{JsonlWriter as McapJsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
+use mcapdecode::batch::{JsonlWriter as McapJsonlWriter, JsonlWriterBuilder, NonFiniteFloats};
 
 pub trait RecordBatchWriter {
     fn write_batch(&mut self, batch: RecordBatch) -> Result<()>;

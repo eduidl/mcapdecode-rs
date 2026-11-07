@@ -12,9 +12,9 @@ use clap::{Args, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use mcapdecode::{
     DecodedMessage, McapReader, McapReaderError, MessageBatchSchema, MetadataColumns,
-    MetadataTimestampFormat, NonFiniteFloats,
-    arrow::{
-        ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, flatten_record_batch,
+    MetadataTimestampFormat,
+    batch::{
+        ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, NonFiniteFloats, flatten_record_batch,
         project_record_batch,
     },
 };
