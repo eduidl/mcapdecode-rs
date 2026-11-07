@@ -82,6 +82,26 @@ fn numeric_conversions_are_checked_and_null_is_explicit() {
     ));
     assert_eq!(Value::F32(1.5).try_widen_f64(), Ok(1.5));
     assert_eq!(Value::F64(1.5).try_widen_f64(), Ok(1.5));
+    for value in [
+        Value::I8(-2),
+        Value::I16(-2),
+        Value::I32(-2),
+        Value::I64(-2),
+        Value::F32(-2.0),
+        Value::F64(-2.0),
+    ] {
+        assert_eq!(value.try_f64_lossy(), Ok(-2.0));
+    }
+    for value in [Value::U8(2), Value::U16(2), Value::U32(2), Value::U64(2)] {
+        assert_eq!(value.try_f64_lossy(), Ok(2.0));
+    }
+    assert_eq!(Value::I64(i64::MIN).try_f64_lossy(), Ok(i64::MIN as f64));
+    assert_eq!(Value::U64(u64::MAX).try_f64_lossy(), Ok(u64::MAX as f64));
+    assert_eq!(Value::Null.try_f64_lossy(), Err(E::NullValue));
+    assert!(matches!(
+        Value::string("x").try_f64_lossy(),
+        Err(E::TypeMismatch(_))
+    ));
     assert_eq!(Value::string("hello").try_str(), Ok(Some("hello")));
     assert_eq!(
         Value::Uint8List(vec![1, 2].into()).try_bytes(),
