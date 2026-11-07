@@ -6,7 +6,7 @@ use mcapdecode_core::{EncodingKey, MessageDecoder, MessageEncoding, SchemaEncodi
 
 use crate::{
     RawMessage, TopicDecodeStatus, TopicSchema,
-    chunk_reader::for_each_chunk,
+    chunk_reader::for_each_selected_message,
     decode::TopicDecodeContext,
     error::McapReaderError,
     mcap_file::McapFile,
@@ -116,21 +116,18 @@ pub(crate) fn for_each_raw_message_impl(
     parallel: bool,
     mut callback: impl FnMut(RawMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>,
 ) -> Result<(), McapReaderError> {
-    let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
-        chunk.message_index_offsets.is_empty()
-            || chunk.message_index_offsets.contains_key(&channel_id)
-    });
-    for_each_chunk(
+    for_each_selected_message(
         file,
-        chunks,
+        &[channel_id],
+        None,
         parallel,
-        |message| {
-            Ok((message.channel.id == channel_id).then(|| RawMessage {
+        |_, message| {
+            Ok(RawMessage {
                 log_time: message.log_time,
                 publish_time: message.publish_time,
                 data: Arc::from(message.data.as_ref()),
-            }))
+            })
         },
-        &mut |message| callback(message).map_err(McapReaderError::Callback),
+        &mut |_, message| callback(message).map_err(McapReaderError::Callback),
     )
 }
