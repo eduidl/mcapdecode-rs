@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::{ValueAccessError, error::ValueTypeError};
+use crate::{ValueAccessError, error::ValueTypeError, path::Segment};
 
 /// Value produced by message decoders.
 /// All types are explicit; no lossy conversions.
@@ -182,6 +182,19 @@ impl Value {
     /// Access a named struct field or string map key, or a sequence element.
     pub fn get<I: crate::ValueIndex>(&self, index: I) -> Result<&Value, ValueAccessError> {
         index.get(self)
+    }
+
+    /// Follow a dotted path such as `"poses.0.position.x"` without a schema.
+    ///
+    /// A segment of only digits indexes a list or array; any other segment
+    /// is a struct field or string map key, as with [`Value::get`]. Use
+    /// [`crate::FieldPath`] to resolve a path once and apply it to many values.
+    pub fn get_path(&self, path: &str) -> Result<&Value, ValueAccessError> {
+        path.split('.')
+            .try_fold(self, |value, segment| match Segment::parse(segment) {
+                Segment::Name(name) => value.get(name),
+                Segment::Index(index) => value.get(index),
+            })
     }
 
     /// Look up a map key by value.

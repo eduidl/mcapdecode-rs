@@ -102,6 +102,35 @@ To read any numeric value, integers included, as `f64`, use `try_f64_lossy()`;
 data after the `Value` is dropped without copying it, clone the `Arc<[u8]>`
 returned by `try_shared_bytes()`.
 
+`get_path("poses.0.position.x")` follows a dotted path in one call, where a
+segment of only digits is a list or array index. To check a path and learn its
+type before reading, and to skip name lookups for every message, resolve it once
+against the topic schema with `FieldPath`:
+
+```rust,no_run
+use mcapdecode::{McapReader, core::FieldPath};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let reader = McapReader::open("sample.mcap")?;
+    let fields = reader.topic_field_defs("/topic/name")?;
+    let path = FieldPath::parse(&fields, "poses.0.position.x")?; // fails if absent
+    println!("type={}", path.data_type());
+    reader
+        .read()
+        .topic("/topic/name")
+        .decoded()
+        .try_for_each(|_, message| {
+            let x = path.get(&message.value)?.try_widen_f64()?;
+            println!("x={x}");
+            Ok(())
+        })?;
+    Ok(())
+}
+```
+
+A resolved path fails with `ValueAccessError::SchemaMismatch` on values whose
+struct fields differ from the schema it was resolved against.
+
 ## Multiple Topics
 
 Read multiple topics in one pass, sharing chunk reads and decompression. The
