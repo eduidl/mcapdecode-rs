@@ -7,6 +7,7 @@ pub use mcapdecode_arrow::{
     Integer64Encoding, JsonlWriter, JsonlWriterBuilder, MessageBatchSchema, MetadataColumns,
     MetadataTimestampFormat, NonFiniteFloats,
 };
+mod chunk_reader;
 mod decode;
 mod error;
 mod internal_reader;

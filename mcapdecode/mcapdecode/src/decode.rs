@@ -1,63 +1,16 @@
 //! Chunk selection and message decoding for the sequential and parallel paths.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    io,
+    collections::{HashMap, HashSet},
     path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
 };
 
 use mcapdecode_core::{DecodedMessage, FieldDefs, TopicDecoder};
-use rayon::prelude::*;
 
 use crate::{
-    McapReader, ReadOptions, TimeRange, error::McapReaderError, internal_reader::InternalReader,
-    mcap_file::McapFile,
+    McapReader, ReadOptions, chunk_reader::for_each_chunk, error::McapReaderError,
+    internal_reader::InternalReader, mcap_file::McapFile,
 };
-
-/// Chunk- and message-level predicates shared by the sequential and parallel
-/// read paths.
-///
-/// The two paths differ in how they schedule decoding, but they must agree on
-/// which chunks and messages belong to a read, so both select through this.
-#[derive(Debug, Clone, Copy)]
-struct MessageFilter {
-    channel_id: u16,
-    time_range: Option<TimeRange>,
-}
-
-impl MessageFilter {
-    fn new(context: &TopicDecodeContext, options: &ReadOptions) -> Self {
-        Self {
-            channel_id: context.channel_id,
-            time_range: options.time_range,
-        }
-    }
-
-    /// Rejected chunks are never decompressed, so this is the read's cheapest
-    /// filter and the only one that saves I/O.
-    fn accepts_chunk(self, chunk_index: &mcap::records::ChunkIndex) -> bool {
-        let offsets = &chunk_index.message_index_offsets;
-        // An empty index cannot rule out a channel.
-        (offsets.is_empty() || offsets.contains_key(&self.channel_id))
-            && self
-                .time_range
-                .is_none_or(|range| range.overlaps_chunk(chunk_index))
-    }
-
-    /// A chunk can hold messages from other channels and from outside the time
-    /// range, so surviving [`MessageFilter::accepts_chunk`] is not enough.
-    fn accepts_message(self, message: &mcap::Message<'_>) -> bool {
-        message.channel.id == self.channel_id
-            && self
-                .time_range
-                .is_none_or(|range| range.contains(message.log_time))
-    }
-}
 
 impl InternalReader {
     pub(crate) fn for_each_decoded_message_impl<F>(
@@ -70,159 +23,20 @@ impl InternalReader {
     where
         F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
     {
-        let parallel = options.parallel.unwrap_or(self.parallel);
-        if parallel {
-            self.for_each_decoded_message_parallel(file, context, options, callback)
-        } else {
-            self.for_each_decoded_message_sequential(file, context, options, callback)
-        }
-    }
-
-    fn for_each_decoded_message_parallel<F>(
-        &self,
-        file: &McapFile,
-        context: &TopicDecodeContext,
-        options: &ReadOptions,
-        callback: &mut F,
-    ) -> Result<(), McapReaderError>
-    where
-        F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
-    {
-        let filter = MessageFilter::new(context, options);
-        let chunk_indexes: Vec<_> = Self::matching_chunk_indexes(&file.summary, filter).collect();
-        let chunk_count = chunk_indexes.len();
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let (sender, receiver) = mpsc::channel();
-
-        std::thread::scope(|scope| -> Result<(), McapReaderError> {
-            let worker_sender = sender.clone();
-            let worker = scope.spawn(|| {
-                chunk_indexes.into_par_iter().enumerate().for_each_with(
-                    worker_sender,
-                    |sender, (position, chunk_index)| {
-                        let result = self.decode_chunk_messages(
-                            file,
-                            context,
-                            chunk_index,
-                            options,
-                            &cancelled,
-                        );
-                        let _ = sender.send((position, result));
-                    },
-                );
-            });
-            drop(sender);
-
-            let mut next_position = 0usize;
-            let mut pending = BTreeMap::new();
-            while next_position < chunk_count {
-                let (position, result) = receiver.recv().map_err(|_| {
-                    McapReaderError::Io(io::Error::other(
-                        "parallel decode worker disconnected unexpectedly",
-                    ))
-                })?;
-                pending.insert(position, result);
-
-                while let Some(result) = pending.remove(&next_position) {
-                    let chunk_messages = match result {
-                        Ok(messages) => messages,
-                        Err(error) => {
-                            cancelled.store(true, Ordering::Relaxed);
-                            return Err(error);
-                        }
-                    };
-                    for decoded in chunk_messages {
-                        if let Err(error) = callback(decoded) {
-                            cancelled.store(true, Ordering::Relaxed);
-                            return Err(error);
-                        }
-                    }
-                    next_position += 1;
-                }
-            }
-            let _ = worker.join();
-            Ok(())
-        })?;
-
-        Ok(())
-    }
-
-    fn matching_chunk_indexes(
-        summary: &mcap::read::Summary,
-        filter: MessageFilter,
-    ) -> impl Iterator<Item = &mcap::records::ChunkIndex> {
-        summary
-            .chunk_indexes
-            .iter()
-            .filter(move |chunk_index| filter.accepts_chunk(chunk_index))
-    }
-
-    fn decode_chunk_messages(
-        &self,
-        file: &McapFile,
-        context: &TopicDecodeContext,
-        chunk_index: &mcap::records::ChunkIndex,
-        options: &ReadOptions,
-        cancelled: &AtomicBool,
-    ) -> Result<Vec<DecodedMessage>, McapReaderError> {
-        if cancelled.load(Ordering::Relaxed) {
-            return Ok(Vec::new());
-        }
-
-        let filter = MessageFilter::new(context, options);
-        let mut decoded_messages = Vec::new();
-        for msg_result in file.summary.stream_chunk(&file.mmap, chunk_index)? {
-            if cancelled.load(Ordering::Relaxed) {
-                return Ok(decoded_messages);
-            }
-
-            let msg = msg_result?;
-            if !filter.accepts_message(&msg) {
-                continue;
-            }
-            decoded_messages.push(self.decode_message(context, &msg)?);
-        }
-
-        Ok(decoded_messages)
-    }
-
-    fn for_each_decoded_message_sequential<F>(
-        &self,
-        file: &McapFile,
-        context: &TopicDecodeContext,
-        options: &ReadOptions,
-        callback: &mut F,
-    ) -> Result<(), McapReaderError>
-    where
-        F: FnMut(DecodedMessage) -> Result<(), McapReaderError>,
-    {
-        let filter = MessageFilter::new(context, options);
-        for chunk_index in Self::matching_chunk_indexes(&file.summary, filter) {
-            for message in file.summary.stream_chunk(&file.mmap, chunk_index)? {
-                let message = message?;
-                if !filter.accepts_message(&message) {
-                    continue;
-                }
-                let decoded = self.decode_message(context, &message)?;
-                callback(decoded)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn decode_message(
-        &self,
-        context: &TopicDecodeContext,
-        message: &mcap::Message<'_>,
-    ) -> Result<DecodedMessage, McapReaderError> {
-        let value = context.decoder.decode(&message.data)?;
-
-        Ok(DecodedMessage {
-            log_time: message.log_time,
-            publish_time: message.publish_time,
-            value,
-        })
+        let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
+            let offsets = &chunk.message_index_offsets;
+            (offsets.is_empty() || offsets.contains_key(&context.channel_id))
+                && options
+                    .time_range
+                    .is_none_or(|range| range.overlaps_chunk(chunk))
+        });
+        self.for_each_selected(
+            file,
+            chunks,
+            options,
+            |message| (message.channel.id == context.channel_id).then_some(((), context)),
+            &mut |(), message| callback(message),
+        )
     }
 
     pub(crate) fn for_each_topic_decoded_message_impl(
@@ -232,90 +46,69 @@ impl InternalReader {
         options: &ReadOptions,
         callback: &mut impl FnMut(usize, DecodedMessage) -> Result<(), McapReaderError>,
     ) -> Result<(), McapReaderError> {
-        if contexts.len() == 1 {
-            for (i, context) in contexts.iter().enumerate() {
-                self.for_each_decoded_message_impl(file, context, options, &mut |message| {
-                    callback(i, message)
-                })?;
-            }
-            return Ok(());
+        if let [context] = contexts {
+            return self.for_each_decoded_message_impl(file, context, options, &mut |message| {
+                callback(0, message)
+            });
         }
         let channels: HashMap<_, _> = contexts
             .iter()
             .enumerate()
             .map(|(i, context)| (context.channel_id, i))
             .collect();
-        let chunks: Vec<_> = file
-            .summary
-            .chunk_indexes
-            .iter()
-            .filter(|chunk| {
-                let offsets = &chunk.message_index_offsets;
-                (offsets.is_empty() || offsets.keys().any(|id| channels.contains_key(id)))
+        let chunks = file.summary.chunk_indexes.iter().filter(|chunk| {
+            let offsets = &chunk.message_index_offsets;
+            (offsets.is_empty() || offsets.keys().any(|id| channels.contains_key(id)))
+                && options
+                    .time_range
+                    .is_none_or(|range| range.overlaps_chunk(chunk))
+        });
+        self.for_each_selected(
+            file,
+            chunks,
+            options,
+            |message| {
+                let &i = channels.get(&message.channel.id)?;
+                Some((i, &contexts[i]))
+            },
+            callback,
+        )
+    }
+
+    fn for_each_selected<'a, K: Send, F>(
+        &self,
+        file: &McapFile,
+        chunks: impl Iterator<Item = &'a mcap::records::ChunkIndex>,
+        options: &ReadOptions,
+        select: impl Fn(&mcap::Message<'_>) -> Option<(K, &'a TopicDecodeContext)> + Sync,
+        callback: &mut F,
+    ) -> Result<(), McapReaderError>
+    where
+        F: FnMut(K, DecodedMessage) -> Result<(), McapReaderError>,
+    {
+        for_each_chunk(
+            file,
+            chunks,
+            options.parallel.unwrap_or(self.parallel),
+            |message| {
+                if let Some((key, context)) = select(message)
                     && options
                         .time_range
-                        .is_none_or(|range| range.overlaps_chunk(chunk))
-            })
-            .collect();
-        let decode_chunk = |chunk: &mcap::records::ChunkIndex,
-                            emit: &mut dyn FnMut(
-            usize,
-            DecodedMessage,
-        ) -> Result<(), McapReaderError>| {
-            for message in file.summary.stream_chunk(&file.mmap, chunk)? {
-                let message = message?;
-                let Some(&i) = channels.get(&message.channel.id) else {
-                    continue;
-                };
-                if options
-                    .time_range
-                    .is_none_or(|range| range.contains(message.log_time))
+                        .is_none_or(|range| range.contains(message.log_time))
                 {
-                    emit(i, self.decode_message(&contexts[i], &message)?)?;
+                    return Ok(Some((
+                        key,
+                        DecodedMessage {
+                            log_time: message.log_time,
+                            publish_time: message.publish_time,
+                            value: context.decoder.decode(&message.data)?,
+                        },
+                    )));
                 }
-            }
-            Ok::<_, McapReaderError>(())
-        };
-        if options.parallel.unwrap_or(self.parallel) {
-            // Decode ahead while the caller writes the previous window.
-            // The bounded channel prevents a slow writer from retaining
-            // decoded messages for the rest of a large file.
-            std::thread::scope(|scope| -> Result<(), McapReaderError> {
-                let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-                let window_size = rayon::current_num_threads().max(1) * 4;
-                scope.spawn(move || {
-                    for window in chunks.chunks(window_size) {
-                        let results: Vec<_> = window
-                            .par_iter()
-                            .map(|chunk| {
-                                let mut messages = Vec::new();
-                                decode_chunk(chunk, &mut |i, message| {
-                                    messages.push((i, message));
-                                    Ok(())
-                                })
-                                .map(|()| messages)
-                            })
-                            .collect();
-                        if sender.send(results).is_err() {
-                            break;
-                        }
-                    }
-                });
-                for results in receiver {
-                    for result in results {
-                        for (i, message) in result? {
-                            callback(i, message)?;
-                        }
-                    }
-                }
-                Ok(())
-            })?;
-        } else {
-            for chunk in chunks {
-                decode_chunk(chunk, callback)?;
-            }
-        }
-        Ok(())
+                Ok(None)
+            },
+            &mut |(key, message)| callback(key, message),
+        )
     }
 }
 
