@@ -121,15 +121,15 @@ pub(crate) fn message_time_range(summary: &mcap::read::Summary) -> Option<RangeI
         return (stats.message_count > 0)
             .then_some(stats.message_start_time..=stats.message_end_time);
     }
-    let start = summary
-        .chunk_indexes
-        .iter()
-        .map(|chunk| chunk.message_start_time)
-        .min()?;
-    let end = summary
-        .chunk_indexes
-        .iter()
-        .map(|chunk| chunk.message_end_time)
-        .max()?;
+    // A chunk without messages, such as one holding only schema and channel
+    // records, reports zero for both times. Without message indexes this cannot
+    // be told apart from messages logged at time zero, which are then ignored.
+    let chunks = summary.chunk_indexes.iter().filter(|chunk| {
+        !(chunk.message_index_offsets.is_empty()
+            && chunk.message_start_time == 0
+            && chunk.message_end_time == 0)
+    });
+    let start = chunks.clone().map(|chunk| chunk.message_start_time).min()?;
+    let end = chunks.map(|chunk| chunk.message_end_time).max()?;
     Some(start..=end)
 }

@@ -293,3 +293,41 @@ fn opened_summary_exposes_statistics() {
     assert_eq!(stats.message_count, 3);
     assert_eq!(opened.summary().channels.len(), 1);
 }
+
+/// Write a statistics-free file whose first chunk holds only schema and channel records.
+fn write_leading_empty_chunk_fixture(log_times: &[u64]) -> TempFixture {
+    let path = temp_fixture_path("leading-empty-chunk");
+    let mut writer = Writer::with_options(
+        File::create(&path).unwrap(),
+        WriteOptions::new().emit_statistics(false),
+    )
+    .unwrap();
+    let schema = writer.add_schema("test.Msg", "jsonschema", b"{}").unwrap();
+    let channel_id = writer
+        .add_channel(schema, "/a", "json", &BTreeMap::new())
+        .unwrap();
+    writer.flush().unwrap();
+    for (sequence, &log_time) in log_times.iter().enumerate() {
+        let header = MessageHeader {
+            channel_id,
+            sequence: sequence as u32,
+            log_time,
+            publish_time: log_time,
+        };
+        writer.write_to_known_channel(&header, b"{}").unwrap();
+    }
+    writer.finish().unwrap();
+    TempFixture { path }
+}
+
+#[test]
+fn opened_message_time_range_ignores_chunks_without_messages() {
+    let fixture = write_leading_empty_chunk_fixture(&[100, 200]);
+    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    assert_eq!(opened.summary().chunk_indexes.len(), 2);
+    assert_eq!(opened.message_time_range(), Some(100..=200));
+
+    let fixture = write_leading_empty_chunk_fixture(&[]);
+    let opened = McapReader::new().open_file(fixture.path()).unwrap();
+    assert_eq!(opened.message_time_range(), None);
+}
