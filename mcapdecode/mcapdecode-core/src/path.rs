@@ -22,8 +22,13 @@ impl<'a> Segment<'a> {
 #[derive(Debug, Clone)]
 enum Step {
     /// A struct field by position, with its name kept to detect values decoded
-    /// with a different schema.
-    Field { index: usize, name: Box<str> },
+    /// with a different schema. The last field step also keeps its definition,
+    /// since it determines the type of everything the path reads below it.
+    Field {
+        index: usize,
+        name: Box<str>,
+        element: Option<Box<ElementDef>>,
+    },
     /// An element of a list or fixed-size array.
     Element(usize),
 }
@@ -53,6 +58,7 @@ impl FieldPath {
     ) -> Result<Self, ValueAccessError> {
         let mut steps = Vec::new();
         let mut current: Option<&ElementDef> = None;
+        let mut last_field = None;
         for segment in segments {
             let segment = segment.as_ref();
             let next = match Segment::parse(segment) {
@@ -66,9 +72,11 @@ impl FieldPath {
                         .iter()
                         .position(|field| field.name == name)
                         .ok_or(ValueAccessError::NotFound)?;
+                    last_field = Some((steps.len(), &fields[index].element));
                     steps.push(Step::Field {
                         index,
                         name: name.into(),
+                        element: None,
                     });
                     &fields[index].element
                 }
@@ -93,6 +101,12 @@ impl FieldPath {
             current = Some(next);
         }
         let element = current.ok_or(ValueAccessError::NotFound)?.clone();
+        // A path always starts with a field, since the top level is a struct.
+        if let Some((position, definition)) = last_field
+            && let Step::Field { element, .. } = &mut steps[position]
+        {
+            *element = Some(Box::new(definition.clone()));
+        }
         Ok(Self { steps, element })
     }
 
@@ -115,17 +129,28 @@ impl FieldPath {
     ///
     /// Passing through a null value fails with [`ValueAccessError::NullValue`],
     /// as with [`Value::get`]; a null at the end of the path is returned as is.
-    /// A struct whose fields differ from the resolved schema fails with
-    /// [`ValueAccessError::SchemaMismatch`].
+    /// A value decoded with a different schema fails with
+    /// [`ValueAccessError::SchemaMismatch`]: each struct on the path must have
+    /// the resolved field name at the resolved position, and the last field on
+    /// the path must have the resolved definition.
     pub fn get<'a>(&self, value: &'a Value) -> Result<&'a Value, ValueAccessError> {
         self.steps.iter().try_fold(value, |value, step| match step {
-            Step::Field { index, name } => {
+            Step::Field {
+                index,
+                name,
+                element,
+            } => {
                 let Value::Struct(fields) = value else {
                     return Err(value.access_mismatch("Struct"));
                 };
                 fields.check_schema()?;
                 match fields.schema().fields.get(*index) {
-                    Some(field) if field.name == **name => Ok(&fields[*index]),
+                    Some(field)
+                        if field.name == **name
+                            && element.as_deref().is_none_or(|e| field.element == *e) =>
+                    {
+                        Ok(&fields[*index])
+                    }
                     _ => Err(ValueAccessError::SchemaMismatch),
                 }
             }

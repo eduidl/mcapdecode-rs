@@ -171,6 +171,18 @@ fn values_from_another_schema_are_rejected() {
     let other = message(&schema(&renamed), &renamed);
     assert!(matches!(path.get(&other), Err(E::SchemaMismatch)));
     assert!(matches!(path.get(&Value::I32(0)), Err(E::TypeMismatch(_))));
+
+    // Same names and positions, but the target field has another type.
+    let retyped = Arc::new(StructDef::from(vec![
+        FieldDef::new("x", DataTypeDef::F64, false),
+        FieldDef::new("y", DataTypeDef::I32, false),
+    ]));
+    let other = message(&schema(&retyped), &retyped);
+    assert!(matches!(path.get(&other), Err(E::SchemaMismatch)));
+
+    // Fields before the target only need matching names.
+    let x = FieldPath::parse(&fields, "pose.position.x").unwrap();
+    assert_eq!(x.get(&other).unwrap().try_widen_f64(), Ok(1.0));
 }
 
 #[test]
