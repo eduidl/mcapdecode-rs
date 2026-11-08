@@ -13,7 +13,7 @@ use std::{
 };
 
 use mcap::{WriteOptions, Writer, records::MessageHeader};
-use mcapdecode::{McapReader, McapReaderBuilder, McapReaderError, Read, TopicInfo};
+use mcapdecode::{ChannelSchema, McapReader, McapReaderBuilder, McapReaderError, Read, TopicInfo};
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,

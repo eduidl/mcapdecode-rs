@@ -60,7 +60,8 @@ Use `topics` or `channels` to select supported channels, for example
 schema; selecting a topic reads all of them. The same selection lists its
 channels with `selected_channels()` and derives their schemas without reading
 messages with `field_defs()`, or `arrow().schemas()` for Arrow. Each callback
-receives `ChannelInfo`, including its ID, topic, and optional schema name.
+receives `ChannelInfo`, including its ID, topic, message encoding, and the name
+and encoding of its schema, if any.
 `McapReader::builder()` starts with the built-in decoders; `with_decoder()` adds
 or replaces one, `clear_decoders()` removes them all, and `open()` opens any
 number of files with the same configuration. The built-in decoders live in

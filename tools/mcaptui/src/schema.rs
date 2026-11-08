@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use mcapdecode::{McapReader, McapReaderError, decoder::DecoderError};
+use mcapdecode::{McapReader, McapReaderError, MessageEncoding, decoder::DecoderError};
 
 use crate::{app, format};
 
@@ -36,11 +36,11 @@ pub(crate) fn load_schema_view(
 
     let label = row.label();
     let topic = &row.channel;
-    let title = match topic.schema_name.as_deref() {
+    let title = match topic.schema.as_ref().map(|schema| schema.name.as_str()) {
         Some(schema_name) => format!("Schema: {label} ({schema_name})"),
         None => format!("Schema: {label}"),
     };
-    let text = if topic.schema_encoding == "jsonschema" && topic.message_encoding == "json" {
+    let text = if format::is_json_schema(topic) && topic.message_encoding == MessageEncoding::Json {
         format::format_unsupported_schema_text(topic)
     } else {
         let field_defs = reader
@@ -86,7 +86,7 @@ pub(crate) fn supports_raw_fallback(error: &McapReaderError) -> bool {
 mod tests {
     use std::path::Path;
 
-    use mcapdecode::{ChannelInfo, McapReader};
+    use mcapdecode::{ChannelInfo, ChannelSchema, McapReader, MessageEncoding, SchemaEncoding};
 
     fn reader() -> McapReader {
         McapReader::builder()
@@ -107,9 +107,11 @@ mod tests {
                 id: u16::MAX,
                 topic: "/imu".to_string(),
                 message_count: Some(1),
-                schema_name: Some("schema-a".to_string()),
-                schema_encoding: "jsonschema".to_string(),
-                message_encoding: "json".to_string(),
+                schema: Some(ChannelSchema {
+                    name: "schema-a".to_string(),
+                    encoding: SchemaEncoding::from("jsonschema"),
+                }),
+                message_encoding: MessageEncoding::from("json"),
                 metadata: Default::default(),
             },
             false,
@@ -129,9 +131,11 @@ mod tests {
                 id: u16::MAX,
                 topic: "/imu".to_string(),
                 message_count: Some(1),
-                schema_name: Some("schema-a".to_string()),
-                schema_encoding: "jsonschema".to_string(),
-                message_encoding: "cbor".to_string(),
+                schema: Some(ChannelSchema {
+                    name: "schema-a".to_string(),
+                    encoding: SchemaEncoding::from("jsonschema"),
+                }),
+                message_encoding: MessageEncoding::from("cbor"),
                 metadata: Default::default(),
             },
             false,
@@ -149,9 +153,8 @@ mod tests {
                 id: 1,
                 topic: "/foo".to_string(),
                 message_count: Some(1),
-                schema_name: None,
-                schema_encoding: String::new(),
-                message_encoding: String::new(),
+                schema: None,
+                message_encoding: MessageEncoding::from(""),
                 metadata: Default::default(),
             },
             true,
@@ -161,9 +164,8 @@ mod tests {
                 id: u16::MAX,
                 topic: "/foo #1".to_string(),
                 message_count: Some(1),
-                schema_name: None,
-                schema_encoding: String::new(),
-                message_encoding: String::new(),
+                schema: None,
+                message_encoding: MessageEncoding::from(""),
                 metadata: Default::default(),
             },
             false,

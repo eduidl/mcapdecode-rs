@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, ops::RangeInclusive};
 
 use chrono::{DateTime, Utc};
-use mcapdecode::{ChannelInfo, FieldDefs, StructValue, Value, mcap::read::Summary};
+use mcapdecode::{ChannelInfo, FieldDefs, SchemaEncoding, StructValue, Value, mcap::read::Summary};
 
 use crate::app::DetailRow;
 
@@ -153,29 +153,45 @@ pub fn format_json_detail_rows(
     Some(rows)
 }
 
+/// The schema name, `-` without a schema, and its encoding, empty without one.
+fn schema_name_and_encoding(topic: &ChannelInfo) -> (&str, &str) {
+    match &topic.schema {
+        Some(schema) => (&schema.name, schema.encoding.as_str()),
+        None => ("-", ""),
+    }
+}
+
+/// Whether the channel's schema is a JSON Schema.
+pub fn is_json_schema(topic: &ChannelInfo) -> bool {
+    topic
+        .schema
+        .as_ref()
+        .is_some_and(|schema| schema.encoding == SchemaEncoding::JsonSchema)
+}
+
 pub fn format_schema_text(topic: &ChannelInfo, field_defs: &FieldDefs) -> String {
-    let schema_name = topic.schema_name.as_deref().unwrap_or("-");
+    let (schema_name, schema_encoding) = schema_name_and_encoding(topic);
     format!(
         "topic: {}\nschema_name: {}\nschema_encoding: {}\nmessage_encoding: {}\n\n{}",
-        topic.topic, schema_name, topic.schema_encoding, topic.message_encoding, field_defs
+        topic.topic, schema_name, schema_encoding, topic.message_encoding, field_defs
     )
 }
 
 pub fn format_raw_schema_text(topic: &ChannelInfo, reason: &str) -> String {
-    let schema_name = topic.schema_name.as_deref().unwrap_or("-");
+    let (schema_name, schema_encoding) = schema_name_and_encoding(topic);
     format!(
         "topic: {}\nschema_name: {}\nschema_encoding: {}\nmessage_encoding: {}\n\nraw payload mode\nreason: {}\n\npayload: bytes",
-        topic.topic, schema_name, topic.schema_encoding, topic.message_encoding, reason
+        topic.topic, schema_name, schema_encoding, topic.message_encoding, reason
     )
 }
 
 /// Text for `jsonschema` topics, whose decoder never reads the schema, so its
 /// `json: string` field says nothing about the message structure.
 pub fn format_unsupported_schema_text(topic: &ChannelInfo) -> String {
-    let schema_name = topic.schema_name.as_deref().unwrap_or("-");
+    let (schema_name, schema_encoding) = schema_name_and_encoding(topic);
     format!(
         "topic: {}\nschema_name: {}\nschema_encoding: {}\nmessage_encoding: {}\n\nJSON Schema is not supported\nmessages are shown as unparsed JSON text",
-        topic.topic, schema_name, topic.schema_encoding, topic.message_encoding
+        topic.topic, schema_name, schema_encoding, topic.message_encoding
     )
 }
 

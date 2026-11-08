@@ -19,9 +19,7 @@ pub mod batch {
 /// features. Register one again with
 /// [`McapReaderBuilder::with_decoder`] to change its settings.
 pub mod decoder {
-    pub use mcapdecode_core::{
-        DecoderError, EncodingKey, MessageDecoder, MessageEncoding, SchemaEncoding, TopicDecoder,
-    };
+    pub use mcapdecode_core::{DecoderError, EncodingKey, MessageDecoder, TopicDecoder};
     #[cfg(feature = "protobuf")]
     pub use mcapdecode_protobuf::{PresencePolicy, ProtobufDecoder};
     #[cfg(feature = "rawjson")]
@@ -43,10 +41,11 @@ pub use error::McapReaderError;
 pub use mcap;
 pub use mcapdecode_core::{
     DataTypeDef, DecodedMessage, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, FieldPath,
-    MapKey, StructDef, StructValue, Value, ValueAccessError, ValueIndex, ValueTypeError,
+    MapKey, MessageEncoding, SchemaEncoding, StructDef, StructValue, Value, ValueAccessError,
+    ValueIndex, ValueTypeError,
 };
 #[cfg(feature = "arrow")]
 pub use read::ArrowRead;
 pub use read::{CallbackOutcome, DecodedRead, RawRead, Read};
 pub use reader::{McapReader, McapReaderBuilder};
-pub use types::{ChannelInfo, RawMessage, TopicInfo};
+pub use types::{ChannelInfo, ChannelSchema, RawMessage, TopicInfo};

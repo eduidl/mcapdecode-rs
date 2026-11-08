@@ -68,14 +68,19 @@ fn render_topics(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
             .unwrap_or_else(|| "-".to_string());
         let schema = row
             .channel
-            .schema_name
-            .clone()
-            .map(|schema| display_empty_text(&schema))
+            .schema
+            .as_ref()
+            .map(|schema| display_empty_text(&schema.name))
             .unwrap_or_else(|| "-".to_string());
+        let schema_encoding = row
+            .channel
+            .schema
+            .as_ref()
+            .map_or("", |schema| schema.encoding.as_str());
         let encoding = format!(
             "{} / {}",
-            display_empty_text(&row.channel.message_encoding),
-            display_empty_text(&row.channel.schema_encoding)
+            display_empty_text(row.channel.message_encoding.as_str()),
+            display_empty_text(schema_encoding)
         );
         let style = if !row.has_messages() {
             Style::default().add_modifier(Modifier::DIM)

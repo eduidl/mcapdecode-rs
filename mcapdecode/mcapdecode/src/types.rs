@@ -6,6 +6,8 @@ use std::{
     sync::Arc,
 };
 
+use mcapdecode_core::{MessageEncoding, SchemaEncoding};
+
 /// Metadata about one channel discovered from the MCAP summary section.
 ///
 /// A topic can span several channels, each with its own schema.
@@ -14,10 +16,21 @@ pub struct ChannelInfo {
     pub id: u16,
     pub topic: String,
     pub message_count: Option<u64>,
-    pub schema_name: Option<String>,
-    pub schema_encoding: String,
-    pub message_encoding: String,
+    /// The channel's schema, or `None` for a channel with schema id 0.
+    ///
+    /// The MCAP spec also marks a schema with an empty encoding
+    /// ([`SchemaEncoding::None`]) as no schema available. Such a schema is kept
+    /// here, since its name may still carry a value.
+    pub schema: Option<ChannelSchema>,
+    pub message_encoding: MessageEncoding,
     pub metadata: BTreeMap<String, String>,
+}
+
+/// Name and encoding of the schema attached to a channel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelSchema {
+    pub name: String,
+    pub encoding: SchemaEncoding,
 }
 
 /// Metadata about a topic discovered from the MCAP summary section.

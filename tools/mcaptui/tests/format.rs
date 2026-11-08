@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use mcapdecode::{
-    ChannelInfo, DataTypeDef,
+    ChannelInfo, ChannelSchema, DataTypeDef,
     DataTypeDef::{Bytes, I64, Map, String as StringType},
-    ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, StructDef, Value,
+    ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, MessageEncoding, SchemaEncoding,
+    StructDef, Value,
 };
 use mcaptui::format::{
     format_detail_rows, format_file_info_text, format_json_detail_rows, format_raw_detail_rows,
@@ -69,9 +70,11 @@ fn sample_topic() -> ChannelInfo {
         id: 1,
         topic: "/camera/image".to_string(),
         message_count: Some(3),
-        schema_name: Some("sensor_msgs/msg/Image".to_string()),
-        schema_encoding: "ros2idl".to_string(),
-        message_encoding: "cdr".to_string(),
+        schema: Some(ChannelSchema {
+            name: "sensor_msgs/msg/Image".to_string(),
+            encoding: SchemaEncoding::from("ros2idl"),
+        }),
+        message_encoding: MessageEncoding::from("cdr"),
         metadata: Default::default(),
     }
 }

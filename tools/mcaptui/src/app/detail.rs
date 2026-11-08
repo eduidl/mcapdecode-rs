@@ -61,7 +61,7 @@ impl App {
         let selected_index = self.messages.selected;
         let is_json = self
             .selected_topic()
-            .is_some_and(|row| row.channel.schema_encoding == "jsonschema");
+            .is_some_and(|row| format::is_json_schema(&row.channel));
         let message = self.messages.items.get_mut(selected_index)?;
         if message.detail_rows.is_none() {
             let json_rows = is_json

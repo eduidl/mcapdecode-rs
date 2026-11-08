@@ -220,7 +220,10 @@ fn reader_selects_multiple_channels_and_reports_metadata() {
         .raw()
         .for_each(|channel, message| {
             assert_eq!(channel.topic, "/split");
-            assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
+            assert_eq!(
+                channel.schema.as_ref().map(|schema| schema.name.as_str()),
+                Some("test.Msg")
+            );
             raw.insert(channel.id, message.log_time);
         })
         .unwrap();
@@ -232,7 +235,10 @@ fn reader_selects_multiple_channels_and_reports_metadata() {
         .decoded()
         .for_each(|channel, message| {
             assert_eq!(channel.topic, "/split");
-            assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
+            assert_eq!(
+                channel.schema.as_ref().map(|schema| schema.name.as_str()),
+                Some("test.Msg")
+            );
             decoded.insert(channel.id, message.log_time);
         })
         .unwrap();
@@ -413,9 +419,14 @@ fn channels_reports_each_channel_in_id_order() {
         [Some(2), Some(2), Some(0)]
     );
     assert!(channels.iter().all(|channel| channel.topic == "/split"));
-    assert_eq!(channels[0].schema_name.as_deref(), Some("test.Msg"));
-    assert_eq!(channels[0].schema_encoding, "jsonschema");
-    assert_eq!(channels[0].message_encoding, "json");
+    assert_eq!(
+        channels[0].schema,
+        Some(ChannelSchema {
+            name: "test.Msg".to_string(),
+            encoding: SchemaEncoding::JsonSchema,
+        })
+    );
+    assert_eq!(channels[0].message_encoding, MessageEncoding::Json);
     assert_eq!(channels[0].metadata["source"], "left");
     assert!(channels[1].metadata.is_empty());
 }

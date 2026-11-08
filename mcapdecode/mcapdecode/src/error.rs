@@ -1,6 +1,6 @@
 //! Error types for the MCAP reader.
 
-use mcapdecode_core::DecoderError;
+use mcapdecode_core::{DecoderError, MessageEncoding, SchemaEncoding};
 
 /// Errors produced by [`McapReader`](crate::McapReader).
 #[derive(Debug, thiserror::Error)]
@@ -35,8 +35,8 @@ pub enum McapReaderError {
         "no decoder registered for schema_encoding='{schema_encoding}', message_encoding='{message_encoding}'"
     )]
     NoDecoder {
-        schema_encoding: String,
-        message_encoding: String,
+        schema_encoding: SchemaEncoding,
+        message_encoding: MessageEncoding,
     },
 
     /// A decoder-derived schema had no fields and cannot be converted to Arrow.

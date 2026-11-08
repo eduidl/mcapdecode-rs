@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind};
-use mcapdecode::{ChannelInfo, TopicInfo, Value};
+use mcapdecode::{ChannelInfo, ChannelSchema, MessageEncoding, SchemaEncoding, TopicInfo, Value};
 use mcaptui::app::{App, AppRequest, AppUpdate, DetailRow, LoadedMessage, MessageFocus, Screen};
 use ratatui::layout::Rect;
 
@@ -61,9 +61,11 @@ fn channel(id: u16, name: &str, message_count: u64) -> ChannelInfo {
         id,
         topic: name.to_string(),
         message_count: Some(message_count),
-        schema_name: Some("test.Msg".to_string()),
-        schema_encoding: "jsonschema".to_string(),
-        message_encoding: "json".to_string(),
+        schema: Some(ChannelSchema {
+            name: "test.Msg".to_string(),
+            encoding: SchemaEncoding::from("jsonschema"),
+        }),
+        message_encoding: MessageEncoding::from("json"),
         metadata: Default::default(),
     }
 }

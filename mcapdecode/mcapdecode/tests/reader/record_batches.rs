@@ -104,7 +104,10 @@ fn reader_arrow_distinguishes_channels_with_the_same_topic() {
         .arrow()
         .for_each(|channel, batch| {
             assert_eq!(channel.topic, "/split");
-            assert_eq!(channel.schema_name.as_deref(), Some("test.Msg"));
+            assert_eq!(
+                channel.schema.as_ref().map(|schema| schema.name.as_str()),
+                Some("test.Msg")
+            );
             rows.insert(channel.id, batch.num_rows());
         })
         .unwrap();

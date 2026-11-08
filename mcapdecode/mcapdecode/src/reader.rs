@@ -22,8 +22,8 @@ use mcapdecode_ros2msg::Ros2MsgDecoder;
 use memmap2::Mmap;
 
 use crate::{
-    ChannelInfo, McapReaderError, TopicInfo, chunk_reader::for_each_selected_message, read::Read,
-    types::ReadOptions,
+    ChannelInfo, ChannelSchema, McapReaderError, TopicInfo,
+    chunk_reader::for_each_selected_message, read::Read, types::ReadOptions,
 };
 
 type Decoders = HashMap<EncodingKey, Arc<dyn MessageDecoder>>;
@@ -179,14 +179,15 @@ impl McapReader {
     }
 
     pub(crate) fn channel_info(&self, channel: &mcap::Channel<'_>) -> ChannelInfo {
-        let (schema_name, schema_encoding) = schema_name_and_encoding(channel);
         ChannelInfo {
             id: channel.id,
             topic: channel.topic.clone(),
             message_count: self.channel_message_count(channel.id),
-            schema_name,
-            schema_encoding,
-            message_encoding: channel.message_encoding.clone(),
+            schema: channel.schema.as_ref().map(|schema| ChannelSchema {
+                name: schema.name.clone(),
+                encoding: SchemaEncoding::from(schema.encoding.as_str()),
+            }),
+            message_encoding: MessageEncoding::from(channel.message_encoding.as_str()),
             metadata: channel.metadata.clone(),
         }
     }
@@ -214,13 +215,13 @@ impl McapReader {
             .ok_or(McapReaderError::SchemaNotAvailable)?;
         let schema_enc = SchemaEncoding::from(schema.encoding.as_str());
         let message_enc = MessageEncoding::from(channel.message_encoding.as_str());
-        let key = EncodingKey::new(schema_enc.clone(), message_enc.clone());
+        let key = EncodingKey::new(schema_enc, message_enc);
         let decoder = self
             .decoders
             .get(&key)
             .ok_or_else(|| McapReaderError::NoDecoder {
-                schema_encoding: schema_enc.to_string(),
-                message_encoding: message_enc.to_string(),
+                schema_encoding: key.schema_encoding.clone(),
+                message_encoding: key.message_encoding.clone(),
             })?;
         let topic_decoder = decoder.build_topic_decoder(&schema.name, &schema.data)?;
         let field_defs = topic_decoder.field_defs().clone();
@@ -260,14 +261,6 @@ impl McapReader {
                 .copied()
                 .unwrap_or_default()
         })
-    }
-}
-
-/// The schema name, if any, and the schema encoding, empty without a schema.
-fn schema_name_and_encoding(channel: &mcap::Channel<'_>) -> (Option<String>, String) {
-    match &channel.schema {
-        Some(schema) => (Some(schema.name.clone()), schema.encoding.clone()),
-        None => (None, String::new()),
     }
 }
 
