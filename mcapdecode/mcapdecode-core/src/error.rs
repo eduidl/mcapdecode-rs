@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::value::TypeName;
+use crate::value::ValueType;
 
 /// Error returned by [`MessageDecoder`](crate::MessageDecoder) implementations.
 #[derive(Debug, Error)]
@@ -23,7 +23,7 @@ pub enum DecoderError {
 // Box arbitrary descriptions so errors containing only type names stay small.
 #[derive(Clone, PartialEq, Eq)]
 enum TypeMismatch {
-    Types(TypeName, TypeName),
+    Types(ValueType, ValueType),
     Descriptions(Box<(String, String)>),
 }
 
@@ -63,7 +63,7 @@ impl ValueTypeError {
     pub fn new(expected: impl Into<String>, actual: impl Into<String>) -> Self {
         let expected = expected.into();
         let actual = actual.into();
-        match (TypeName::parse(&expected), TypeName::parse(&actual)) {
+        match (ValueType::parse(&expected), ValueType::parse(&actual)) {
             (Some(expected), Some(actual)) => Self::for_types(expected, actual),
             _ => Self {
                 inner: TypeMismatch::Descriptions(Box::new((expected, actual))),
@@ -71,15 +71,15 @@ impl ValueTypeError {
         }
     }
 
-    pub(crate) fn for_types(expected: TypeName, actual: TypeName) -> Self {
+    pub(crate) fn for_types(expected: ValueType, actual: ValueType) -> Self {
         Self {
             inner: TypeMismatch::Types(expected, actual),
         }
     }
 
-    pub(crate) fn for_value(expected: impl Into<String>, actual: TypeName) -> Self {
+    pub(crate) fn for_value(expected: impl Into<String>, actual: ValueType) -> Self {
         let expected = expected.into();
-        match TypeName::parse(&expected) {
+        match ValueType::parse(&expected) {
             Some(expected) => Self::for_types(expected, actual),
             None => Self::new(expected, actual.as_str()),
         }

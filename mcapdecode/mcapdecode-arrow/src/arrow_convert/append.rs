@@ -7,7 +7,7 @@ use arrow::{
     },
     datatypes::DataType,
 };
-use mcapdecode_core::{Value, ValueTypeError};
+use mcapdecode_core::{Value, ValueType, ValueTypeError};
 
 use super::scalar::{ScalarValue, scalar_value_for_datatype};
 
@@ -54,7 +54,7 @@ fn append_list_elements(
             Ok(true)
         }
         Value::Null => Ok(false),
-        _ => Err(value.type_mismatch("List")),
+        _ => Err(value.type_mismatch(ValueType::List)),
     }
 }
 
@@ -72,7 +72,7 @@ fn append_map_entries(
             Ok(true)
         }
         Value::Null => Ok(false),
-        _ => Err(value.type_mismatch("Map")),
+        _ => Err(value.type_mismatch(ValueType::Map)),
     }
 }
 
@@ -101,7 +101,7 @@ fn append_fixed_size_list_elements(
             }
             Ok(false)
         }
-        _ => Err(value.type_mismatch("Array")),
+        _ => Err(value.type_mismatch(ValueType::Array)),
     }
 }
 
@@ -143,7 +143,7 @@ pub(super) fn append_value_to_builder(
                     }
                     b.append(false);
                 }
-                _ => return Err(value.type_mismatch("Struct")),
+                _ => return Err(value.type_mismatch(ValueType::Struct)),
             }
         }
         DataType::Map(entry_field, _) => {

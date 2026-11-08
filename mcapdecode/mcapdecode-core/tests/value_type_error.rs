@@ -1,4 +1,4 @@
-use mcapdecode_core::{Value, ValueTypeError};
+use mcapdecode_core::{Value, ValueType, ValueTypeError};
 
 #[test]
 fn enum_type_names_preserve_error_messages_and_equality() {
@@ -24,13 +24,11 @@ fn enum_type_names_preserve_error_messages_and_equality() {
         (Value::Map(vec![]), "Map"),
     ];
     for (value, name) in cases {
-        let error = value.type_mismatch("F64");
+        let error = value.type_mismatch(ValueType::F64);
         assert_eq!(error, ValueTypeError::new("F64", name));
         assert_eq!(error.to_string(), format!("expected F64, got {name}"));
         assert_eq!(
-            value
-                .type_mismatch("custom expected description")
-                .to_string(),
+            ValueTypeError::new("custom expected description", name).to_string(),
             format!("expected custom expected description, got {name}")
         );
     }

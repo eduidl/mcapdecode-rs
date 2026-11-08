@@ -42,7 +42,7 @@ pub use mcap;
 pub use mcapdecode_core::{
     DataTypeDef, DecodedMessage, ElementDef, EnumDef, EnumVariant, FieldDef, FieldDefs, FieldPath,
     MapKey, MessageEncoding, SchemaEncoding, StructDef, StructValue, Value, ValueAccessError,
-    ValueIndex, ValueTypeError,
+    ValueIndex, ValueType, ValueTypeError,
 };
 #[cfg(feature = "arrow")]
 pub use read::ArrowRead;

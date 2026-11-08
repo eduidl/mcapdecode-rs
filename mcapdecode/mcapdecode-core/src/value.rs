@@ -30,8 +30,9 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TypeName {
+/// The variant of a [`Value`], used to describe type mismatches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValueType {
     Null,
     Bool,
     I8,
@@ -53,7 +54,7 @@ pub(crate) enum TypeName {
     Map,
 }
 
-impl TypeName {
+impl ValueType {
     pub(crate) fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "Null" => Self::Null,
@@ -79,7 +80,8 @@ impl TypeName {
         })
     }
 
-    pub(crate) fn as_str(self) -> &'static str {
+    /// The variant name, such as `"I32"`.
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Null => "Null",
             Self::Bool => "Bool",
@@ -101,6 +103,12 @@ impl TypeName {
             Self::Array => "Array",
             Self::Map => "Map",
         }
+    }
+}
+
+impl std::fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -229,7 +237,7 @@ impl Value {
         if matches!(self, Self::Null) {
             ValueAccessError::NullValue
         } else {
-            ValueAccessError::TypeMismatch(self.type_mismatch(expected))
+            ValueAccessError::TypeMismatch(ValueTypeError::for_value(expected, self.type_name()))
         }
     }
 
@@ -301,7 +309,7 @@ impl Value {
         match self {
             Value::I8(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::I8, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::I8, self.type_name())),
         }
     }
 
@@ -309,7 +317,7 @@ impl Value {
         match self {
             Value::I16(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::I16, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::I16, self.type_name())),
         }
     }
 
@@ -317,7 +325,7 @@ impl Value {
         match self {
             Value::I32(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::I32, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::I32, self.type_name())),
         }
     }
 
@@ -325,7 +333,7 @@ impl Value {
         match self {
             Value::I64(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::I64, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::I64, self.type_name())),
         }
     }
 
@@ -333,7 +341,7 @@ impl Value {
         match self {
             Value::U8(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::U8, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::U8, self.type_name())),
         }
     }
 
@@ -341,7 +349,7 @@ impl Value {
         match self {
             Value::U16(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::U16, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::U16, self.type_name())),
         }
     }
 
@@ -349,7 +357,7 @@ impl Value {
         match self {
             Value::U32(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::U32, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::U32, self.type_name())),
         }
     }
 
@@ -357,7 +365,7 @@ impl Value {
         match self {
             Value::U64(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::U64, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::U64, self.type_name())),
         }
     }
 
@@ -365,7 +373,7 @@ impl Value {
         match self {
             Value::Bool(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::Bool, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::Bool, self.type_name())),
         }
     }
 
@@ -373,7 +381,7 @@ impl Value {
         match self {
             Value::F32(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::F32, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::F32, self.type_name())),
         }
     }
 
@@ -381,7 +389,7 @@ impl Value {
         match self {
             Value::F64(v) => Ok(Some(*v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::F64, self.type_name())),
+            _ => Err(ValueTypeError::for_types(ValueType::F64, self.type_name())),
         }
     }
 
@@ -390,7 +398,7 @@ impl Value {
             Value::String(v) => Ok(Some(v.as_ref())),
             Value::Null => Ok(None),
             _ => Err(ValueTypeError::for_types(
-                TypeName::String,
+                ValueType::String,
                 self.type_name(),
             )),
         }
@@ -401,7 +409,10 @@ impl Value {
         match self {
             Value::Bytes(v) | Value::Uint8List(v) => Ok(Some(v.as_ref())),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::Bytes, self.type_name())),
+            _ => Err(ValueTypeError::for_types(
+                ValueType::Bytes,
+                self.type_name(),
+            )),
         }
     }
 
@@ -414,35 +425,41 @@ impl Value {
         match self {
             Value::Bytes(v) | Value::Uint8List(v) => Ok(Some(v)),
             Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(TypeName::Bytes, self.type_name())),
+            _ => Err(ValueTypeError::for_types(
+                ValueType::Bytes,
+                self.type_name(),
+            )),
         }
     }
 
-    pub fn type_mismatch(&self, expected: impl Into<String>) -> ValueTypeError {
-        ValueTypeError::for_value(expected, self.type_name())
+    /// Describe this value as not being of the `expected` type.
+    ///
+    /// Use [`ValueTypeError::new`] to describe the expected type in free text.
+    pub fn type_mismatch(&self, expected: ValueType) -> ValueTypeError {
+        ValueTypeError::for_types(expected, self.type_name())
     }
 
-    fn type_name(&self) -> TypeName {
+    fn type_name(&self) -> ValueType {
         match self {
-            Value::Null => TypeName::Null,
-            Value::Bool(_) => TypeName::Bool,
-            Value::I8(_) => TypeName::I8,
-            Value::I16(_) => TypeName::I16,
-            Value::I32(_) => TypeName::I32,
-            Value::I64(_) => TypeName::I64,
-            Value::U8(_) => TypeName::U8,
-            Value::U16(_) => TypeName::U16,
-            Value::U32(_) => TypeName::U32,
-            Value::U64(_) => TypeName::U64,
-            Value::F32(_) => TypeName::F32,
-            Value::F64(_) => TypeName::F64,
-            Value::String(_) => TypeName::String,
-            Value::Bytes(_) => TypeName::Bytes,
-            Value::Struct(_) => TypeName::Struct,
-            Value::List(_) => TypeName::List,
-            Value::Uint8List(_) => TypeName::Uint8List,
-            Value::Array(_) => TypeName::Array,
-            Value::Map(_) => TypeName::Map,
+            Value::Null => ValueType::Null,
+            Value::Bool(_) => ValueType::Bool,
+            Value::I8(_) => ValueType::I8,
+            Value::I16(_) => ValueType::I16,
+            Value::I32(_) => ValueType::I32,
+            Value::I64(_) => ValueType::I64,
+            Value::U8(_) => ValueType::U8,
+            Value::U16(_) => ValueType::U16,
+            Value::U32(_) => ValueType::U32,
+            Value::U64(_) => ValueType::U64,
+            Value::F32(_) => ValueType::F32,
+            Value::F64(_) => ValueType::F64,
+            Value::String(_) => ValueType::String,
+            Value::Bytes(_) => ValueType::Bytes,
+            Value::Struct(_) => ValueType::Struct,
+            Value::List(_) => ValueType::List,
+            Value::Uint8List(_) => ValueType::Uint8List,
+            Value::Array(_) => ValueType::Array,
+            Value::Map(_) => ValueType::Map,
         }
     }
 }
