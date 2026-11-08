@@ -12,7 +12,7 @@ Apache Arrow `RecordBatch` streams.
 
 ```toml
 [dependencies]
-mcapdecode = "0.10.0"
+mcapdecode = "0.11.0"
 ```
 
 The default features enable the protobuf and ROS 2 decoders. See
@@ -213,7 +213,7 @@ Enable the `arrow` feature for that API:
 
 ```toml
 [dependencies]
-mcapdecode = { version = "0.10.0", features = ["arrow"] }
+mcapdecode = { version = "0.11.0", features = ["arrow"] }
 ```
 
 ## Feature Flags
@@ -230,7 +230,7 @@ Disable defaults to trim dependencies, and add only what you need:
 
 ```toml
 [dependencies]
-mcapdecode = { version = "0.10.0", default-features = false, features = ["protobuf", "arrow"] }
+mcapdecode = { version = "0.11.0", default-features = false, features = ["protobuf", "arrow"] }
 ```
 
 ## Workspace Crates
