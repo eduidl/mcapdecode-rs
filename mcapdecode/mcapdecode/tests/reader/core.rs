@@ -1211,7 +1211,7 @@ fn default_decoders_expose_json_topics_unparsed() {
         .topic("/json")
         .decoded()
         .try_for_each(|_, message| {
-            decoded.push(message.value.get("json")?.try_str()?.unwrap().to_owned());
+            decoded.push(message.value.get("json")?.try_str()?.to_owned());
             Ok(())
         })
         .unwrap();

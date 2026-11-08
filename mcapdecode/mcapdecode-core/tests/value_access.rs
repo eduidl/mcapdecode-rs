@@ -28,7 +28,7 @@ fn map_keys_match_by_value() {
     assert!(matches!(numbers.get_key(1_u8), Err(E::NotFound)));
 
     let booleans = Value::Map(vec![(Value::Bool(true), Value::string("yes"))]);
-    assert_eq!(booleans.get_key(true).unwrap().try_str(), Ok(Some("yes")));
+    assert_eq!(booleans.get_key(true).unwrap().try_str(), Ok("yes"));
 }
 
 #[test]
@@ -102,12 +102,12 @@ fn numeric_conversions_are_checked_and_null_is_explicit() {
         Value::string("x").try_lossy_f64(),
         Err(E::TypeMismatch(_))
     ));
-    assert_eq!(Value::string("hello").try_str(), Ok(Some("hello")));
+    assert_eq!(Value::string("hello").try_str(), Ok("hello"));
     assert_eq!(
         Value::Uint8List(vec![1, 2].into()).try_bytes(),
-        Ok(Some(&[1, 2][..]))
+        Ok(&[1, 2][..])
     );
-    assert!(Value::U8(1).try_u64().is_err());
+    assert!(matches!(Value::U8(1).try_u64(), Err(E::TypeMismatch(_))));
 }
 
 #[test]
@@ -117,15 +117,27 @@ fn shared_bytes_reuse_the_decoded_buffer() {
         Value::Bytes(buffer.clone()),
         Value::Uint8List(buffer.clone()),
     ] {
-        let shared = value.try_shared_bytes().unwrap().unwrap();
+        let shared = value.try_shared_bytes().unwrap();
         assert!(std::sync::Arc::ptr_eq(shared, &buffer));
     }
 }
 
 #[test]
-fn exact_type_errors_convert_into_access_errors() {
-    fn read(value: &Value) -> Result<Option<f64>, E> {
-        Ok(value.try_f64()?)
+fn exact_type_accessors_report_null_as_an_error() {
+    assert_eq!(Value::F64(1.5).try_f64(), Ok(1.5));
+    assert!(matches!(Value::I32(1).try_f64(), Err(E::TypeMismatch(_))));
+    assert_eq!(Value::Null.try_f64(), Err(E::NullValue));
+    assert_eq!(Value::Null.try_str(), Err(E::NullValue));
+}
+
+#[test]
+fn non_null_makes_null_an_option() {
+    fn read(value: &Value) -> Result<Option<i32>, E> {
+        value.non_null().map(Value::try_i32).transpose()
     }
-    assert!(matches!(read(&Value::I32(1)), Err(E::TypeMismatch(_))));
+    assert_eq!(read(&Value::I32(3)), Ok(Some(3)));
+    assert_eq!(read(&Value::Null), Ok(None));
+    assert!(matches!(read(&Value::I64(3)), Err(E::TypeMismatch(_))));
+    assert!(Value::Null.is_null());
+    assert!(!Value::I32(0).is_null());
 }

@@ -1,4 +1,4 @@
-use mcapdecode_core::{Value, ValueType, ValueTypeError};
+use mcapdecode_core::{Value, ValueAccessError, ValueType, ValueTypeError};
 
 #[test]
 fn enum_type_names_preserve_error_messages_and_equality() {
@@ -35,14 +35,14 @@ fn enum_type_names_preserve_error_messages_and_equality() {
 }
 
 #[test]
-fn scalar_accessors_preserve_success_null_and_type_errors() {
+fn scalar_accessors_report_null_and_type_errors() {
     macro_rules! check {
         ($method:ident, $name:literal, $value:expr, $expected:expr) => {
-            assert_eq!($value.$method(), Ok(Some($expected)));
-            assert_eq!(Value::Null.$method(), Ok(None));
+            assert_eq!($value.$method(), Ok($expected));
+            assert_eq!(Value::Null.$method(), Err(ValueAccessError::NullValue));
             assert_eq!(
                 Value::Map(vec![]).$method().unwrap_err(),
-                ValueTypeError::new($name, "Map")
+                ValueAccessError::TypeMismatch(ValueTypeError::new($name, "Map"))
             );
         };
     }

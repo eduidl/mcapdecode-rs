@@ -208,7 +208,7 @@ impl Value {
     /// Look up a map key by value.
     pub fn get_key<K: crate::MapKey>(&self, key: K) -> Result<&Value, ValueAccessError> {
         let Self::Map(entries) = self else {
-            return Err(self.access_mismatch("Map"));
+            return Err(self.exact_mismatch(ValueType::Map));
         };
         entries
             .iter()
@@ -229,7 +229,7 @@ impl Value {
     pub fn as_map(&self) -> Result<&[(Value, Value)], ValueAccessError> {
         match self {
             Self::Map(entries) => Ok(entries),
-            _ => Err(self.access_mismatch("Map")),
+            _ => Err(self.exact_mismatch(ValueType::Map)),
         }
     }
 
@@ -241,12 +241,45 @@ impl Value {
         }
     }
 
+    /// Like [`Value::access_mismatch`], but for an exact type, so that the
+    /// error is built without parsing a type name.
+    pub(crate) fn exact_mismatch(&self, expected: ValueType) -> ValueAccessError {
+        if matches!(self, Self::Null) {
+            ValueAccessError::NullValue
+        } else {
+            ValueAccessError::TypeMismatch(self.type_mismatch(expected))
+        }
+    }
+
+    /// Whether this value is [`Value::Null`].
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    /// Return `None` for [`Value::Null`] and `Some(self)` otherwise.
+    ///
+    /// Every `try_*` accessor reports null as [`ValueAccessError::NullValue`].
+    /// Use this where null is an expected value, such as an unset optional
+    /// field:
+    ///
+    /// ```
+    /// # use mcapdecode_core::{Value, ValueAccessError};
+    /// # fn main() -> Result<(), ValueAccessError> {
+    /// let count = Value::Null;
+    /// let count: Option<i32> = count.non_null().map(Value::try_i32).transpose()?;
+    /// assert_eq!(count, None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn non_null(&self) -> Option<&Value> {
+        match self {
+            Self::Null => None,
+            _ => Some(self),
+        }
+    }
+
     /// Widen signed integers and unsigned integers up to `u32` to `i64`.
     /// `u64` is rejected even when the particular value would fit.
-    ///
-    /// Unlike the exact-type `try_*` methods, which return `Ok(None)` for null,
-    /// the `try_widen_*` methods report null as [`ValueAccessError::NullValue`]
-    /// so that they chain with [`Value::get`] using `?`.
     pub fn try_widen_i64(&self) -> Result<i64, ValueAccessError> {
         match self {
             Self::I8(v) => Ok(i64::from(*v)),
@@ -283,8 +316,6 @@ impl Value {
 
     /// Convert any numeric value to `f64`. Unlike [`Value::try_widen_f64`], this
     /// also accepts integers, so `i64` and `u64` values beyond 2^53 may lose precision.
-    ///
-    /// Null is reported as [`ValueAccessError::NullValue`], like the `try_widen_*` methods.
     pub fn try_lossy_f64(&self) -> Result<f64, ValueAccessError> {
         match self {
             Self::I8(v) => Ok(f64::from(*v)),
@@ -305,114 +336,95 @@ impl Value {
         Self::String(Arc::from(s.as_ref()))
     }
 
-    pub fn try_i8(&self) -> Result<Option<i8>, ValueTypeError> {
+    pub fn try_i8(&self) -> Result<i8, ValueAccessError> {
         match self {
-            Value::I8(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::I8, self.type_name())),
+            Value::I8(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::I8)),
         }
     }
 
-    pub fn try_i16(&self) -> Result<Option<i16>, ValueTypeError> {
+    pub fn try_i16(&self) -> Result<i16, ValueAccessError> {
         match self {
-            Value::I16(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::I16, self.type_name())),
+            Value::I16(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::I16)),
         }
     }
 
-    pub fn try_i32(&self) -> Result<Option<i32>, ValueTypeError> {
+    pub fn try_i32(&self) -> Result<i32, ValueAccessError> {
         match self {
-            Value::I32(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::I32, self.type_name())),
+            Value::I32(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::I32)),
         }
     }
 
-    pub fn try_i64(&self) -> Result<Option<i64>, ValueTypeError> {
+    pub fn try_i64(&self) -> Result<i64, ValueAccessError> {
         match self {
-            Value::I64(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::I64, self.type_name())),
+            Value::I64(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::I64)),
         }
     }
 
-    pub fn try_u8(&self) -> Result<Option<u8>, ValueTypeError> {
+    pub fn try_u8(&self) -> Result<u8, ValueAccessError> {
         match self {
-            Value::U8(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::U8, self.type_name())),
+            Value::U8(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::U8)),
         }
     }
 
-    pub fn try_u16(&self) -> Result<Option<u16>, ValueTypeError> {
+    pub fn try_u16(&self) -> Result<u16, ValueAccessError> {
         match self {
-            Value::U16(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::U16, self.type_name())),
+            Value::U16(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::U16)),
         }
     }
 
-    pub fn try_u32(&self) -> Result<Option<u32>, ValueTypeError> {
+    pub fn try_u32(&self) -> Result<u32, ValueAccessError> {
         match self {
-            Value::U32(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::U32, self.type_name())),
+            Value::U32(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::U32)),
         }
     }
 
-    pub fn try_u64(&self) -> Result<Option<u64>, ValueTypeError> {
+    pub fn try_u64(&self) -> Result<u64, ValueAccessError> {
         match self {
-            Value::U64(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::U64, self.type_name())),
+            Value::U64(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::U64)),
         }
     }
 
-    pub fn try_bool(&self) -> Result<Option<bool>, ValueTypeError> {
+    pub fn try_bool(&self) -> Result<bool, ValueAccessError> {
         match self {
-            Value::Bool(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::Bool, self.type_name())),
+            Value::Bool(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::Bool)),
         }
     }
 
-    pub fn try_f32(&self) -> Result<Option<f32>, ValueTypeError> {
+    pub fn try_f32(&self) -> Result<f32, ValueAccessError> {
         match self {
-            Value::F32(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::F32, self.type_name())),
+            Value::F32(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::F32)),
         }
     }
 
-    pub fn try_f64(&self) -> Result<Option<f64>, ValueTypeError> {
+    pub fn try_f64(&self) -> Result<f64, ValueAccessError> {
         match self {
-            Value::F64(v) => Ok(Some(*v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(ValueType::F64, self.type_name())),
+            Value::F64(v) => Ok(*v),
+            _ => Err(self.exact_mismatch(ValueType::F64)),
         }
     }
 
-    pub fn try_str(&self) -> Result<Option<&str>, ValueTypeError> {
+    pub fn try_str(&self) -> Result<&str, ValueAccessError> {
         match self {
-            Value::String(v) => Ok(Some(v.as_ref())),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(
-                ValueType::String,
-                self.type_name(),
-            )),
+            Value::String(v) => Ok(v.as_ref()),
+            _ => Err(self.exact_mismatch(ValueType::String)),
         }
     }
 
     /// Borrow opaque bytes or a packed unsigned byte sequence as a byte slice.
-    pub fn try_bytes(&self) -> Result<Option<&[u8]>, ValueTypeError> {
+    pub fn try_bytes(&self) -> Result<&[u8], ValueAccessError> {
         match self {
-            Value::Bytes(v) | Value::Uint8List(v) => Ok(Some(v.as_ref())),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(
-                ValueType::Bytes,
-                self.type_name(),
-            )),
+            Value::Bytes(v) | Value::Uint8List(v) => Ok(v.as_ref()),
+            _ => Err(self.exact_mismatch(ValueType::Bytes)),
         }
     }
 
@@ -421,14 +433,10 @@ impl Value {
     ///
     /// Unlike [`Value::try_bytes`], cloning the returned `Arc` keeps the data
     /// alive beyond the `Value` without copying it.
-    pub fn try_shared_bytes(&self) -> Result<Option<&Arc<[u8]>>, ValueTypeError> {
+    pub fn try_shared_bytes(&self) -> Result<&Arc<[u8]>, ValueAccessError> {
         match self {
-            Value::Bytes(v) | Value::Uint8List(v) => Ok(Some(v)),
-            Value::Null => Ok(None),
-            _ => Err(ValueTypeError::for_types(
-                ValueType::Bytes,
-                self.type_name(),
-            )),
+            Value::Bytes(v) | Value::Uint8List(v) => Ok(v),
+            _ => Err(self.exact_mismatch(ValueType::Bytes)),
         }
     }
 

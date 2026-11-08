@@ -111,10 +111,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Name lookup is linear in the number of fields. Lists and arrays also expose
 `as_sequence()`, and maps expose `get_key()` and `as_map()`. Integer conversions
-only accept source types whose entire range fits the destination; `f32` can
-widen to `f64`, and null is reported as
-`ValueAccessError::NullValue`. Existing exact-type methods such as `try_str()`
-and `try_u64()` retain their null behavior.
+only accept source types whose entire range fits the destination, and `f32` can
+widen to `f64`. Every `try_*` accessor, including exact-type ones such as
+`try_str()` and `try_u64()`, reports null as `ValueAccessError::NullValue`, so
+they chain with `get()` using `?`. Where null is expected, such as an unset
+protobuf `optional` field, turn it into an `Option` with `non_null()`:
+
+```rust,ignore
+let count: Option<i32> = msg.get("count")?.non_null().map(Value::try_i32).transpose()?;
+```
 
 For example, `try_widen_i64()` accepts `U32` but rejects `U64`, even for zero;
 `try_widen_u64()` accepts unsigned integers but rejects all signed integers.

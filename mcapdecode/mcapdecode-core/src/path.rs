@@ -141,7 +141,7 @@ impl FieldPath {
                 element,
             } => {
                 let Value::Struct(fields) = value else {
-                    return Err(value.access_mismatch("Struct"));
+                    return Err(value.exact_mismatch(crate::ValueType::Struct));
                 };
                 fields.check_schema()?;
                 match fields.schema().fields.get(*index) {

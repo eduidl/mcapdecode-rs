@@ -11,7 +11,7 @@ impl ValueIndex for &str {
             return value.get_key(self);
         }
         let Value::Struct(fields) = value else {
-            return Err(value.access_mismatch("Struct"));
+            return Err(value.exact_mismatch(crate::ValueType::Struct));
         };
         fields.check_schema()?;
         let index = fields

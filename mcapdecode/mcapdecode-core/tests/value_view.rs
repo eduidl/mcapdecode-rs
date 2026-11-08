@@ -77,7 +77,7 @@ fn nested_structs_sequences_and_maps_keep_their_schema() {
     let map = view.get("map").unwrap().as_map().unwrap();
     assert_eq!(map.len(), 1);
     let (key, point) = map.iter().next().unwrap();
-    assert_eq!(key.try_str(), Ok(Some("p")));
+    assert_eq!(key.try_str(), Ok("p"));
     assert_eq!(point.get("x").unwrap().try_widen_f64(), Ok(1.5));
     let sequence = view.get("poses").unwrap().as_sequence().unwrap();
     assert_eq!(sequence.len(), 1);
@@ -148,7 +148,7 @@ fn map_keys_and_schema_mismatches_are_reported() {
             .get_key(true)
             .unwrap()
             .try_str(),
-        Ok(Some("yes"))
+        Ok("yes")
     );
     let null = Value::structure(schema, vec![Value::Null, Value::Null]);
     assert!(matches!(

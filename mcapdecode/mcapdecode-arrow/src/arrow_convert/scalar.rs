@@ -1,5 +1,5 @@
 use arrow::datatypes::{DataType, TimeUnit};
-use mcapdecode_core::{Value, ValueTypeError};
+use mcapdecode_core::{Value, ValueType, ValueTypeError};
 
 pub(super) enum ScalarValue<'a> {
     Null,
@@ -19,27 +19,43 @@ pub(super) enum ScalarValue<'a> {
     TimestampNanosecond(Option<i64>),
 }
 
+/// Read an exactly typed scalar, mapping null to `None`.
+///
+/// Matches the value directly rather than going through the public accessors,
+/// which report null as an error.
+macro_rules! scalar {
+    ($value:expr, $($pattern:pat => $out:expr),+ ; $expected:ident) => {
+        match $value {
+            $($pattern => Some($out),)+
+            Value::Null => None,
+            other => return Err(other.type_mismatch(ValueType::$expected)),
+        }
+    };
+}
+
 pub(super) fn scalar_value_for_datatype<'a>(
     dt: &DataType,
     value: &'a Value,
 ) -> Result<Option<ScalarValue<'a>>, ValueTypeError> {
     Ok(Some(match dt {
         DataType::Null => ScalarValue::Null,
-        DataType::Boolean => ScalarValue::Boolean(value.try_bool()?),
-        DataType::Int8 => ScalarValue::Int8(value.try_i8()?),
-        DataType::Int16 => ScalarValue::Int16(value.try_i16()?),
-        DataType::Int32 => ScalarValue::Int32(value.try_i32()?),
-        DataType::Int64 => ScalarValue::Int64(value.try_i64()?),
-        DataType::UInt8 => ScalarValue::UInt8(value.try_u8()?),
-        DataType::UInt16 => ScalarValue::UInt16(value.try_u16()?),
-        DataType::UInt32 => ScalarValue::UInt32(value.try_u32()?),
-        DataType::UInt64 => ScalarValue::UInt64(value.try_u64()?),
-        DataType::Float32 => ScalarValue::Float32(value.try_f32()?),
-        DataType::Float64 => ScalarValue::Float64(value.try_f64()?),
-        DataType::Utf8 => ScalarValue::Utf8(value.try_str()?),
-        DataType::Binary => ScalarValue::Binary(value.try_bytes()?),
+        DataType::Boolean => ScalarValue::Boolean(scalar!(value, Value::Bool(v) => *v; Bool)),
+        DataType::Int8 => ScalarValue::Int8(scalar!(value, Value::I8(v) => *v; I8)),
+        DataType::Int16 => ScalarValue::Int16(scalar!(value, Value::I16(v) => *v; I16)),
+        DataType::Int32 => ScalarValue::Int32(scalar!(value, Value::I32(v) => *v; I32)),
+        DataType::Int64 => ScalarValue::Int64(scalar!(value, Value::I64(v) => *v; I64)),
+        DataType::UInt8 => ScalarValue::UInt8(scalar!(value, Value::U8(v) => *v; U8)),
+        DataType::UInt16 => ScalarValue::UInt16(scalar!(value, Value::U16(v) => *v; U16)),
+        DataType::UInt32 => ScalarValue::UInt32(scalar!(value, Value::U32(v) => *v; U32)),
+        DataType::UInt64 => ScalarValue::UInt64(scalar!(value, Value::U64(v) => *v; U64)),
+        DataType::Float32 => ScalarValue::Float32(scalar!(value, Value::F32(v) => *v; F32)),
+        DataType::Float64 => ScalarValue::Float64(scalar!(value, Value::F64(v) => *v; F64)),
+        DataType::Utf8 => ScalarValue::Utf8(scalar!(value, Value::String(v) => v.as_ref(); String)),
+        DataType::Binary => ScalarValue::Binary(
+            scalar!(value, Value::Bytes(v) | Value::Uint8List(v) => v.as_ref(); Bytes),
+        ),
         DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-            ScalarValue::TimestampNanosecond(value.try_i64()?)
+            ScalarValue::TimestampNanosecond(scalar!(value, Value::I64(v) => *v; I64))
         }
         _ => return Ok(None),
     }))

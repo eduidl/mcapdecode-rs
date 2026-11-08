@@ -33,10 +33,7 @@ fn keeps_message_text_unchanged_without_parsing() {
         .unwrap();
     for message in [r#"{ "b": 1.50, "a": [1] }"#, "{broken", ""] {
         let value = decoder.decode(message.as_bytes()).unwrap();
-        assert_eq!(
-            value.get(COLUMN_NAME).unwrap().try_str().unwrap(),
-            Some(message)
-        );
+        assert_eq!(value.get(COLUMN_NAME).unwrap().try_str().unwrap(), message);
     }
 }
 

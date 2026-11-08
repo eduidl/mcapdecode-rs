@@ -96,7 +96,7 @@ fn time_range_accepts_inclusive_and_open_ranges() {
                 let Value::Struct(fields) = message.value else {
                     panic!("expected struct payload");
                 };
-                values.push(fields[0].try_i64().unwrap().unwrap());
+                values.push(fields[0].try_i64().unwrap());
             })
             .unwrap();
         values
