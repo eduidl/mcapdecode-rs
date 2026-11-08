@@ -56,3 +56,21 @@ pub enum McapReaderError {
     #[error(transparent)]
     Callback(Box<dyn std::error::Error + Send + Sync>),
 }
+
+impl McapReaderError {
+    /// Whether the error means that a channel cannot be decoded with the
+    /// registered decoders: it has no schema, no decoder handles its encodings,
+    /// or the decoder cannot parse or derive its schema.
+    ///
+    /// Such channels can still be read with [`Read::raw`](crate::Read::raw).
+    /// Failures to decode individual messages, I/O errors and other errors
+    /// return `false`.
+    pub fn is_unsupported_channel(&self) -> bool {
+        matches!(
+            self,
+            Self::NoDecoder { .. }
+                | Self::SchemaNotAvailable
+                | Self::Decoder(DecoderError::SchemaParse(_) | DecoderError::SchemaDerivation(_))
+        )
+    }
+}

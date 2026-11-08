@@ -15,7 +15,7 @@ use mcapdecode::{DecodedMessage, McapReader, McapReaderError, RawMessage, Value}
 
 use crate::{
     app::{App, LoadedMessage, TopicRow},
-    format, schema,
+    format,
 };
 
 const MAX_LOADER_EVENTS_PER_FRAME: usize = 32;
@@ -63,7 +63,7 @@ impl TopicLoader {
                         .decoded()
                         .try_for_each(|_, message| callback(message))
                 }),
-                Err(error) if schema::supports_raw_fallback(&error) => load_topic(
+                Err(error) if error.is_unsupported_channel() => load_topic(
                     &sender,
                     &cancel_for_thread,
                     to_loaded_raw_message,

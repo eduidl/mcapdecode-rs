@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use mcapdecode::{McapReader, McapReaderError, MessageEncoding, decoder::DecoderError};
+use mcapdecode::{McapReader, MessageEncoding};
 
 use crate::{app, format};
 
@@ -50,7 +50,7 @@ pub(crate) fn load_schema_view(
             .map(|mut schemas| schemas.remove(0).1);
         match field_defs {
             Ok(field_defs) => format::format_schema_text(topic, &field_defs),
-            Err(error) if supports_raw_fallback(&error) => {
+            Err(error) if error.is_unsupported_channel() => {
                 format::format_raw_schema_text(topic, &error.to_string())
             }
             Err(error) => {
@@ -69,17 +69,6 @@ pub(crate) fn load_schema_view(
     schema_view.line_count = schema_view.text.lines().count();
     schema_cache.insert(key, schema_view.clone());
     Ok(schema_view)
-}
-
-pub(crate) fn supports_raw_fallback(error: &McapReaderError) -> bool {
-    matches!(
-        error,
-        McapReaderError::NoDecoder { .. }
-            | McapReaderError::SchemaNotAvailable
-            | McapReaderError::Decoder(
-                DecoderError::SchemaParse(_) | DecoderError::SchemaDerivation(_)
-            )
-    )
 }
 
 #[cfg(test)]

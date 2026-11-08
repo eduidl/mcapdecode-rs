@@ -55,6 +55,52 @@ fn reader_preserves_lookup_and_decoder_errors() {
 }
 
 #[test]
+fn unsupported_channel_errors_are_told_apart_from_other_errors() {
+    let path = fixture_path("with_summary.mcap");
+    let opened = McapReader::builder().clear_decoders().open(&path).unwrap();
+    // No decoder for the channel's encodings, and no schema.
+    assert!(
+        topic_field_defs(&opened, "/decoded")
+            .unwrap_err()
+            .is_unsupported_channel()
+    );
+    assert!(
+        topic_field_defs(&opened, "/raw")
+            .unwrap_err()
+            .is_unsupported_channel()
+    );
+    assert!(
+        !topic_field_defs(&opened, "/unknown")
+            .unwrap_err()
+            .is_unsupported_channel()
+    );
+    for error in [
+        DecoderError::SchemaParse("bad schema".into()),
+        DecoderError::SchemaDerivation("bad schema".into()),
+    ] {
+        assert!(McapReaderError::Decoder(error).is_unsupported_channel());
+    }
+
+    // A message that fails to decode fails the read, not the channel.
+    let fixture = write_chunked_fixture("unsupported-message", &[br#"{"value":"text"}"#]);
+    let error = McapReader::builder()
+        .clear_decoders()
+        .with_decoder(TestJsonDecoder)
+        .open(fixture.path())
+        .unwrap()
+        .read()
+        .topic("/decoded")
+        .decoded()
+        .for_each(|_, _| {})
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        McapReaderError::Decoder(DecoderError::MessageDecode(_))
+    ));
+    assert!(!error.is_unsupported_channel());
+}
+
+#[test]
 fn reader_reports_each_channel_of_a_split_topic() {
     let fixture = write_split_topic_fixture("opened-split");
     let opened = McapReader::builder()
