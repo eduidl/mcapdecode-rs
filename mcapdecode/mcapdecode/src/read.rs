@@ -14,6 +14,7 @@ use mcapdecode_core::{DecodedMessage, FieldDefs};
 
 use crate::{
     ChannelInfo, McapReader, McapReaderError, RawMessage,
+    chunk_reader::latest_selected_messages,
     reader::TopicDecodeContext,
     types::{ReadOptions, TimeRange},
 };
@@ -160,6 +161,17 @@ impl<'a> Read<'a> {
         Ok(channels)
     }
 
+    /// Find the latest message within the time range of each selected channel, omitting
+    /// channels without one.
+    fn latest(&self) -> Result<Vec<(&'a Arc<mcap::Channel<'a>>, RawMessage)>, McapReaderError> {
+        let channels = self.resolve_channels()?;
+        let channel_ids: Vec<_> = channels.iter().map(|channel| channel.id).collect();
+        let latest = latest_selected_messages(self.reader, &channel_ids, self.options.time_range)?;
+        Ok((channels.into_iter().zip(latest))
+            .filter_map(|(channel, message)| Some((channel, message?)))
+            .collect())
+    }
+
     /// Decode the messages of the channels in `contexts`.
     fn for_each_decoded(
         &self,
@@ -242,9 +254,8 @@ impl RawRead<'_> {
         mut callback: impl FnMut(&ChannelInfo, RawMessage) -> R,
     ) -> Result<(), McapReaderError> {
         let read = self.0;
-        let channels = read.resolve_channels()?;
-        let infos = read.channel_infos(&channels);
-        let channel_ids: Vec<_> = channels.iter().map(|channel| channel.id).collect();
+        let infos = read.selected_channels()?;
+        let channel_ids: Vec<_> = infos.iter().map(|info| info.id).collect();
         read.reader.for_each_message(
             &channel_ids,
             &read.options,
@@ -261,6 +272,26 @@ impl RawRead<'_> {
                     .map_err(McapReaderError::Callback)
             },
         )
+    }
+
+    /// Return the latest message within the [`Read::time_range`] of each selected channel.
+    ///
+    /// The latest message is the one with the greatest `log_time`; among messages with
+    /// the same `log_time`, any one may be returned. To find the message shown at a
+    /// playback position `t`, select `..=t`; a start such as `t - window..=t` also bounds
+    /// how old a returned message may be.
+    /// Results follow the order of [`Read::selected_channels`], omitting channels without
+    /// a message in range.
+    ///
+    /// Message indexes locate the messages, so only the chunks holding them are decompressed,
+    /// on the calling thread regardless of [`Read::parallel`].
+    /// Fails with [`McapReaderError::MessageIndexNotAvailable`] when a chunk in range has no
+    /// message indexes, or when the file has no chunk indexes.
+    pub fn latest(self) -> Result<Vec<(ChannelInfo, RawMessage)>, McapReaderError> {
+        let read = self.0;
+        Ok((read.latest()?.into_iter())
+            .map(|(channel, message)| (read.reader.channel_info(channel), message))
+            .collect())
     }
 }
 
@@ -292,6 +323,26 @@ impl DecodedRead<'_> {
                 .into_flow()
                 .map_err(McapReaderError::Callback)
         })
+    }
+
+    /// Like [`RawRead::latest`], decoding only the returned messages.
+    ///
+    /// Decoders are built only for channels with a returned message, so the schema of
+    /// a channel without one is not checked.
+    pub fn latest(self) -> Result<Vec<(ChannelInfo, DecodedMessage)>, McapReaderError> {
+        let read = self.0;
+        let reader = read.reader;
+        (read.latest()?.into_iter())
+            .map(|(channel, message)| {
+                let context = reader.decode_context(channel)?;
+                let message = DecodedMessage {
+                    log_time: message.log_time,
+                    publish_time: message.publish_time,
+                    value: context.decoder.decode(&message.data)?,
+                };
+                Ok((reader.channel_info(channel), message))
+            })
+            .collect()
     }
 }
 

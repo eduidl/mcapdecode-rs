@@ -5,6 +5,7 @@ use std::{
     io,
     ops::ControlFlow,
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -12,7 +13,7 @@ use std::{
 
 use rayon::prelude::*;
 
-use crate::{McapReader, McapReaderError, types::TimeRange};
+use crate::{McapReader, McapReaderError, RawMessage, types::TimeRange};
 
 /// What a chunk holds, resolved once when the file is opened.
 ///
@@ -82,11 +83,7 @@ pub(crate) fn for_each_selected_message<T: Send>(
             callback,
         );
     }
-    let indexes: BTreeMap<_, _> = channel_ids
-        .iter()
-        .enumerate()
-        .map(|(i, &id)| (id, i))
-        .collect();
+    let indexes = channel_positions(channel_ids);
     for_each_message_of(
         reader,
         |id| indexes.get(&id).copied(),
@@ -95,6 +92,15 @@ pub(crate) fn for_each_selected_message<T: Send>(
         process,
         callback,
     )
+}
+
+/// Map each channel id to its position in `channel_ids`.
+fn channel_positions(channel_ids: &[u16]) -> BTreeMap<u16, usize> {
+    channel_ids
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| (id, i))
+        .collect()
 }
 
 fn for_each_message_of<T: Send>(
@@ -131,6 +137,133 @@ fn for_each_message_of<T: Send>(
         },
         &mut |(i, result)| callback(i, result),
     )
+}
+
+/// Find, for each channel in `channel_ids`, the message with the greatest `log_time` within
+/// `time_range`, any one of them on ties. Results follow `channel_ids`.
+///
+/// Message indexes locate the winning chunks without decompressing anything, so only those
+/// chunks are read. Missing chunk indexes or message indexes in range are an error.
+pub(crate) fn latest_selected_messages(
+    reader: &McapReader,
+    channel_ids: &[u16],
+    time_range: Option<TimeRange>,
+) -> Result<Vec<Option<RawMessage>>, McapReaderError> {
+    if channel_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let summary = reader.summary();
+    // Without chunk indexes, messages cannot be located; only statistics reporting no
+    // messages make that fine.
+    if summary.chunk_indexes.is_empty()
+        && summary
+            .stats
+            .as_ref()
+            .is_none_or(|stats| stats.message_count > 0)
+    {
+        return Err(McapReaderError::MessageIndexNotAvailable);
+    }
+    let mut overlapping = Vec::new();
+    for (chunk, contents) in reader.message_chunks() {
+        if time_range.is_none_or(|range| range.overlaps_chunk(chunk)) {
+            if contents == ChunkContents::Unindexed {
+                return Err(McapReaderError::MessageIndexNotAvailable);
+            }
+            overlapping.push(chunk);
+        }
+    }
+
+    // Best (log_time, chunk) per channel.
+    // Visiting chunks by descending end time lets each channel skip chunks it cannot win.
+    let mut best: Vec<Option<(u64, &mcap::records::ChunkIndex)>> = vec![None; channel_ids.len()];
+    overlapping.sort_unstable_by_key(|chunk| std::cmp::Reverse(chunk.message_end_time));
+    for chunk in &overlapping {
+        let chunk_upper = chunk.message_end_time;
+        if best
+            .iter()
+            .all(|best| best.is_some_and(|(time, _)| chunk_upper <= time))
+        {
+            break;
+        }
+        for (i, id) in channel_ids.iter().enumerate() {
+            let Some(&offset) = chunk.message_index_offsets.get(id) else {
+                continue;
+            };
+            if best[i].is_some_and(|(time, _)| chunk_upper <= time) {
+                continue;
+            }
+            let latest = read_message_index(reader.mmap(), offset, *id)?
+                .into_iter()
+                .map(|entry| entry.log_time)
+                .filter(|&time| time_range.is_none_or(|range| range.contains(time)))
+                .max();
+            if let Some(time) = latest
+                && best[i].is_none_or(|(current, _)| time > current)
+            {
+                best[i] = Some((time, *chunk));
+            }
+        }
+    }
+
+    // Read the winning chunks, taking a message at each channel's best time.
+    let index_of = channel_positions(channel_ids);
+    let mut winners: Vec<_> = best.iter().flatten().map(|&(_, chunk)| chunk).collect();
+    winners.sort_unstable_by_key(|chunk| chunk.chunk_start_offset);
+    winners.dedup_by_key(|chunk| chunk.chunk_start_offset);
+    let mut latest = vec![None; channel_ids.len()];
+    let won_in = |i: usize, chunk: &mcap::records::ChunkIndex| {
+        best[i].is_some_and(|(_, best)| best.chunk_start_offset == chunk.chunk_start_offset)
+    };
+    for chunk in winners {
+        // Chunks decompress as they are read, so stop once every channel won here is found.
+        let mut remaining = (0..best.len()).filter(|&i| won_in(i, chunk)).count();
+        for message in summary.stream_chunk(reader.mmap(), chunk)? {
+            let message = message?;
+            if let Some(&i) = index_of.get(&message.channel.id)
+                && latest[i].is_none()
+                && won_in(i, chunk)
+                && best[i].is_some_and(|(time, _)| time == message.log_time)
+            {
+                latest[i] = Some(RawMessage {
+                    log_time: message.log_time,
+                    publish_time: message.publish_time,
+                    data: Arc::from(message.data.as_ref()),
+                });
+                remaining -= 1;
+                if remaining == 0 {
+                    break;
+                }
+            }
+        }
+    }
+    // A message index pointing at a message the chunk does not hold means a broken file.
+    if best
+        .iter()
+        .zip(&latest)
+        .any(|(best, latest)| best.is_some() && latest.is_none())
+    {
+        return Err(mcap::McapError::BadIndex.into());
+    }
+    Ok(latest)
+}
+
+/// Read the entries of the message index record of `channel_id` at `offset`.
+fn read_message_index(
+    mcap: &[u8],
+    offset: u64,
+    channel_id: u16,
+) -> Result<Vec<mcap::records::MessageIndexEntry>, McapReaderError> {
+    let buf = usize::try_from(offset)
+        .ok()
+        .and_then(|offset| mcap.get(offset..))
+        .ok_or(mcap::McapError::BadIndex)?;
+    match mcap::read::LinearReader::sans_magic(buf).next() {
+        Some(Ok(mcap::records::Record::MessageIndex(index))) if index.channel_id == channel_id => {
+            Ok(index.records)
+        }
+        Some(Err(error)) => Err(error.into()),
+        _ => Err(mcap::McapError::BadIndex.into()),
+    }
 }
 
 /// Process each message while its chunk is being read, then deliver results in chunk order.

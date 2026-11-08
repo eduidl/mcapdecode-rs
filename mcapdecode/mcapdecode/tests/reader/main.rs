@@ -379,6 +379,7 @@ impl MessageDecoder for SchemaNamedFieldDecoder {
 }
 
 mod core;
+mod latest;
 mod metadata;
 mod read_options;
 mod stop;

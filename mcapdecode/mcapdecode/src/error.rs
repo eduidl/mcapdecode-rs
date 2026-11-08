@@ -17,6 +17,11 @@ pub enum McapReaderError {
     #[error("MCAP summary not available")]
     SummaryNotAvailable,
 
+    /// A lookup by message index found a chunk in range without message indexes, or a
+    /// file without chunk indexes whose statistics do not show it has no messages.
+    #[error("MCAP message index not available")]
+    MessageIndexNotAvailable,
+
     /// A channel that was about to be decoded has no schema attached.
     #[error("schema not available")]
     SchemaNotAvailable,
