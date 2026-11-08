@@ -1,0 +1,6 @@
+[tools]
+pre-commit = "4.7.0"
+
+[hooks]
+# Install the git hooks (pre-commit and pre-push) whenever `mise install` runs.
+postinstall = "pre-commit install"
