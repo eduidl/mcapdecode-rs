@@ -6,8 +6,6 @@ use std::{
     sync::Arc,
 };
 
-use mcapdecode_core::FieldDefs;
-
 /// Metadata about one channel discovered from the MCAP summary section.
 ///
 /// A topic can span several channels, each with its own schema.
@@ -26,26 +24,9 @@ pub struct ChannelInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TopicInfo {
     pub topic: String,
+    /// Total message count of all channels of the topic.
     pub message_count: Option<u64>,
-    pub schema_name: Option<String>,
-    pub schema_encoding: String,
-    pub message_encoding: String,
     pub channel_count: usize,
-}
-
-/// Topic metadata and derived schema IR obtained from one MCAP summary read.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TopicSchema {
-    pub info: TopicInfo,
-    pub field_defs: FieldDefs,
-}
-
-/// Decode support status for a topic discovered from the MCAP summary section.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TopicDecodeStatus {
-    pub topic: TopicInfo,
-    pub decodable: bool,
-    pub decode_error: Option<String>,
 }
 
 /// Raw message payload for topics that cannot be decoded structurally.

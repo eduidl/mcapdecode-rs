@@ -13,13 +13,51 @@ use std::{
 };
 
 use mcap::{WriteOptions, Writer, records::MessageHeader};
-use mcapdecode::{
-    McapReader, McapReaderBuilder, McapReaderError, Read, TopicDecodeStatus, TopicInfo,
-};
+use mcapdecode::{McapReader, McapReaderBuilder, McapReaderError, Read, TopicInfo};
 use mcapdecode_core::{
     DataTypeDef, DecoderError, EncodingKey, FieldDef, FieldDefs, MessageDecoder, MessageEncoding,
     SchemaEncoding, TopicDecoder, Value,
 };
+
+/// The schema of one channel.
+fn channel_field_defs(reader: &McapReader, channel_id: u16) -> Result<FieldDefs, McapReaderError> {
+    Ok(reader.read().channel(channel_id).field_defs()?.remove(0).1)
+}
+
+/// The schema of the only channel of `topic`.
+fn topic_field_defs(reader: &McapReader, topic: &str) -> Result<FieldDefs, McapReaderError> {
+    let mut schemas = reader.read().topic(topic).field_defs()?;
+    assert_eq!(schemas.len(), 1, "topic {topic} has several channels");
+    Ok(schemas.remove(0).1)
+}
+
+/// The total message count of all channels of `topic`, `None` without statistics.
+fn topic_message_count(reader: &McapReader, topic: &str) -> Result<Option<u64>, McapReaderError> {
+    Ok(reader
+        .read()
+        .topic(topic)
+        .selected_channels()?
+        .iter()
+        .map(|channel| channel.message_count)
+        .sum())
+}
+
+/// The Arrow batch schema of the only channel of `topic`.
+#[cfg(feature = "arrow")]
+fn topic_batch_schema(
+    reader: &McapReader,
+    topic: &str,
+    metadata: &mcapdecode::MetadataColumns,
+) -> Result<mcapdecode::MessageBatchSchema, McapReaderError> {
+    let mut schemas = reader
+        .read()
+        .topic(topic)
+        .arrow()
+        .metadata(metadata.clone())
+        .schemas()?;
+    assert_eq!(schemas.len(), 1, "topic {topic} has several channels");
+    Ok(schemas.remove(0).1)
+}
 
 static TEMP_FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 

@@ -10,7 +10,7 @@ use std::{
 use arrow::record_batch::RecordBatch;
 #[cfg(feature = "arrow")]
 use mcapdecode_arrow::{MessageBatchSchema, MetadataColumns};
-use mcapdecode_core::DecodedMessage;
+use mcapdecode_core::{DecodedMessage, FieldDefs};
 
 use crate::{
     ChannelInfo, McapReader, McapReaderError, RawMessage,
@@ -36,12 +36,13 @@ impl<'a> Read<'a> {
         }
     }
 
-    /// Select one topic instead of channels.
+    /// Select all channels of one topic instead of channel ids.
     pub fn topic(self, topic: impl AsRef<str>) -> Self {
         self.topics([topic])
     }
 
-    /// Select topics. Repeated names are read once.
+    /// Select all channels of these topics instead of channel ids.
+    /// Repeated names are read once.
     pub fn topics(mut self, topics: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         self.topics = Some(topics.into_iter().map(|s| s.as_ref().to_owned()).collect());
         self.channel_ids = None;
@@ -96,6 +97,24 @@ impl<'a> Read<'a> {
         }
     }
 
+    /// List the selected channels in selection order, the channels of one topic
+    /// by ascending id.
+    ///
+    /// Repeated selections appear once. An unknown topic or channel id is an error.
+    pub fn selected_channels(&self) -> Result<Vec<ChannelInfo>, McapReaderError> {
+        Ok(self.channel_infos(&self.resolve_channels()?))
+    }
+
+    /// Derive the schema of each selected channel without reading messages,
+    /// in the order of [`Read::selected_channels`].
+    pub fn field_defs(&self) -> Result<Vec<(ChannelInfo, FieldDefs)>, McapReaderError> {
+        let (infos, contexts) = self.decoded_contexts()?;
+        Ok(infos
+            .into_iter()
+            .zip(contexts.into_iter().map(|context| context.field_defs))
+            .collect())
+    }
+
     fn decoded_contexts(
         &self,
     ) -> Result<(Vec<ChannelInfo>, Vec<TopicDecodeContext>), McapReaderError> {
@@ -127,14 +146,18 @@ impl<'a> Read<'a> {
                 .collect();
         }
         let Some(topics) = &self.topics else {
-            return Ok(reader.channels());
+            return Ok(reader.summary_channels());
         };
         let mut seen = HashSet::new();
-        topics
-            .iter()
-            .filter(|topic| seen.insert(topic.as_str()))
-            .map(|topic| reader.channel_by_topic(topic))
-            .collect()
+        let mut channels = Vec::new();
+        for topic in topics {
+            for channel in reader.channels_of_topic(topic)? {
+                if seen.insert(channel.id) {
+                    channels.push(channel);
+                }
+            }
+        }
+        Ok(channels)
     }
 
     /// Decode the messages of the channels in `contexts`.
@@ -294,6 +317,30 @@ impl ArrowRead<'_> {
         self
     }
 
+    /// Derive the batch schema of each selected channel without reading messages,
+    /// in the order of [`Read::selected_channels`].
+    ///
+    /// These are the schemas of the batches this read emits. Callers that must
+    /// state the schema up front, such as a Parquet writer, should take it from
+    /// here so the declared schema and the emitted batches cannot disagree.
+    pub fn schemas(&self) -> Result<Vec<(ChannelInfo, MessageBatchSchema)>, McapReaderError> {
+        let (infos, contexts) = self.read.decoded_contexts()?;
+        Ok(infos
+            .into_iter()
+            .zip(self.batch_schemas(&contexts)?)
+            .collect())
+    }
+
+    fn batch_schemas(
+        &self,
+        contexts: &[TopicDecodeContext],
+    ) -> Result<Vec<MessageBatchSchema>, McapReaderError> {
+        contexts
+            .iter()
+            .map(|context| batch_schema_for_context(context, &self.metadata))
+            .collect()
+    }
+
     /// Visit selected batches, receiving the originating channel information.
     pub fn for_each(
         self,
@@ -312,13 +359,10 @@ impl ArrowRead<'_> {
         self,
         mut callback: impl FnMut(&ChannelInfo, RecordBatch) -> R,
     ) -> Result<(), McapReaderError> {
+        let (infos, contexts) = self.read.decoded_contexts()?;
+        let schemas = self.batch_schemas(&contexts)?;
         let read = self.read;
-        let (infos, contexts) = read.decoded_contexts()?;
         let batch_size = self.batch_size;
-        let schemas = contexts
-            .iter()
-            .map(|context| batch_schema_for_context(context, &self.metadata))
-            .collect::<Result<Vec<_>, _>>()?;
         let mut rows: Vec<_> = contexts
             .iter()
             .map(|_| Vec::with_capacity(batch_size))
@@ -347,7 +391,7 @@ impl ArrowRead<'_> {
 }
 
 #[cfg(feature = "arrow")]
-pub(crate) fn batch_schema_for_context(
+fn batch_schema_for_context(
     context: &TopicDecodeContext,
     metadata: &MetadataColumns,
 ) -> Result<MessageBatchSchema, McapReaderError> {

@@ -11,7 +11,7 @@ use arrow::record_batch::RecordBatch;
 use clap::{Args, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use mcapdecode::{
-    DecodedMessage, McapReader, McapReaderError, MessageBatchSchema, MetadataColumns,
+    ChannelInfo, DecodedMessage, McapReader, MessageBatchSchema, MetadataColumns,
     MetadataTimestampFormat,
     batch::{
         ArrayPolicy, FlattenPolicy, ListPolicy, MapPolicy, NonFiniteFloats, flatten_record_batch,
@@ -245,6 +245,28 @@ impl BatchArgs {
     }
 }
 
+/// The batch schema shared by all channels of a topic, which are written to one output.
+///
+/// Channels whose schemas differ only in struct or enum type names match, since
+/// type names do not appear in the output.
+fn topic_batch_schema(
+    topic: &str,
+    schemas: Vec<(ChannelInfo, MessageBatchSchema)>,
+) -> Result<MessageBatchSchema> {
+    let mut schemas = schemas.into_iter();
+    let (first, schema) = schemas.next().context("topic has no channels")?;
+    for (channel, other) in schemas {
+        if other.schema() != schema.schema() {
+            bail!(
+                "channels {} and {} of topic {topic} have different schemas",
+                first.id,
+                channel.id
+            );
+        }
+    }
+    Ok(schema)
+}
+
 pub(super) fn run_conversion(
     input: &Path,
     parallel: bool,
@@ -268,12 +290,22 @@ pub(super) fn run_conversion(
         } else if matches!(spec.format, OutputFormat::Parquet) {
             bail!("Parquet output requires -o <file>");
         }
-        match reader.message_count(&spec.name) {
-            Ok(count) => total += count,
-            Err(McapReaderError::StatsNotAvailable) if config_path.is_some() => has_stats = false,
-            Err(error) => return Err(error.into()),
+        let schemas = reader
+            .read()
+            .topic(&spec.name)
+            .arrow()
+            .metadata(spec.metadata.clone())
+            .schemas()?;
+        match schemas
+            .iter()
+            .map(|(channel, _)| channel.message_count)
+            .sum::<Option<u64>>()
+        {
+            Some(count) => total += count,
+            None if config_path.is_some() => has_stats = false,
+            None => bail!("MCAP summary stats not available"),
         }
-        let schema = reader.topic_batch_schema(&spec.name, &spec.metadata)?;
+        let schema = topic_batch_schema(&spec.name, schemas)?;
         let topic = Topic {
             name: spec.name,
             output: spec.output,

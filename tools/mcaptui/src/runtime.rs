@@ -63,7 +63,7 @@ fn run(cli: Cli) -> Result<()> {
             .open(&cli.input)
             .with_context(|| format!("failed to open {}", cli.input.display()))?,
     );
-    let mut app = App::with_channels(reader.list_topics(), &reader.list_channels());
+    let mut app = App::with_channels(reader.topics(), &reader.channels());
     let file_size = std::fs::metadata(&cli.input)
         .with_context(|| format!("failed to stat {}", cli.input.display()))?
         .len();

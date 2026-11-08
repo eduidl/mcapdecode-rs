@@ -50,7 +50,11 @@ impl TopicLoader {
         let join_handle = thread::spawn(move || {
             // Deriving the schema up front tells whether the topic can be
             // decoded, or has to be shown as raw payload bytes.
-            let field_defs = reader.field_defs_by_channel_id(row.channel.id);
+            let field_defs = reader
+                .read()
+                .channel(row.channel.id)
+                .field_defs()
+                .map(|mut schemas| schemas.remove(0).1);
             let load_result = match field_defs {
                 Ok(_) => load_topic(&sender, &cancel_for_thread, to_loaded_message, |callback| {
                     reader

@@ -7,13 +7,11 @@ fn reader_reuses_metadata_and_custom_decoders_without_reopening() {
         .clear_decoders()
         .with_decoder(Box::new(TestJsonDecoder));
     let opened = builder.open(fixture.path()).unwrap();
-    let topics = opened.list_topics();
-    let channels = opened.list_channels();
-    let count = opened.message_count("/decoded").unwrap();
-    let fields = opened.topic_field_defs("/decoded").unwrap();
-    let schema = opened.topic_schema("/decoded").unwrap();
-    let statuses = opened.list_topics_with_decode_status();
-    assert_eq!(count, 1);
+    let topics = opened.topics();
+    let channels = opened.channels();
+    let count = topic_message_count(&opened, "/decoded").unwrap();
+    let fields = topic_field_defs(&opened, "/decoded").unwrap();
+    assert_eq!(count, Some(1));
     assert_eq!(
         fields,
         vec![FieldDef::new("value", DataTypeDef::I64, true)].into()
@@ -22,16 +20,11 @@ fn reader_reuses_metadata_and_custom_decoders_without_reopening() {
     fs::remove_file(fixture.path()).unwrap();
 
     for _ in 0..2 {
-        assert_eq!(opened.topic_schema("/decoded").unwrap(), schema);
-        assert_eq!(opened.list_topics_with_decode_status(), statuses);
-        assert_eq!(opened.list_topics(), topics);
-        assert_eq!(opened.list_channels(), channels);
-        assert_eq!(opened.message_count("/decoded").unwrap(), count);
-        assert_eq!(opened.topic_field_defs("/decoded").unwrap(), fields);
-        assert_eq!(
-            opened.field_defs_by_channel_id(channels[0].id).unwrap(),
-            fields
-        );
+        assert_eq!(opened.topics(), topics);
+        assert_eq!(opened.channels(), channels);
+        assert_eq!(topic_message_count(&opened, "/decoded").unwrap(), count);
+        assert_eq!(topic_field_defs(&opened, "/decoded").unwrap(), fields);
+        assert_eq!(channel_field_defs(&opened, channels[0].id).unwrap(), fields);
     }
 }
 
@@ -40,35 +33,19 @@ fn reader_preserves_lookup_and_decoder_errors() {
     let path = fixture_path("with_summary.mcap");
     let opened = McapReader::builder().clear_decoders().open(&path).unwrap();
     assert!(matches!(
-        opened.topic_schema("/unknown"),
+        topic_field_defs(&opened, "/unknown"),
         Err(McapReaderError::TopicNotFound)
     ));
     assert!(matches!(
-        opened.topic_schema("/decoded"),
-        Err(McapReaderError::NoDecoder { .. })
-    ));
-    assert!(matches!(
-        opened.topic_schema("/raw"),
-        Err(McapReaderError::SchemaNotAvailable)
-    ));
-    assert!(matches!(
-        opened.message_count("/unknown"),
-        Err(McapReaderError::TopicNotFound)
-    ));
-    assert!(matches!(
-        opened.topic_field_defs("/unknown"),
-        Err(McapReaderError::TopicNotFound)
-    ));
-    assert!(matches!(
-        opened.field_defs_by_channel_id(u16::MAX),
+        channel_field_defs(&opened, u16::MAX),
         Err(McapReaderError::ChannelNotFound)
     ));
     assert!(matches!(
-        opened.topic_field_defs("/decoded"),
+        topic_field_defs(&opened, "/decoded"),
         Err(McapReaderError::NoDecoder { .. })
     ));
     assert!(matches!(
-        opened.topic_field_defs("/raw"),
+        topic_field_defs(&opened, "/raw"),
         Err(McapReaderError::SchemaNotAvailable)
     ));
     assert!(matches!(
@@ -78,35 +55,25 @@ fn reader_preserves_lookup_and_decoder_errors() {
 }
 
 #[test]
-fn reader_requires_a_channel_for_ambiguous_topics() {
+fn reader_reports_each_channel_of_a_split_topic() {
     let fixture = write_split_topic_fixture("opened-split");
     let opened = McapReader::builder()
         .clear_decoders()
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
         .open(fixture.path())
         .unwrap();
-    assert_eq!(opened.list_topics()[0].channel_count, 3);
-    assert!(matches!(
-        opened.topic_schema("/split"),
-        Err(McapReaderError::MultipleChannels)
-    ));
-    assert!(matches!(
-        opened.message_count("/split"),
-        Err(McapReaderError::MultipleChannels)
-    ));
-    assert!(matches!(
-        opened.topic_field_defs("/split"),
-        Err(McapReaderError::MultipleChannels)
-    ));
-    let names: Vec<_> = opened
-        .list_channels()
+    assert_eq!(opened.topics()[0].channel_count, 3);
+    assert_eq!(opened.topics()[0].message_count, Some(4));
+    let schemas = opened.read().topic("/split").field_defs().unwrap();
+    let ids: Vec<_> = schemas.iter().map(|(channel, _)| channel.id).collect();
+    let names: Vec<_> = schemas
         .iter()
-        .map(|channel| {
-            opened.field_defs_by_channel_id(channel.id).unwrap()[0]
-                .name
-                .clone()
-        })
+        .map(|(_, field_defs)| field_defs[0].name.clone())
         .collect();
+    assert_eq!(
+        ids,
+        opened.channels().iter().map(|c| c.id).collect::<Vec<_>>()
+    );
     assert_eq!(names, ["first", "second", "empty"]);
 }
 
@@ -124,18 +91,12 @@ fn reader_preserves_missing_statistics() {
         .add_channel(0, "/raw", "json", &BTreeMap::new())
         .unwrap();
     writer.finish().unwrap();
-    let builder = McapReader::builder().clear_decoders();
-    assert!(matches!(
-        builder.open(fixture.path()).unwrap().message_count("/raw"),
-        Err(McapReaderError::StatsNotAvailable)
-    ));
-    let opened = builder.open(fixture.path()).unwrap();
-    assert_eq!(opened.list_topics()[0].message_count, None);
-    assert_eq!(opened.list_channels()[0].message_count, None);
-    assert!(matches!(
-        opened.message_count("/raw"),
-        Err(McapReaderError::StatsNotAvailable)
-    ));
+    let opened = McapReader::builder()
+        .clear_decoders()
+        .open(fixture.path())
+        .unwrap();
+    assert_eq!(opened.topics()[0].message_count, None);
+    assert_eq!(opened.channels()[0].message_count, None);
 }
 
 #[cfg(feature = "ros2msg")]
@@ -152,13 +113,13 @@ fn open_enables_default_decoders() {
         .add_channel(schema, "/decoded", "cdr", &BTreeMap::new())
         .unwrap();
     writer.finish().unwrap();
-    let expected = McapReader::builder()
-        .open(fixture.path())
-        .unwrap()
-        .topic_field_defs("/decoded")
-        .unwrap();
+    let expected = topic_field_defs(
+        &McapReader::builder().open(fixture.path()).unwrap(),
+        "/decoded",
+    )
+    .unwrap();
     let opened = McapReader::open(fixture.path()).unwrap();
-    assert_eq!(opened.topic_field_defs("/decoded").unwrap(), expected);
+    assert_eq!(topic_field_defs(&opened, "/decoded").unwrap(), expected);
 }
 
 #[cfg(feature = "arrow")]
@@ -172,7 +133,7 @@ fn reader_batch_schema_uses_custom_metadata() {
         .unwrap();
     let metadata = mcapdecode::MetadataColumns::with_prefix("mcap_")
         .with_timestamp_format(mcapdecode::MetadataTimestampFormat::UnixNanoseconds);
-    let actual = opened.topic_batch_schema("/decoded", &metadata).unwrap();
+    let actual = topic_batch_schema(&opened, "/decoded", &metadata).unwrap();
     let names: Vec<_> = actual
         .schema()
         .fields()
@@ -182,7 +143,7 @@ fn reader_batch_schema_uses_custom_metadata() {
         .collect();
     assert_eq!(names, metadata.names());
     assert!(matches!(
-        opened.topic_batch_schema("/unknown", &Default::default()),
+        topic_batch_schema(&opened, "/unknown", &Default::default()),
         Err(McapReaderError::TopicNotFound)
     ));
 }
@@ -198,12 +159,12 @@ fn builder_opens_multiple_files_with_the_same_decoders() {
     let first = builder.open(first_fixture.path()).unwrap();
     let second = builder.open(second_fixture.path()).unwrap();
     let fields: FieldDefs = vec![FieldDef::new("value", DataTypeDef::I64, true)].into();
-    assert_eq!(first.topic_field_defs("/decoded").unwrap(), fields);
-    assert_eq!(second.topic_field_defs("/decoded").unwrap(), fields);
-    assert_eq!(first.message_count("/decoded").unwrap(), 1);
-    assert_eq!(second.message_count("/decoded").unwrap(), 2);
+    assert_eq!(topic_field_defs(&first, "/decoded").unwrap(), fields);
+    assert_eq!(topic_field_defs(&second, "/decoded").unwrap(), fields);
+    assert_eq!(topic_message_count(&first, "/decoded").unwrap(), Some(1));
+    assert_eq!(topic_message_count(&second, "/decoded").unwrap(), Some(2));
     assert!(matches!(
-        unconfigured.topic_field_defs("/decoded"),
+        topic_field_defs(&unconfigured, "/decoded"),
         Err(McapReaderError::NoDecoder { .. })
     ));
 }
@@ -212,10 +173,10 @@ fn builder_opens_multiple_files_with_the_same_decoders() {
 fn reader_reports_zero_for_an_empty_channel_with_statistics() {
     let fixture = multi_topic_fixture();
     let opened = McapReader::open(fixture.path()).unwrap();
-    assert_eq!(opened.message_count("/empty").unwrap(), 0);
+    assert_eq!(topic_message_count(&opened, "/empty").unwrap(), Some(0));
     assert_eq!(
         opened
-            .list_topics()
+            .topics()
             .iter()
             .find(|topic| topic.topic == "/empty")
             .unwrap()
@@ -224,7 +185,7 @@ fn reader_reports_zero_for_an_empty_channel_with_statistics() {
     );
     assert_eq!(
         opened
-            .list_channels()
+            .channels()
             .iter()
             .find(|channel| channel.topic == "/empty")
             .unwrap()

@@ -7,9 +7,6 @@ fn topic(name: &str, channel_count: usize) -> TopicInfo {
     TopicInfo {
         topic: name.to_string(),
         message_count: Some(3),
-        schema_name: Some("test.Msg".to_string()),
-        schema_encoding: "jsonschema".to_string(),
-        message_encoding: "json".to_string(),
         channel_count,
     }
 }

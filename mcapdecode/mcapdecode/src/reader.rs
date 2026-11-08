@@ -22,8 +22,8 @@ use mcapdecode_ros2msg::Ros2MsgDecoder;
 use memmap2::Mmap;
 
 use crate::{
-    ChannelInfo, McapReaderError, TopicDecodeStatus, TopicInfo, TopicSchema,
-    chunk_reader::for_each_selected_message, read::Read, types::ReadOptions,
+    ChannelInfo, McapReaderError, TopicInfo, chunk_reader::for_each_selected_message, read::Read,
+    types::ReadOptions,
 };
 
 type Decoders = HashMap<EncodingKey, Arc<dyn MessageDecoder>>;
@@ -82,53 +82,6 @@ impl McapReader {
         builder
     }
 
-    /// Return topic metadata and schema IR without reading message payloads.
-    pub fn topic_schema(&self, topic: &str) -> Result<TopicSchema, McapReaderError> {
-        let channel = self.channel_by_topic(topic)?;
-        Ok(TopicSchema {
-            field_defs: self.decode_context(channel)?.field_defs,
-            info: self.topic_info(channel),
-        })
-    }
-
-    /// List topics and report whether their schemas can be derived by the configured decoders.
-    pub fn list_topics_with_decode_status(&self) -> Vec<TopicDecodeStatus> {
-        self.list_topics()
-            .into_iter()
-            .map(|topic| {
-                let decode_error = self
-                    .channel_by_topic(&topic.topic)
-                    .and_then(|channel| self.decode_context(channel))
-                    .err()
-                    .map(|error| error.to_string());
-                TopicDecodeStatus {
-                    topic,
-                    decodable: decode_error.is_none(),
-                    decode_error,
-                }
-            })
-            .collect()
-    }
-
-    /// Derive the schema of a topic without reading messages.
-    pub fn topic_field_defs(&self, topic: &str) -> Result<FieldDefs, McapReaderError> {
-        Ok(self
-            .decode_context(self.channel_by_topic(topic)?)?
-            .field_defs)
-    }
-
-    /// Derive the schema of a channel without reading messages.
-    pub fn field_defs_by_channel_id(&self, id: u16) -> Result<FieldDefs, McapReaderError> {
-        Ok(self.decode_context(self.channel_by_id(id)?)?.field_defs)
-    }
-
-    /// Return a topic's message count from the summary statistics.
-    pub fn message_count(&self, topic: &str) -> Result<u64, McapReaderError> {
-        let channel = self.channel_by_topic(topic)?;
-        self.channel_message_count(channel.id)
-            .ok_or(McapReaderError::StatsNotAvailable)
-    }
-
     /// Return the inclusive `log_time` range of all messages in the file.
     ///
     /// Uses summary statistics when present, otherwise the chunk indexes.
@@ -158,23 +111,8 @@ impl McapReader {
         &self.summary
     }
 
-    /// Derive the Arrow batch schema for a topic before reading messages.
-    ///
-    /// This is the schema that [`ArrowRead`](crate::ArrowRead) emits for `topic` with the same `metadata`.
-    /// Callers that must state the schema up front, such as a Parquet writer,
-    /// should take it from here so the declared schema and the emitted batches cannot disagree.
-    #[cfg(feature = "arrow")]
-    pub fn topic_batch_schema(
-        &self,
-        topic: &str,
-        metadata: &crate::MetadataColumns,
-    ) -> Result<crate::MessageBatchSchema, McapReaderError> {
-        let context = self.decode_context(self.channel_by_topic(topic)?)?;
-        crate::read::batch_schema_for_context(&context, metadata)
-    }
-
     /// List topics from the file summary.
-    pub fn list_topics(&self) -> Vec<TopicInfo> {
+    pub fn topics(&self) -> Vec<TopicInfo> {
         let mut topics = BTreeMap::<String, TopicInfo>::new();
         for channel in self.summary.channels.values() {
             topics
@@ -194,14 +132,15 @@ impl McapReader {
     }
 
     /// List channels from the file summary.
-    pub fn list_channels(&self) -> Vec<ChannelInfo> {
-        self.channels()
+    pub fn channels(&self) -> Vec<ChannelInfo> {
+        self.summary_channels()
             .into_iter()
             .map(|channel| self.channel_info(channel))
             .collect()
     }
 
-    /// Select messages to read. By default all topics are selected.
+    /// Select messages to read, or the channels whose schemas to derive.
+    /// By default all channels are selected.
     pub fn read(&self) -> Read<'_> {
         Read::new(self)
     }
@@ -216,24 +155,24 @@ impl McapReader {
             .ok_or(McapReaderError::ChannelNotFound)
     }
 
-    pub(crate) fn channel_by_topic(
+    /// The channels of `topic` in ascending id order.
+    pub(crate) fn channels_of_topic(
         &self,
         topic: &str,
-    ) -> Result<&Arc<mcap::Channel<'_>>, McapReaderError> {
-        let mut channels = self
-            .summary
-            .channels
-            .values()
-            .filter(|channel| channel.topic == topic);
-        let first = channels.next().ok_or(McapReaderError::TopicNotFound)?;
-        if channels.next().is_some() {
-            return Err(McapReaderError::MultipleChannels);
+    ) -> Result<Vec<&Arc<mcap::Channel<'_>>>, McapReaderError> {
+        let channels: Vec<_> = self
+            .summary_channels()
+            .into_iter()
+            .filter(|channel| channel.topic == topic)
+            .collect();
+        if channels.is_empty() {
+            return Err(McapReaderError::TopicNotFound);
         }
-        Ok(first)
+        Ok(channels)
     }
 
     /// All channels in ascending id order.
-    pub(crate) fn channels(&self) -> Vec<&Arc<mcap::Channel<'_>>> {
+    pub(crate) fn summary_channels(&self) -> Vec<&Arc<mcap::Channel<'_>>> {
         let mut channels: Vec<_> = self.summary.channels.values().collect();
         channels.sort_unstable_by_key(|channel| channel.id);
         channels
@@ -254,13 +193,9 @@ impl McapReader {
 
     /// Describe a topic as if `channel` were its only channel.
     fn topic_info(&self, channel: &mcap::Channel<'_>) -> TopicInfo {
-        let (schema_name, schema_encoding) = schema_name_and_encoding(channel);
         TopicInfo {
             topic: channel.topic.clone(),
             message_count: self.channel_message_count(channel.id),
-            schema_name,
-            schema_encoding,
-            message_encoding: channel.message_encoding.clone(),
             channel_count: 1,
         }
     }

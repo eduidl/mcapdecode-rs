@@ -17,10 +17,6 @@ pub enum McapReaderError {
     #[error("MCAP summary not available")]
     SummaryNotAvailable,
 
-    /// The MCAP summary section has no statistics record.
-    #[error("MCAP summary stats not available")]
-    StatsNotAvailable,
-
     /// A channel that was about to be decoded has no schema attached.
     #[error("schema not available")]
     SchemaNotAvailable,
@@ -51,10 +47,6 @@ pub enum McapReaderError {
     #[cfg(feature = "arrow")]
     #[error(transparent)]
     ArrowConvert(#[from] mcapdecode_arrow::ArrowConvertError),
-
-    /// Multiple channels found for the same topic in the MCAP file.
-    #[error("multiple channels found for requested topic")]
-    MultipleChannels,
 
     /// Error reported by a registered message decoder.
     #[error(transparent)]

@@ -43,7 +43,11 @@ pub(crate) fn load_schema_view(
     let text = if topic.schema_encoding == "jsonschema" && topic.message_encoding == "json" {
         format::format_unsupported_schema_text(topic)
     } else {
-        let field_defs = reader.field_defs_by_channel_id(row.channel.id);
+        let field_defs = reader
+            .read()
+            .channel(row.channel.id)
+            .field_defs()
+            .map(|mut schemas| schemas.remove(0).1);
         match field_defs {
             Ok(field_defs) => format::format_schema_text(topic, &field_defs),
             Err(error) if supports_raw_fallback(&error) => {

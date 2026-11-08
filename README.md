@@ -56,11 +56,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 The opened reader can be reused for multiple reads. Omit `topics` to select all
 channels. Decoded and Arrow reads fail if a selected channel cannot be decoded.
 Use `topics` or `channels` to select supported channels, for example
-`channels([id1, id2])`. Each callback receives `ChannelInfo`, including its ID,
-topic, and optional schema name. `McapReader::builder()` starts with the
-built-in decoders; `with_decoder()` adds or replaces one, `clear_decoders()`
-removes them all, and `open()` opens any number of files with the same
-configuration.
+`channels([id1, id2])`. A topic can span several channels, each with its own
+schema; selecting a topic reads all of them. The same selection lists its
+channels with `selected_channels()` and derives their schemas without reading
+messages with `field_defs()`, or `arrow().schemas()` for Arrow. Each callback
+receives `ChannelInfo`, including its ID, topic, and optional schema name.
+`McapReader::builder()` starts with the built-in decoders; `with_decoder()` adds
+or replaces one, `clear_decoders()` removes them all, and `open()` opens any
+number of files with the same configuration.
 
 Decoded structs carry a shared schema, so fields can be accessed by name without
 passing a separate schema:
@@ -106,19 +109,19 @@ returned by `try_shared_bytes()`.
 `get_path("poses.0.position.x")` follows a dotted path in one call, where a
 segment of only digits is a list or array index. To check a path and learn its
 type before reading, and to skip name lookups for every message, resolve it once
-against the topic schema with `FieldPath`:
+against the channel schema with `FieldPath`:
 
 ```rust,no_run
 use mcapdecode::{FieldPath, McapReader};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reader = McapReader::open("sample.mcap")?;
-    let fields = reader.topic_field_defs("/topic/name")?;
+    let (channel, fields) = reader.read().topic("/topic/name").field_defs()?.remove(0);
     let path = FieldPath::parse(&fields, "poses.0.position.x")?; // fails if absent
     println!("type={}", path.data_type());
     reader
         .read()
-        .topic("/topic/name")
+        .channel(channel.id)
         .decoded()
         .try_for_each(|_, message| {
             let x = path.get(&message.value)?.try_widen_f64()?;

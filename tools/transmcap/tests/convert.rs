@@ -795,3 +795,89 @@ fn batch_and_convert_reject_the_same_invalid_settings() {
     }
     fs::remove_file(config).unwrap();
 }
+
+/// Write `/split` as two channels whose schemas define `first_field` and `second_field`.
+fn write_split_topic_mcap(path: &Path, first_field: &str, second_field: &str) {
+    let mut writer = mcap::Writer::new(fs::File::create(path).unwrap()).unwrap();
+    let channels: Vec<_> = [first_field, second_field]
+        .iter()
+        .map(|field| {
+            let schema = writer
+                .add_schema(
+                    "test_msgs/msg/Sample",
+                    "ros2msg",
+                    format!("float64 {field}\n").as_bytes(),
+                )
+                .unwrap();
+            writer
+                .add_channel(schema, "/split", "cdr", &BTreeMap::new())
+                .unwrap()
+        })
+        .collect();
+    for (time, channel_id) in [channels[0], channels[1], channels[0], channels[1]]
+        .into_iter()
+        .enumerate()
+    {
+        let mut payload = vec![0, 1, 0, 0];
+        payload.extend_from_slice(&(time as f64).to_le_bytes());
+        writer
+            .write_to_known_channel(
+                &mcap::records::MessageHeader {
+                    channel_id,
+                    sequence: time as u32,
+                    log_time: time as u64,
+                    publish_time: time as u64,
+                },
+                &payload,
+            )
+            .unwrap();
+    }
+    writer.finish().unwrap();
+}
+
+#[test]
+fn convert_writes_every_channel_of_a_topic_to_one_output() {
+    let input = common::temporary_output_path("mcap");
+    let path = common::temporary_output_path("jsonl");
+    write_split_topic_mcap(&input, "value", "value");
+    let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
+        .arg("convert")
+        .arg(&input)
+        .args(["--topic", "/split", "--output"])
+        .arg(&path)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let values: Vec<_> = fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap()["value"].clone())
+        .collect();
+    assert_eq!(values, [0.0, 1.0, 2.0, 3.0]);
+    fs::remove_file(input).unwrap();
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn convert_rejects_a_topic_whose_channels_have_different_schemas() {
+    let input = common::temporary_output_path("mcap");
+    let path = common::temporary_output_path("jsonl");
+    write_split_topic_mcap(&input, "value", "other");
+    let output = Command::new(env!("CARGO_BIN_EXE_transmcap"))
+        .arg("convert")
+        .arg(&input)
+        .args(["--topic", "/split", "--output"])
+        .arg(&path)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("have different schemas"));
+    assert!(!path.exists());
+    fs::remove_file(input).unwrap();
+}

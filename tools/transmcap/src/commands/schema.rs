@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use mcapdecode::McapReader;
 
@@ -21,7 +21,18 @@ pub struct SchemaArgs {
 impl SchemaArgs {
     pub fn run(self) -> Result<()> {
         let reader = McapReader::open(&self.input)?;
-        let field_defs = reader.topic_field_defs(&self.topic)?;
+        let mut schemas = reader.read().topic(&self.topic).field_defs()?.into_iter();
+        let (first, field_defs) = schemas.next().context("topic has no channels")?;
+        for (channel, other) in schemas {
+            if other != field_defs {
+                bail!(
+                    "channels {} and {} of topic {} have different schemas",
+                    first.id,
+                    channel.id,
+                    self.topic
+                );
+            }
+        }
         let text = field_defs.to_string();
 
         match self.output {

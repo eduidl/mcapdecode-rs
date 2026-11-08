@@ -96,7 +96,7 @@ fn reader_arrow_distinguishes_channels_with_the_same_topic() {
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
         .open(fixture.path())
         .unwrap();
-    let channels = reader.list_channels();
+    let channels = reader.channels();
     let mut rows = BTreeMap::new();
     reader
         .read()
@@ -462,9 +462,9 @@ fn arrow_read_parallel_propagates_decode_error_for_multi_chunk_fixture() {
 }
 
 #[test]
-fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
+fn arrow_schemas_match_the_schema_of_emitted_batches() {
     // Consumers that must declare a schema up front take it from
-    // `topic_batch_schema`. If the two ever diverge the mismatch only shows up
+    // `ArrowRead::schemas`. If the two ever diverge the mismatch only shows up
     // at run time deep inside the consumer, so pin it here.
     let fixture = write_chunked_fixture("batch-schema-agreement", &[br#"{"value":1}"#]);
     let file = McapReader::builder()
@@ -477,13 +477,15 @@ fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
         MetadataColumns::default(),
         MetadataColumns::with_prefix("@"),
     ] {
-        let declared = file.topic_batch_schema("/decoded", &metadata).unwrap();
-
-        let mut emitted = Vec::new();
-        file.read()
+        let arrow = file
+            .read()
             .topic("/decoded")
             .arrow()
-            .metadata(metadata.clone())
+            .metadata(metadata.clone());
+        let (_, declared) = arrow.schemas().unwrap().remove(0);
+
+        let mut emitted = Vec::new();
+        arrow
             .for_each(|_, batch| {
                 emitted.push(batch.schema());
             })
@@ -506,7 +508,7 @@ fn topic_batch_schema_matches_the_schema_of_emitted_batches() {
 }
 
 #[test]
-fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
+fn arrow_schemas_reject_a_payload_field_shadowing_a_metadata_column() {
     let fixture = write_chunked_fixture("batch-schema-collision", &[br#"{"value":1}"#]);
     let file = McapReader::builder()
         .clear_decoders()
@@ -514,9 +516,7 @@ fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
         .open(fixture.path())
         .unwrap();
 
-    let err = file
-        .topic_batch_schema("/decoded", &MetadataColumns::default())
-        .unwrap_err();
+    let err = topic_batch_schema(&file, "/decoded", &MetadataColumns::default()).unwrap_err();
     assert!(matches!(
         err,
         McapReaderError::ArrowConvert(
@@ -525,9 +525,7 @@ fn topic_batch_schema_rejects_a_payload_field_shadowing_a_metadata_column() {
     ));
 
     // A prefix moves the metadata columns out of the payload's way.
-    let schema = file
-        .topic_batch_schema("/decoded", &MetadataColumns::with_prefix("_"))
-        .unwrap();
+    let schema = topic_batch_schema(&file, "/decoded", &MetadataColumns::with_prefix("_")).unwrap();
     assert_eq!(schema.schema().field(0).name(), "_log_time");
     assert_eq!(schema.schema().field(2).name(), "log_time");
 }
@@ -718,9 +716,5 @@ fn reader_exposes_arrow_schema() {
         .with_decoder(Box::new(SchemaNamedFieldDecoder))
         .open(fixture.path())
         .unwrap();
-    assert!(
-        reader
-            .topic_batch_schema("/first", &MetadataColumns::default())
-            .is_ok()
-    );
+    assert!(topic_batch_schema(&reader, "/first", &MetadataColumns::default()).is_ok());
 }
