@@ -62,7 +62,7 @@ fn numeric_types_match_values_accepted_by_f64_lossy() {
     ];
     for (ty, value) in numeric {
         assert!(ty.is_numeric(), "{ty} should be numeric");
-        assert!(value.try_f64_lossy().is_ok());
+        assert!(value.try_lossy_f64().is_ok());
     }
 
     let non_numeric = [
@@ -77,6 +77,6 @@ fn numeric_types_match_values_accepted_by_f64_lossy() {
     ];
     for (ty, value) in non_numeric {
         assert!(!ty.is_numeric(), "{ty} should not be numeric");
-        assert!(value.try_f64_lossy().is_err());
+        assert!(value.try_lossy_f64().is_err());
     }
 }

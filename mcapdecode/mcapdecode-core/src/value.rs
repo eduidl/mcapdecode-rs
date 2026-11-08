@@ -285,7 +285,7 @@ impl Value {
     /// also accepts integers, so `i64` and `u64` values beyond 2^53 may lose precision.
     ///
     /// Null is reported as [`ValueAccessError::NullValue`], like the `try_widen_*` methods.
-    pub fn try_f64_lossy(&self) -> Result<f64, ValueAccessError> {
+    pub fn try_lossy_f64(&self) -> Result<f64, ValueAccessError> {
         match self {
             Self::I8(v) => Ok(f64::from(*v)),
             Self::I16(v) => Ok(f64::from(*v)),

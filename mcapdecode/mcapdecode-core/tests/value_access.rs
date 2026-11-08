@@ -90,16 +90,16 @@ fn numeric_conversions_are_checked_and_null_is_explicit() {
         Value::F32(-2.0),
         Value::F64(-2.0),
     ] {
-        assert_eq!(value.try_f64_lossy(), Ok(-2.0));
+        assert_eq!(value.try_lossy_f64(), Ok(-2.0));
     }
     for value in [Value::U8(2), Value::U16(2), Value::U32(2), Value::U64(2)] {
-        assert_eq!(value.try_f64_lossy(), Ok(2.0));
+        assert_eq!(value.try_lossy_f64(), Ok(2.0));
     }
-    assert_eq!(Value::I64(i64::MIN).try_f64_lossy(), Ok(i64::MIN as f64));
-    assert_eq!(Value::U64(u64::MAX).try_f64_lossy(), Ok(u64::MAX as f64));
-    assert_eq!(Value::Null.try_f64_lossy(), Err(E::NullValue));
+    assert_eq!(Value::I64(i64::MIN).try_lossy_f64(), Ok(i64::MIN as f64));
+    assert_eq!(Value::U64(u64::MAX).try_lossy_f64(), Ok(u64::MAX as f64));
+    assert_eq!(Value::Null.try_lossy_f64(), Err(E::NullValue));
     assert!(matches!(
-        Value::string("x").try_f64_lossy(),
+        Value::string("x").try_lossy_f64(),
         Err(E::TypeMismatch(_))
     ));
     assert_eq!(Value::string("hello").try_str(), Ok(Some("hello")));

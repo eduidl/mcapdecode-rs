@@ -63,7 +63,7 @@ impl DataTypeDef {
     /// Whether this is an integer or floating-point type.
     ///
     /// Covers exactly the types whose non-null values
-    /// [`Value::try_f64_lossy`](crate::Value::try_f64_lossy) accepts.
+    /// [`Value::try_lossy_f64`](crate::Value::try_lossy_f64) accepts.
     /// `Bool` and `Enum` are not numeric.
     pub fn is_numeric(&self) -> bool {
         matches!(
