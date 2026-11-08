@@ -23,7 +23,9 @@ use memmap2::Mmap;
 
 use crate::{
     ChannelInfo, ChannelSchema, McapReaderError, TopicInfo,
-    chunk_reader::for_each_selected_message, read::Read, types::ReadOptions,
+    chunk_reader::{ChunkContents, classify_chunks, for_each_selected_message},
+    read::Read,
+    types::ReadOptions,
 };
 
 type Decoders = HashMap<EncodingKey, Arc<dyn MessageDecoder>>;
@@ -37,6 +39,8 @@ pub struct McapReader {
     parallel: bool,
     mmap: Mmap,
     summary: mcap::read::Summary,
+    /// Contents of each entry of `summary.chunk_indexes`, in the same order.
+    chunk_contents: Vec<ChunkContents>,
 }
 
 /// Builder for configuring and opening a [`McapReader`].
@@ -91,17 +95,21 @@ impl McapReader {
             return (stats.message_count > 0)
                 .then_some(stats.message_start_time..=stats.message_end_time);
         }
-        // A chunk without messages, such as one holding only schema and channel
-        // records, reports zero for both times. Without message indexes this cannot
-        // be told apart from messages logged at time zero, which are then ignored.
-        let chunks = self.summary.chunk_indexes.iter().filter(|chunk| {
-            !(chunk.message_index_offsets.is_empty()
-                && chunk.message_start_time == 0
-                && chunk.message_end_time == 0)
-        });
+        let chunks = self.message_chunks().map(|(chunk, _)| chunk);
         let start = chunks.clone().map(|chunk| chunk.message_start_time).min()?;
         let end = chunks.map(|chunk| chunk.message_end_time).max()?;
         Some(start..=end)
+    }
+
+    /// Iterate over the chunks that hold messages, in file order.
+    pub(crate) fn message_chunks(
+        &self,
+    ) -> impl Iterator<Item = (&mcap::records::ChunkIndex, ChunkContents)> + Clone {
+        self.summary
+            .chunk_indexes
+            .iter()
+            .zip(self.chunk_contents.iter().copied())
+            .filter(|(_, contents)| *contents != ChunkContents::Empty)
     }
 
     /// Return the summary section read when the file was opened.
@@ -304,11 +312,13 @@ impl McapReaderBuilder {
         summary
             .chunk_indexes
             .sort_by_key(|index| index.chunk_start_offset);
+        let chunk_contents = classify_chunks(&summary, &mmap);
         Ok(McapReader {
             decoders: self.decoders.clone(),
             parallel: self.parallel,
             mmap,
             summary,
+            chunk_contents,
         })
     }
 }

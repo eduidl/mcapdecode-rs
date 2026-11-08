@@ -14,6 +14,49 @@ use rayon::prelude::*;
 
 use crate::{McapReader, McapReaderError, types::TimeRange};
 
+/// What a chunk holds, resolved once when the file is opened.
+///
+/// Whether a chunk has messages and whether it has message indexes is decided by
+/// this, not by the [`mcap::records::ChunkIndex`] fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChunkContents {
+    /// No message records, e.g. only schema and channel records.
+    Empty,
+    /// Messages, with a message index for each channel in the chunk.
+    Indexed,
+    /// Messages without message indexes; which channels appear is unknown.
+    Unindexed,
+}
+
+/// Classify each chunk index of `summary`, in the same order.
+///
+/// A chunk index without message index offsets and with both message times at zero
+/// is either empty or holds only messages logged at time zero. Only such chunks are
+/// read, and only until their first message.
+pub(crate) fn classify_chunks(summary: &mcap::read::Summary, mcap: &[u8]) -> Vec<ChunkContents> {
+    summary
+        .chunk_indexes
+        .iter()
+        .map(|chunk| {
+            if !chunk.message_index_offsets.is_empty() {
+                ChunkContents::Indexed
+            } else if chunk.message_start_time != 0 || chunk.message_end_time != 0 {
+                ChunkContents::Unindexed
+            } else {
+                // A chunk that cannot be read is left to fail when its messages are read.
+                let has_message = summary
+                    .stream_chunk(mcap, chunk)
+                    .map_or(true, |mut messages| messages.next().is_some());
+                if has_message {
+                    ChunkContents::Unindexed
+                } else {
+                    ChunkContents::Empty
+                }
+            }
+        })
+        .collect()
+}
+
 /// Process messages of the selected channels within `time_range`, skipping chunks that hold none.
 /// `process` and `callback` receive the message channel's position in `channel_ids`.
 /// Reading stops without error once `callback` returns [`ControlFlow::Break`].
@@ -62,11 +105,17 @@ fn for_each_message_of<T: Send>(
     process: impl Fn(usize, &mcap::Message<'_>) -> Result<T, McapReaderError> + Sync,
     callback: &mut impl FnMut(usize, T) -> Result<ControlFlow<()>, McapReaderError>,
 ) -> Result<(), McapReaderError> {
-    let chunks = reader.summary().chunk_indexes.iter().filter(|chunk| {
-        let offsets = &chunk.message_index_offsets;
-        (offsets.is_empty() || offsets.keys().any(|&id| index_of(id).is_some()))
-            && time_range.is_none_or(|range| range.overlaps_chunk(chunk))
-    });
+    let chunks = reader
+        .message_chunks()
+        .filter(|(chunk, contents)| {
+            (*contents == ChunkContents::Unindexed
+                || chunk
+                    .message_index_offsets
+                    .keys()
+                    .any(|&id| index_of(id).is_some()))
+                && time_range.is_none_or(|range| range.overlaps_chunk(chunk))
+        })
+        .map(|(chunk, _)| chunk);
     for_each_chunk(
         reader,
         chunks,

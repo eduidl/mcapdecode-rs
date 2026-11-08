@@ -288,10 +288,17 @@ fn reader_summary_exposes_statistics() {
 
 /// Write a statistics-free file whose first chunk holds only schema and channel records.
 fn write_leading_empty_chunk_fixture(log_times: &[u64]) -> TempFixture {
+    write_leading_empty_chunk_fixture_with(log_times, true)
+}
+
+/// Like [`write_leading_empty_chunk_fixture`], optionally without message indexes.
+fn write_leading_empty_chunk_fixture_with(log_times: &[u64], message_indexes: bool) -> TempFixture {
     let path = temp_fixture_path("leading-empty-chunk");
     let mut writer = Writer::with_options(
         File::create(&path).unwrap(),
-        WriteOptions::new().emit_statistics(false),
+        WriteOptions::new()
+            .emit_statistics(false)
+            .emit_message_indexes(message_indexes),
     )
     .unwrap();
     let schema = writer.add_schema("test.Msg", "jsonschema", b"{}").unwrap();
@@ -328,4 +335,40 @@ fn reader_message_time_range_ignores_chunks_without_messages() {
         .open(fixture.path())
         .unwrap();
     assert_eq!(opened.message_time_range(), None);
+}
+
+#[test]
+fn reader_message_time_range_tells_empty_chunks_from_time_zero_messages() {
+    let cases: [(&[u64], _); 4] = [
+        (&[0, 0], Some(0..=0)),
+        (&[0, 200], Some(0..=200)),
+        (&[100, 200], Some(100..=200)),
+        (&[], None),
+    ];
+    for message_indexes in [true, false] {
+        for (log_times, expected) in cases.clone() {
+            let fixture = write_leading_empty_chunk_fixture_with(log_times, message_indexes);
+            let opened = McapReader::builder()
+                .clear_decoders()
+                .open(fixture.path())
+                .unwrap();
+            assert_eq!(
+                opened.message_time_range(),
+                expected,
+                "{log_times:?}, indexes: {message_indexes}"
+            );
+        }
+    }
+}
+
+#[test]
+fn reader_reads_time_zero_messages_without_message_indexes() {
+    let fixture = write_leading_empty_chunk_fixture_with(&[0, 0], false);
+    for parallel in [true, false] {
+        let builder = McapReader::builder()
+            .clear_decoders()
+            .with_parallel(parallel);
+        let payloads = collect_raw_payloads(&builder, fixture.path(), "/a");
+        assert_eq!(payloads.len(), 2, "parallel: {parallel}");
+    }
 }
