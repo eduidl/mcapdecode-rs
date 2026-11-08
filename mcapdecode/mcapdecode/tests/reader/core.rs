@@ -39,7 +39,7 @@ fn reads_with_and_without_chunk_indexes() {
         writer.finish().unwrap();
         let reader = McapReader::builder()
             .clear_decoders()
-            .with_decoder(Box::new(TestJsonDecoder))
+            .with_decoder(TestJsonDecoder)
             .open(fixture.path())
             .unwrap();
         let mut count = 0;
@@ -328,7 +328,7 @@ fn reader_decoded_topics_apply_options_and_deduplicate() {
     let fixture = multi_topic_fixture();
     let reader = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_decoder(SchemaNamedFieldDecoder)
         .open(fixture.path())
         .unwrap();
     let mut topics = Vec::new();
@@ -383,7 +383,7 @@ fn reader_raw_and_decoded_share_filters() {
 pub(super) fn split_builder(parallel: bool) -> McapReaderBuilder {
     McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_decoder(SchemaNamedFieldDecoder)
         .with_parallel(parallel)
 }
 
@@ -629,7 +629,7 @@ fn reader_topic_schema_enables_value_access() {
     let fixture = write_chunked_fixture("opened-value-view", &[br#"{"value":42}"#]);
     let reader = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .open(fixture.path())
         .unwrap();
     reader
@@ -688,7 +688,7 @@ fn topics_aggregates_duplicate_channels() {
 fn decoded_read_unknown_topic_returns_error() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let err = builder
         .open(fixture_path("with_summary.mcap"))
@@ -706,7 +706,7 @@ fn decoded_read_unknown_topic_returns_error() {
 fn decoded_read_errors_when_schema_is_missing() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let err = builder
         .open(fixture_path("with_summary.mcap"))
@@ -794,11 +794,11 @@ fn decoded_read_parallel_matches_sequential_for_multi_chunk_fixture() {
 
     let parallel_builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
     let sequential_builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(false);
 
     assert_eq!(
@@ -816,7 +816,7 @@ fn decoded_read_parallel_propagates_decode_error() {
 
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
 
     let err = builder
@@ -838,7 +838,7 @@ fn decoded_read_parallel_propagates_decode_error() {
 fn decoded_read_propagates_callback_error() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let err = builder
         .open(fixture_path("with_summary.mcap"))
@@ -864,7 +864,7 @@ fn parallel_reader_callback_can_use_rayon() {
     let fixture = multi_topic_fixture();
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
     for topics in [&["/first"][..], &["/first", "/second"][..]] {
         let mut calls = 0;
@@ -890,7 +890,7 @@ fn parallel_reader_stops_after_callback_error_across_windows() {
     let fixture = multi_topic_fixture();
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
     for topics in [&["/first"][..], &["/first", "/second"][..]] {
         let mut calls = 0;
@@ -928,7 +928,7 @@ fn decoded_read_parallel_stops_after_callback_error() {
 
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
     let mut visited = Vec::new();
 
@@ -1007,7 +1007,7 @@ fn multi_topic_decoded_reads_work_without_arrow() {
     for parallel in [false, true] {
         let builder = McapReader::builder()
             .clear_decoders()
-            .with_decoder(Box::new(TestJsonDecoder))
+            .with_decoder(TestJsonDecoder)
             .with_parallel(parallel);
         for range in [
             (Unbounded, Unbounded),
@@ -1083,7 +1083,7 @@ fn repeated_single_topic_is_read_once() {
     let fixture = multi_topic_fixture();
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     let mut topics = Vec::new();
     builder
         .open(fixture.path())
@@ -1109,7 +1109,7 @@ fn decoded_reads_scan_chunks_without_message_indexes() {
     for parallel in [false, true] {
         let builder = McapReader::builder()
             .clear_decoders()
-            .with_decoder(Box::new(TestJsonDecoder))
+            .with_decoder(TestJsonDecoder)
             .with_parallel(parallel);
         let mut times = Vec::new();
         builder

@@ -63,7 +63,24 @@ messages with `field_defs()`, or `arrow().schemas()` for Arrow. Each callback
 receives `ChannelInfo`, including its ID, topic, and optional schema name.
 `McapReader::builder()` starts with the built-in decoders; `with_decoder()` adds
 or replaces one, `clear_decoders()` removes them all, and `open()` opens any
-number of files with the same configuration.
+number of files with the same configuration. The built-in decoders live in
+`mcapdecode::decoder`, so one can be registered again with other settings:
+
+```rust,no_run
+use mcapdecode::{
+    McapReader,
+    decoder::{PresencePolicy, ProtobufDecoder},
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _reader = McapReader::builder()
+        .with_decoder(ProtobufDecoder::new_with_presence_policy(
+            PresencePolicy::AlwaysDefault,
+        ))
+        .open("sample.mcap")?;
+    Ok(())
+}
+```
 
 Decoded structs carry a shared schema, so fields can be accessed by name without
 passing a separate schema:

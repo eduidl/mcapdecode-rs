@@ -6,10 +6,7 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use mcapbench::{Encoding, PayloadCase, fixture};
-use mcapdecode::decoder::MessageDecoder;
-use mcapdecode_protobuf::ProtobufDecoder;
-use mcapdecode_ros2idl::Ros2IdlDecoder;
-use mcapdecode_ros2msg::Ros2MsgDecoder;
+use mcapdecode::decoder::{MessageDecoder, ProtobufDecoder, Ros2IdlDecoder, Ros2MsgDecoder};
 
 fn message_decoder(encoding: Encoding) -> Box<dyn MessageDecoder> {
     match encoding {

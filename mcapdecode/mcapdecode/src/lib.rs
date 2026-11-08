@@ -13,11 +13,23 @@ pub mod batch {
         MapPolicy, NonFiniteFloats, StructPolicy, flatten_record_batch, project_record_batch,
     };
 }
-/// Types for implementing and registering custom message decoders.
+/// Built-in message decoders, and types for implementing custom ones.
+///
+/// [`McapReader::builder`] registers every built-in decoder enabled by cargo
+/// features. Register one again with
+/// [`McapReaderBuilder::with_decoder`] to change its settings.
 pub mod decoder {
     pub use mcapdecode_core::{
         DecoderError, EncodingKey, MessageDecoder, MessageEncoding, SchemaEncoding, TopicDecoder,
     };
+    #[cfg(feature = "protobuf")]
+    pub use mcapdecode_protobuf::{PresencePolicy, ProtobufDecoder};
+    #[cfg(feature = "rawjson")]
+    pub use mcapdecode_rawjson::RawJsonDecoder;
+    #[cfg(feature = "ros2idl")]
+    pub use mcapdecode_ros2idl::Ros2IdlDecoder;
+    #[cfg(feature = "ros2msg")]
+    pub use mcapdecode_ros2msg::Ros2MsgDecoder;
 }
 
 mod chunk_reader;

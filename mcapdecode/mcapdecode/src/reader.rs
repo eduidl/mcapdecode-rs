@@ -72,13 +72,13 @@ impl McapReader {
             parallel: true,
         };
         #[cfg(feature = "rawjson")]
-        let builder = builder.with_decoder(Box::new(RawJsonDecoder::new()));
+        let builder = builder.with_decoder(RawJsonDecoder::new());
         #[cfg(feature = "protobuf")]
-        let builder = builder.with_decoder(Box::new(ProtobufDecoder::new()));
+        let builder = builder.with_decoder(ProtobufDecoder::new());
         #[cfg(feature = "ros2idl")]
-        let builder = builder.with_decoder(Box::new(Ros2IdlDecoder::new()));
+        let builder = builder.with_decoder(Ros2IdlDecoder::new());
         #[cfg(feature = "ros2msg")]
-        let builder = builder.with_decoder(Box::new(Ros2MsgDecoder::new()));
+        let builder = builder.with_decoder(Ros2MsgDecoder::new());
         builder
     }
 
@@ -274,8 +274,11 @@ fn schema_name_and_encoding(channel: &mcap::Channel<'_>) -> (Option<String>, Str
 impl McapReaderBuilder {
     /// Register a message decoder, replacing any decoder registered for the
     /// same encoding pair.
-    pub fn with_decoder(self, decoder: Box<dyn MessageDecoder>) -> Self {
-        self.with_shared_decoder(Arc::from(decoder))
+    ///
+    /// Built-in decoders with non-default settings, such as `ProtobufDecoder`
+    /// with a `PresencePolicy`, are registered here too.
+    pub fn with_decoder(self, decoder: impl MessageDecoder + 'static) -> Self {
+        self.with_shared_decoder(Arc::new(decoder))
     }
 
     /// Register a shared message decoder.

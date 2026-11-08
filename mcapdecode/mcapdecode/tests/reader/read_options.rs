@@ -8,7 +8,7 @@ fn read_options_filter_time_range_with_exclusive_end() {
     );
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     let mut values = Vec::new();
 
     builder
@@ -46,11 +46,11 @@ fn read_options_parallel_overrides_reader_setting_in_both_directions() {
     // A parallel reader forced onto the sequential path, and vice versa.
     let parallel_builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
     let sequential_builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(false);
 
     let forced_sequential =
@@ -69,7 +69,7 @@ fn read_options_parallel_defaults_to_reader_setting() {
     );
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(false);
 
     let values = collect_values(&builder, fixture.path(), None);
@@ -85,7 +85,7 @@ fn time_range_accepts_inclusive_and_open_ranges() {
     );
     let reader = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .open(fixture.path())
         .unwrap();
     let read = |select: &dyn Fn(Read<'_>) -> Read<'_>| {

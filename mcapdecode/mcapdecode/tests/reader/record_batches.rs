@@ -13,7 +13,7 @@ fn raw_decoded_and_arrow_use_the_same_selection() {
         for parallel in [false, true] {
             let reader = McapReader::builder()
                 .clear_decoders()
-                .with_decoder(Box::new(SchemaNamedFieldDecoder))
+                .with_decoder(SchemaNamedFieldDecoder)
                 .with_parallel(parallel)
                 .open(fixture.path())
                 .unwrap();
@@ -93,7 +93,7 @@ fn reader_arrow_distinguishes_channels_with_the_same_topic() {
     let fixture = write_split_topic_fixture("opened-arrow-channels");
     let reader = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_decoder(SchemaNamedFieldDecoder)
         .open(fixture.path())
         .unwrap();
     let channels = reader.channels();
@@ -235,7 +235,7 @@ fn arrow_read_errors_when_decoder_is_missing_contains_message() {
 fn arrow_read_unknown_topic_returns_error() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let err = builder
         .open(fixture_path("with_summary.mcap"))
@@ -252,7 +252,7 @@ fn arrow_read_unknown_topic_returns_error() {
 fn arrow_read_errors_when_schema_is_missing() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     let err = builder
         .open(fixture_path("with_summary.mcap"))
         .unwrap()
@@ -268,7 +268,7 @@ fn arrow_read_errors_when_schema_is_missing() {
 fn arrow_read_propagates_callback_error() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     let err = builder
         .open(fixture_path("with_summary.mcap"))
         .unwrap()
@@ -294,7 +294,7 @@ fn arrow_read_reports_arrow_conversion_errors_separately() {
     let fixture = write_chunked_fixture("arrow-conversion-error", &[br#"{"value":1}"#]);
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(MismatchedJsonDecoder));
+        .with_decoder(MismatchedJsonDecoder);
 
     let err = builder
         .open(fixture.path())
@@ -312,7 +312,7 @@ fn arrow_read_reports_arrow_conversion_errors_separately() {
 fn arrow_read_emits_batches_by_batch_size() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let file = builder.open(fixture_path("with_summary.mcap")).unwrap();
     let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(1));
@@ -324,7 +324,7 @@ fn arrow_read_emits_batches_by_batch_size() {
 fn arrow_read_treats_zero_batch_size_as_one() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let file = builder.open(fixture_path("with_summary.mcap")).unwrap();
     let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(0));
@@ -336,7 +336,7 @@ fn arrow_read_treats_zero_batch_size_as_one() {
 fn arrow_read_defaults_to_a_single_batch() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let mut batch_rows = Vec::new();
     builder
@@ -357,7 +357,7 @@ fn arrow_read_defaults_to_a_single_batch() {
 fn arrow_read_flushes_final_partial_batch() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let file = builder.open(fixture_path("with_summary.mcap")).unwrap();
     let batch_rows = collect_batch_rows(file.read().topic("/decoded").arrow().batch_size(3));
@@ -369,7 +369,7 @@ fn arrow_read_flushes_final_partial_batch() {
 fn arrow_read_propagates_callback_error_with_builder_decoder() {
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
 
     let err = builder
         .open(fixture_path("with_summary.mcap"))
@@ -411,11 +411,11 @@ fn arrow_read_parallel_matches_sequential_for_multi_chunk_fixture() {
 
     let parallel_builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
     let sequential_builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(false);
     let parallel = parallel_builder.open(fixture.path()).unwrap();
     let sequential = sequential_builder.open(fixture.path()).unwrap();
@@ -443,7 +443,7 @@ fn arrow_read_parallel_propagates_decode_error_for_multi_chunk_fixture() {
 
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .with_parallel(true);
 
     let err = builder
@@ -469,7 +469,7 @@ fn arrow_schemas_match_the_schema_of_emitted_batches() {
     let fixture = write_chunked_fixture("batch-schema-agreement", &[br#"{"value":1}"#]);
     let file = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .open(fixture.path())
         .unwrap();
 
@@ -512,7 +512,7 @@ fn arrow_schemas_reject_a_payload_field_shadowing_a_metadata_column() {
     let fixture = write_chunked_fixture("batch-schema-collision", &[br#"{"value":1}"#]);
     let file = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(CollidingJsonDecoder))
+        .with_decoder(CollidingJsonDecoder)
         .open(fixture.path())
         .unwrap();
 
@@ -536,7 +536,7 @@ fn multi_topic_batches_match_individual_reads_and_per_topic_filters() {
     for parallel in [false, true] {
         let builder = McapReader::builder()
             .clear_decoders()
-            .with_decoder(Box::new(TestJsonDecoder))
+            .with_decoder(TestJsonDecoder)
             .with_parallel(parallel);
         for range in [
             (Unbounded, Unbounded),
@@ -586,7 +586,7 @@ fn multi_topic_read_validates_before_callbacks_and_propagates_callback_failure()
     let fixture = multi_topic_fixture();
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     {
         let mut called = false;
         let err = builder
@@ -629,7 +629,7 @@ fn repeated_single_topic_emits_one_batch() {
     let fixture = multi_topic_fixture();
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     let mut topics = Vec::new();
     builder
         .open(fixture.path())
@@ -657,7 +657,7 @@ fn record_batch_reads_scan_chunks_without_message_indexes() {
     let fixture = multi_topic_fixture_with_indexes(false);
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     let mut actual = BTreeMap::<String, Vec<i64>>::new();
     builder
         .open(fixture.path())
@@ -688,7 +688,7 @@ fn reader_arrow_uses_shared_filters() {
     let fixture = multi_topic_fixture();
     let reader = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_decoder(SchemaNamedFieldDecoder)
         .with_parallel(false)
         .open(fixture.path())
         .unwrap();
@@ -713,7 +713,7 @@ fn reader_exposes_arrow_schema() {
     let fixture = multi_topic_fixture();
     let reader = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_decoder(SchemaNamedFieldDecoder)
         .open(fixture.path())
         .unwrap();
     assert!(topic_batch_schema(&reader, "/first", &MetadataColumns::default()).is_ok());

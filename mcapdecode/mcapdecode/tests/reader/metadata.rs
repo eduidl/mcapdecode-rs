@@ -5,7 +5,7 @@ fn reader_reuses_metadata_and_custom_decoders_without_reopening() {
     let fixture = write_chunked_fixture("opened-reuse", &[br#"{"value":42}"#]);
     let builder = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder));
+        .with_decoder(TestJsonDecoder);
     let opened = builder.open(fixture.path()).unwrap();
     let topics = opened.topics();
     let channels = opened.channels();
@@ -59,7 +59,7 @@ fn reader_reports_each_channel_of_a_split_topic() {
     let fixture = write_split_topic_fixture("opened-split");
     let opened = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(SchemaNamedFieldDecoder))
+        .with_decoder(SchemaNamedFieldDecoder)
         .open(fixture.path())
         .unwrap();
     assert_eq!(opened.topics()[0].channel_count, 3);
@@ -128,7 +128,7 @@ fn reader_batch_schema_uses_custom_metadata() {
     let fixture = write_chunked_fixture("opened-arrow", &[br#"{"value":42}"#]);
     let opened = McapReader::builder()
         .clear_decoders()
-        .with_decoder(Box::new(TestJsonDecoder))
+        .with_decoder(TestJsonDecoder)
         .open(fixture.path())
         .unwrap();
     let metadata = mcapdecode::MetadataColumns::with_prefix("mcap_")
@@ -155,7 +155,7 @@ fn builder_opens_multiple_files_with_the_same_decoders() {
         write_chunked_fixture("opened-second", &[br#"{"value":2}"#, br#"{"value":3}"#]);
     let builder = McapReader::builder().clear_decoders();
     let unconfigured = builder.open(first_fixture.path()).unwrap();
-    let builder = builder.with_decoder(Box::new(TestJsonDecoder));
+    let builder = builder.with_decoder(TestJsonDecoder);
     let first = builder.open(first_fixture.path()).unwrap();
     let second = builder.open(second_fixture.path()).unwrap();
     let fields: FieldDefs = vec![FieldDef::new("value", DataTypeDef::I64, true)].into();
