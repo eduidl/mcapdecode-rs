@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use mcapdecode_core::{DecoderError, Value};
+use mcapdecode_core::{DecoderError, Value, ValueAccessError};
 use mcapdecode_protobuf::{
     PresencePolicy, decode_protobuf_to_value, decode_protobuf_to_value_with_policy,
 };
@@ -377,4 +377,101 @@ fn decode_proto3_optional_missing_is_default_in_legacy_policy() {
         panic!("expected Struct");
     };
     assert!(matches!(fields[0], Value::I32(0)));
+}
+
+/// Read a field that may be unset, as callers of the value API would.
+fn optional_i32(value: &Value, field: &str) -> Result<Option<i32>, ValueAccessError> {
+    value.get(field)?.non_null().map(Value::try_i32).transpose()
+}
+
+#[test]
+fn proto3_optional_reads_as_option() {
+    let msg = DescriptorProto {
+        name: Some("WithOptional".to_string()),
+        field: vec![
+            proto3_optional_scalar_field("count", 1, Type::Int32, 0),
+            scalar_field("plain", 2, Type::Int32),
+        ],
+        oneof_decl: vec![synthetic_oneof("_count")],
+        ..Default::default()
+    };
+    let fds = build_fds("optional.proto", vec![msg]);
+
+    let unset = decode_protobuf_to_value("WithOptional", &fds, &[]).unwrap();
+    assert_eq!(optional_i32(&unset, "count"), Ok(None));
+    assert_eq!(
+        unset.get("count").unwrap().try_i32(),
+        Err(ValueAccessError::NullValue)
+    );
+    // A field without presence is never null, even when unset.
+    assert_eq!(unset.get("plain").unwrap().try_i32(), Ok(0));
+
+    let (_pool, desc) = pool_and_desc(&fds, "WithOptional");
+    let mut dm = DynamicMessage::new(desc);
+    dm.set_field_by_name("count", prost_reflect::Value::I32(0));
+    let set = decode_protobuf_to_value("WithOptional", &fds, &encode_dynamic(&dm)).unwrap();
+    assert_eq!(optional_i32(&set, "count"), Ok(Some(0)));
+}
+
+#[test]
+fn unset_nested_message_reads_as_option() {
+    let inner = DescriptorProto {
+        name: Some("Inner".to_string()),
+        field: vec![scalar_field("x", 1, Type::Int32)],
+        ..Default::default()
+    };
+    let outer = DescriptorProto {
+        name: Some("Outer".to_string()),
+        field: vec![message_field("inner", 1, ".Inner", Label::Optional)],
+        ..Default::default()
+    };
+    let fds = build_fds("nested.proto", vec![inner, outer]);
+    let value = decode_protobuf_to_value("Outer", &fds, &[]).unwrap();
+
+    assert!(matches!(
+        value.get_path("inner.x"),
+        Err(ValueAccessError::NullValue)
+    ));
+    let x = value
+        .get("inner")
+        .unwrap()
+        .non_null()
+        .map(|inner| inner.get("x")?.try_i32())
+        .transpose();
+    assert_eq!(x, Ok(None));
+}
+
+#[test]
+fn oneof_members_other_than_the_set_one_are_null() {
+    let mut a = scalar_field("a", 1, Type::Int32);
+    a.oneof_index = Some(0);
+    let mut b = scalar_field("b", 2, Type::String);
+    b.oneof_index = Some(0);
+    let msg = DescriptorProto {
+        name: Some("Choice".to_string()),
+        field: vec![a, b],
+        oneof_decl: vec![prost_types::OneofDescriptorProto {
+            name: Some("kind".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let fds = build_fds("oneof.proto", vec![msg]);
+    let (_pool, desc) = pool_and_desc(&fds, "Choice");
+    let mut dm = DynamicMessage::new(desc);
+    dm.set_field_by_name("b", prost_reflect::Value::String("hi".to_string()));
+
+    let value = decode_protobuf_to_value("Choice", &fds, &encode_dynamic(&dm)).unwrap();
+    let Value::Struct(fields) = &value else {
+        panic!("expected Struct");
+    };
+    let set: Vec<_> = fields
+        .fields()
+        .unwrap()
+        .filter(|(_, v)| !v.is_null())
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(set, ["b"]);
+    assert_eq!(value.get("b").unwrap().try_str(), Ok("hi"));
+    assert_eq!(optional_i32(&value, "a"), Ok(None));
 }
